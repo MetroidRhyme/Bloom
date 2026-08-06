@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>BLOOM</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <style>
+    :root {
+      --hud-top-h: 74px;
+      --bg: #eaf6ee;
+      --panel-bg: rgba(255,255,255,0.94);
+      --panel-border: rgba(60,40,20,0.08);
+      --text: #332e28;
+      --text-dim: #8a8478;
+      --green: #4caf6d;
+      --green-dark: #3d8f57;
+      --blue: #4aa3ff;
+      --pink: #ff6fa0;
+      --amber: #f0a93a;
+      --shadow: 0 6px 24px rgba(60,40,20,0.16);
+      --shadow-sm: 0 2px 10px rgba(60,40,20,0.14);
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--bg); }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); }
+    button { font-family: inherit; }
+
+    #map { position: fixed; inset: 0; background: var(--bg); }
+    .leaflet-container { background: var(--bg); }
+
+    /* ================= TOP BAR ================= */
+    #hud-top {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86));
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      padding: 14px 16px 10px;
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+      box-shadow: var(--shadow-sm);
+      border-radius: 0 0 22px 22px;
+    }
+    #title-wrap { display: flex; flex-direction: column; line-height: 1.1; }
+    #game-title {
+      font-weight: 800; font-size: 23px; letter-spacing: 1.5px;
+      background: linear-gradient(90deg, #ff6fa0, #f0a93a, #4caf6d, #4aa3ff);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    #game-version { font-size: 10px; color: var(--text-dim); font-weight: 600; letter-spacing: 0.4px; margin-top: 2px; }
+
+    #top-right { display: flex; align-items: center; gap: 8px; }
+    #gps-status {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 5px 10px;
+      border-radius: 999px; background: rgba(240,169,58,0.16); color: #a06a00;
+      white-space: nowrap;
+    }
+    #gps-status.pending { animation: pulse 1.6s ease-in-out infinite; }
+    #gps-status.locked { background: rgba(76,175,109,0.16); color: var(--green-dark); }
+    #gps-status.err { background: rgba(240,169,58,0.22); color: #a06a00; }
+
+    #top-menu-btn {
+      width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--panel-border);
+      background: rgba(255,255,255,0.9); color: var(--text); font-size: 18px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);
+    }
+    #top-menu-btn:active { background: rgba(0,0,0,0.06); }
+
+    #menu-dropdown {
+      position: fixed; top: 68px; right: 16px; z-index: 1001;
+      background: var(--panel-bg); border-radius: 16px; box-shadow: var(--shadow);
+      border: 1px solid var(--panel-border); overflow: hidden;
+      display: none; min-width: 190px;
+    }
+    #menu-dropdown.open { display: block; }
+    #menu-dropdown button {
+      display: block; width: 100%; text-align: left; padding: 13px 16px; border: none;
+      background: none; font-size: 14px; color: var(--text); cursor: pointer;
+      border-bottom: 1px solid var(--panel-border);
+    }
+    #menu-dropdown button:last-child { border-bottom: none; }
+    #menu-dropdown button:active { background: rgba(0,0,0,0.05); }
+    #menu-dropdown button.danger { color: #c0554a; }
+
+    /* ================= BOTTOM HUD ================= */
+    #hud-bottom {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+      background: linear-gradient(0deg, rgba(255,255,255,0.97), rgba(255,255,255,0.88));
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      padding: 14px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+      border-radius: 22px 22px 0 0;
+      box-shadow: var(--shadow-sm);
+      text-align: center;
+    }
+    #hud-status-line { font-size: 13.5px; color: var(--text); font-weight: 600; }
+
+    #recenter-btn {
+      position: fixed; right: 16px; bottom: 96px; z-index: 900;
+      width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--panel-border);
+      background: var(--panel-bg); box-shadow: var(--shadow); font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #recenter-btn:active { background: rgba(0,0,0,0.06); }
+
+    /* ================= PLANT PANEL ================= */
+    #plant-panel {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100;
+      background: var(--panel-bg); border-radius: 24px 24px 0 0; box-shadow: var(--shadow);
+      padding: 10px 22px calc(22px + env(safe-area-inset-bottom, 0px));
+      transform: translateY(105%);
+      transition: transform 0.28s ease;
+    }
+    #plant-panel.open { transform: translateY(0); }
+    .panel-handle { width: 40px; height: 4px; border-radius: 2px; background: var(--panel-border); margin: 4px auto 10px; }
+    #panel-close-btn {
+      position: absolute; top: 14px; right: 16px; width: 30px; height: 30px; border-radius: 50%;
+      border: none; background: rgba(0,0,0,0.05); font-size: 17px; color: var(--text-dim); cursor: pointer;
+    }
+    #plant-icon-big { display: flex; align-items: center; justify-content: center; margin: 4px auto 8px; }
+    #plant-title { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
+    #plant-meta { text-align: center; font-size: 12.5px; color: var(--text-dim); margin-bottom: 12px; }
+
+    .water-bar-track { width: 100%; height: 10px; background: rgba(0,0,0,0.07); border-radius: 999px; overflow: hidden; }
+    #water-bar-fill { height: 100%; background: linear-gradient(90deg, #4aa3ff, #7ec8ff); border-radius: 999px; transition: width 0.4s ease; }
+    #water-bar-label { text-align: center; font-size: 11.5px; color: var(--text-dim); margin-top: 5px; margin-bottom: 10px; }
+
+    #plant-status-line { text-align: center; font-size: 13.5px; font-weight: 700; margin-bottom: 14px; }
+    .status-good { color: var(--green-dark); }
+    .status-thirsty { color: var(--amber); }
+    .status-wilt { color: var(--blue); }
+
+    #plant-action-btn {
+      display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
+      font-size: 15px; font-weight: 800; letter-spacing: 0.3px; cursor: pointer;
+      background: linear-gradient(90deg, var(--blue), #7ec8ff); color: #fff; box-shadow: var(--shadow-sm);
+    }
+    #plant-action-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
+
+    /* ================= MODAL ================= */
+    #modal-overlay {
+      position: fixed; inset: 0; z-index: 1500; background: rgba(30,25,15,0.4);
+      display: none; align-items: center; justify-content: center; padding: 20px;
+    }
+    #modal-overlay.open { display: flex; }
+    #modal-card {
+      background: var(--panel-bg); border-radius: 22px; padding: 26px 24px; max-width: 360px;
+      box-shadow: var(--shadow); text-align: center;
+    }
+    #modal-title { font-size: 20px; font-weight: 800; margin-bottom: 12px; }
+    #modal-body { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 18px; text-align: left; }
+    #modal-body p { margin: 0 0 10px; }
+    #modal-body p:last-child { margin-bottom: 0; }
+    #modal-ok-btn {
+      display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
+      font-size: 15px; font-weight: 800; cursor: pointer; color: #fff;
+      background: linear-gradient(90deg, var(--green), var(--green-dark)); box-shadow: var(--shadow-sm);
+    }
+
+    /* ================= TOAST ================= */
+    #toast-container {
+      position: fixed; left: 0; right: 0; bottom: 92px; z-index: 1300;
+      display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
+    }
+    .toast {
+      background: rgba(40,35,25,0.92); color: #fff; font-size: 13px; font-weight: 600;
+      padding: 10px 18px; border-radius: 999px; box-shadow: var(--shadow-sm);
+      opacity: 0; transform: translateY(8px); transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ================= ANIMATIONS ================= */
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    @keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+    .flourish-cluster { animation: sway 3.2s ease-in-out infinite; transform-origin: bottom center; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div id="hud-top">
+    <div id="title-wrap">
+      <span id="game-title">BLOOM &#x1F338;</span>
+      <span id="game-version">v1.0.0</span>
+    </div>
+    <div id="top-right">
+      <span id="gps-status" class="pending">LOCATING&hellip;</span>
+      <button id="top-menu-btn" onclick="toggleMenu()">&#8942;</button>
+    </div>
+  </div>
+
+  <div id="menu-dropdown">
+    <button onclick="openHowToPlay()">How to Play</button>
+    <button class="danger" onclick="onResetGarden()">Reset Garden</button>
+  </div>
+
+  <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
+
+  <div id="hud-bottom">
+    <div id="hud-status-line">Finding your location&hellip;</div>
+  </div>
+
+  <div id="plant-panel">
+    <div class="panel-handle"></div>
+    <button id="panel-close-btn" onclick="closePlantPanel()">&times;</button>
+    <div id="plant-icon-big"></div>
+    <div id="plant-title">&nbsp;</div>
+    <div id="plant-meta">&nbsp;</div>
+    <div class="water-bar-track"><div id="water-bar-fill" style="width:0%"></div></div>
+    <div id="water-bar-label">&nbsp;</div>
+    <div id="plant-status-line">&nbsp;</div>
+    <button id="plant-action-btn">Water</button>
+  </div>
+
+  <div id="modal-overlay">
+    <div id="modal-card">
+      <div id="modal-title">Welcome to Bloom</div>
+      <div id="modal-body"></div>
+      <button id="modal-ok-btn" onclick="closeModal()">Let's grow! &#x1F331;</button>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script>
+    // =====================================================================
+    //  BLOOM - a chill, walking-based gardening game.
+    //  Plant seeds on foot, water them on your next walk, watch them grow.
+    //  No score pressure, no failure state beyond "walk back and water it" -
+    //  the whole point is to give a relaxed excuse to go outside.
+    //
+    //  Encoding note: every emoji below is written as a JS \u{...} escape
+    //  (in script) or an HTML numeric entity &#x...; (in markup) rather than
+    //  a raw UTF-8 glyph, so the file itself contains only ASCII bytes.
+    // =====================================================================
+
+    // ---------------------------------------------------------------------
+    //  CONSTANTS
+    // ---------------------------------------------------------------------
+    var HOUR = 3600000;
+
+    // Hex grid cell size - same ~20m scale used by the Porter game backbone,
+    // a good balance between "walkable in a few minutes" and "not so tiny
+    // that GPS jitter causes mis-taps".
+    var CELL_LAT_DEG = 20 / 111111;
+    var SQ3 = Math.sqrt(3);
+    // Longitude degrees-per-meter shrink with latitude (cos(lat) factor), so
+    // this is corrected once at first GPS lock and persisted - see onGpsLocked.
+    var CELL_LNG_DEG = parseFloat(localStorage.getItem('bloom_cell_lng')) || CELL_LAT_DEG;
+
+    var PLANT_RANGE_HEX = 2;   // how close (in hexes) you must be to plant or water
+    // Visual-only radius for the glow circle around the player; derived from
+    // the same hex lattice so it roughly matches the real (hex-distance)
+    // interaction range without needing a second magic number.
+    var RANGE_METERS = PLANT_RANGE_HEX * CELL_LAT_DEG * 111111 * SQ3;
+
+    var WATER_DURATION_MS = 48 * HOUR;  // full water drains to empty over 2 days
+    var GRACE_MS          = 24 * HOUR;  // then it can sit dry a day before wilting
+    var DEATH_MS           = 96 * HOUR; // ...and up to 4 more wilted days before it dies
+    // growthMs thresholds for [seed, sprout, single bloom, flourishing cluster]
+    var GROWTH_THRESHOLDS = [0, 8 * HOUR, 20 * HOUR, 40 * HOUR];
+    var STAGE_LABELS = ['Seed', 'Sprout', 'In Bloom', 'Flourishing'];
+
+    var SPECIES = [
+      { key: 'sunflower',  emoji: '\u{1F33B}', name: 'Sunflower', color: '#ffd23f' },
+      { key: 'tulip',      emoji: '\u{1F337}', name: 'Tulip',     color: '#ff7fae' },
+      { key: 'daisy',      emoji: '\u{1F33C}', name: 'Daisy',     color: '#fff2a8' },
+      { key: 'rose',       emoji: '\u{1F339}', name: 'Rose',      color: '#f0637f' },
+      { key: 'hibiscus',   emoji: '\u{1F33A}', name: 'Hibiscus',  color: '#ff8aa8' },
+      { key: 'blossom',    emoji: '\u{1F338}', name: 'Blossom',   color: '#ffc7e0' },
+      { key: 'lotus',      emoji: '\u{1FAB7}', name: 'Lotus',     color: '#caa8f5' }
+    ];
+    function speciesFor(key) {
+      for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return SPECIES[i];
+      return SPECIES[0];
+    }
+
+    // ---------------------------------------------------------------------
+    //  STATE & PERSISTENCE
+    //  Small, single-blob save (unlike Porter's many-key layout) since
+    //  Bloom's whole state is just a dictionary of plants plus a few stats.
+    // ---------------------------------------------------------------------
+    var STORAGE_KEY = 'bloom_state_v1';
+
+    function loadState() {
+      var def = {
+        plants: {},
+        stats: { planted: 0, bloomed: 0, flourished: 0, lost: 0 },
+        following: true,
+        seenWelcome: false
+      };
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return def;
+      try {
+        var parsed = JSON.parse(raw);
+        return {
+          plants: parsed.plants || {},
+          stats: Object.assign({}, def.stats, parsed.stats || {}),
+          following: parsed.following !== false,
+          seenWelcome: !!parsed.seenWelcome
+        };
+      } catch (e) {
+        return def; // corrupted save falls back to defaults rather than breaking load
+      }
+    }
+
+    var state = loadState();
+    state.userPos = null; // runtime-only, never persisted
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        plants: state.plants, stats: state.stats,
+        following: state.following, seenWelcome: state.seenWelcome
+      }));
+    }
+
+    // ---------------------------------------------------------------------
+    //  HEX MATH (flat-top axial, same shape as the Porter backbone)
+    // ---------------------------------------------------------------------
+    function hexRound(qf, rf) {
+      var sf = -qf - rf;
+      var q = Math.round(qf), r = Math.round(rf), s = Math.round(sf);
+      var dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
+      if (dq > dr && dq > ds) q = -r - s;
+      else if (dr > ds) r = -q - s;
+      return { q: q, r: r };
+    }
+    function latLngToHex(lat, lng) {
+      var nx = lng / CELL_LNG_DEG, ny = lat / CELL_LAT_DEG;
+      return hexRound(2 / 3 * nx, -1 / 3 * nx + SQ3 / 3 * ny);
+    }
+    function hexCenter(q, r) {
+      return { lat: (SQ3 / 2 * q + SQ3 * r) * CELL_LAT_DEG, lng: (3 / 2 * q) * CELL_LNG_DEG };
+    }
+    function hexKey(q, r) { return q + ',' + r; }
+    function hexDist(q1, r1, q2, r2) {
+      var dq = q1 - q2, dr = r1 - r2;
+      return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+    }
+
+    // ---------------------------------------------------------------------
+    //  GROWTH ENGINE
+    //  Fully timestamp-derived so it stays correct across long offline gaps
+    //  (the whole point of the game is that you walk away for hours/days).
+    // ---------------------------------------------------------------------
+    function stageForGrowth(growthMs) {
+      for (var i = GROWTH_THRESHOLDS.length - 1; i >= 0; i--) {
+        if (growthMs >= GROWTH_THRESHOLDS[i]) return i;
+      }
+      return 0;
+    }
+
+    // Recomputes a plant's derived state as of `now` and mutates its stored
+    // growth accumulator. Safe to call any number of times (idempotent aside
+    // from accruing whatever real time has actually passed since the last call).
+    //
+    // Growth only accrues while the plant isn't wilted: `wiltStartAt` is the
+    // exact timestamp watering would need to happen by to avoid wilting, so
+    // clamping the growth window to min(now, wiltStartAt) accounts for offline
+    // gaps that span a wilt transition without needing stored history.
+    function recomputePlant(p, now) {
+      var wiltStartAt = p.lastWateredAt + WATER_DURATION_MS + GRACE_MS;
+      var growEnd = Math.min(now, wiltStartAt);
+      var added = Math.max(0, growEnd - p.lastGrowthCheckAt);
+      p.growthMs += added;
+      p.lastGrowthCheckAt = now;
+
+      var dryMs = Math.max(0, now - p.lastWateredAt - WATER_DURATION_MS);
+      var d = {
+        waterFrac: Math.max(0, Math.min(1, 1 - (now - p.lastWateredAt) / WATER_DURATION_MS)),
+        wilted: dryMs > GRACE_MS,
+        dead: dryMs > GRACE_MS + DEATH_MS,
+        stage: stageForGrowth(p.growthMs)
+      };
+      p._d = d;
+      return d;
+    }
+
+    function plantSeedAt(q, r) {
+      var now = Date.now();
+      var species = SPECIES[Math.floor(Math.random() * SPECIES.length)].key;
+      var c = hexCenter(q, r);
+      var key = hexKey(q, r);
+      state.plants[key] = {
+        q: q, r: r, lat: c.lat, lng: c.lng, species: species,
+        plantedAt: now, lastWateredAt: now, growthMs: 0, lastGrowthCheckAt: now,
+        reachedBloom: false, reachedFlourish: false
+      };
+      state.stats.planted++;
+      saveState();
+      renderPlants();
+      updateHUD();
+      toast('\u{1F331} Seed planted! Come back and water it soon.');
+      vibrate(20);
+    }
+
+    function waterPlant(key) {
+      var p = state.plants[key];
+      if (!p) return;
+      var now = Date.now();
+      recomputePlant(p, now);   // accrue any growth earned before the dry spell
+      p.lastWateredAt = now;
+      recomputePlant(p, now);   // refresh derived state for immediate UI feedback
+      saveState();
+      renderPlants();
+      if (viewingKey === key) renderPlantPanel(key);
+      updateHUD();
+      toast('\u{1F4A7} Watered!');
+      vibrate(15);
+    }
+
+    // Runs on load and every minute: advances growth, tracks first-time
+    // milestones, and gently retires anything left dry for too long.
+    function tickPlants() {
+      var now = Date.now();
+      var removed = 0;
+      Object.keys(state.plants).forEach(function (key) {
+        var p = state.plants[key];
+        var d = recomputePlant(p, now);
+        if (d.dead) { delete state.plants[key]; state.stats.lost++; removed++; return; }
+        if (d.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
+        if (d.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+      });
+      saveState();
+      renderPlants();
+      updateHUD();
+      if (viewingKey) renderPlantPanel(viewingKey);
+      if (removed > 0) {
+        toast(removed === 1
+          ? 'A flower quietly returned to the earth. \u{1F90D}'
+          : removed + ' flowers quietly returned to the earth. \u{1F90D}');
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    //  VISUALS
+    // ---------------------------------------------------------------------
+    // Builds the emoji "look" for a plant at a given stage/size and returns
+    // its rendered box dimensions so callers (map marker vs. big panel
+    // preview) can size their container to match exactly.
+    function buildPlantVisual(species, stage, wilted, base) {
+      var wiltFilter = wilted ? 'filter:grayscale(55%) opacity(0.7);' : '';
+      function dot(size) {
+        var fs = Math.round(size * 0.6);
+        return '<div style="background:' + species.color + ';border:2px solid rgba(255,255,255,0.85);' +
+          'border-radius:50%;width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;' +
+          'justify-content:center;font-size:' + fs + 'px;box-shadow:0 2px 8px rgba(60,40,20,0.3);flex-shrink:0">' +
+          species.emoji + '</div>';
+      }
+      var html, w, h;
+      if (stage === 0) {
+        w = h = Math.round(base * 0.5);
+        html = '<div style="' + wiltFilter + 'background:#c9a06a;border:2px solid rgba(255,255,255,0.85);' +
+          'border-radius:50%;width:' + w + 'px;height:' + h + 'px;display:flex;align-items:center;' +
+          'justify-content:center;font-size:' + Math.round(w * 0.55) + 'px;box-shadow:0 2px 8px rgba(60,40,20,0.3)">' +
+          '\u{1F330}</div>';
+      } else if (stage === 1) {
+        w = h = Math.round(base * 0.55);
+        html = '<div style="' + wiltFilter + 'background:#bfe6a0;border:2px solid rgba(255,255,255,0.85);' +
+          'border-radius:50%;width:' + w + 'px;height:' + h + 'px;display:flex;align-items:center;' +
+          'justify-content:center;font-size:' + Math.round(w * 0.58) + 'px;box-shadow:0 2px 8px rgba(60,40,20,0.3)">' +
+          '\u{1F331}</div>';
+      } else if (stage === 2) {
+        w = h = Math.round(base * 0.85);
+        html = '<div style="' + wiltFilter + '">' + dot(w) + '</div>';
+      } else {
+        var ds = Math.round(base * 0.5), gap = Math.max(2, Math.round(base * 0.04));
+        w = 2 * ds + gap; h = 2 * ds + gap;
+        html = '<div class="flourish-cluster" style="' + wiltFilter + 'display:flex;flex-direction:column;' +
+          'gap:' + gap + 'px;align-items:center"><div style="display:flex;gap:' + gap + 'px">' +
+          dot(ds) + dot(ds) + '</div>' + dot(ds) + '</div>';
+      }
+      return { html: html, w: w, h: h };
+    }
+
+    function makePlantIcon(plant) {
+      var d = recomputePlant(plant, Date.now());
+      var v = buildPlantVisual(speciesFor(plant.species), d.stage, d.wilted, 44);
+      var html = v.html;
+      if (d.wilted) {
+        html = '<div style="position:relative;width:' + v.w + 'px;height:' + v.h + 'px">' + html +
+          '<div style="position:absolute;top:-4px;right:-6px;background:#4aa3ff;color:#fff;' +
+          'border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;' +
+          'font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,0.35)">\u{1F4A7}</div></div>';
+      }
+      return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h / 2], className: '' });
+    }
+
+    function userIcon() {
+      return L.divIcon({
+        html: '<div style="background:#1a3050;border:3px solid #fff;border-radius:50%;width:40px;height:40px;' +
+          'display:flex;align-items:center;justify-content:center;font-size:22px;' +
+          'box-shadow:0 2px 12px rgba(0,0,0,0.35)">\u{1F6B6}</div>',
+        iconSize: [40, 40], iconAnchor: [20, 20]
+      });
+    }
+
+    // ---------------------------------------------------------------------
+    //  MAP
+    // ---------------------------------------------------------------------
+    var map = L.map('map', { zoomControl: false, attributionControl: false, minZoom: 14, maxZoom: 19, zoomSnap: 0.5 });
+    // Voyager tiles - colorful parks/water/roads, matching the "pretty and
+    // colorful" brief better than a flat greyscale basemap would.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 20
+    }).addTo(map);
+    map.setView([20, 0], 3);
+    map.on('dragstart', function () { state.following = false; });
+
+    var plantMarkers = {};
+    function renderPlants() {
+      var seen = {};
+      Object.keys(state.plants).forEach(function (key) {
+        var p = state.plants[key];
+        seen[key] = true;
+        var icon = makePlantIcon(p);
+        if (plantMarkers[key]) plantMarkers[key].setIcon(icon);
+        else plantMarkers[key] = L.marker([p.lat, p.lng], { icon: icon, interactive: false, zIndexOffset: 100 }).addTo(map);
+      });
+      Object.keys(plantMarkers).forEach(function (key) {
+        if (!seen[key]) { map.removeLayer(plantMarkers[key]); delete plantMarkers[key]; }
+      });
+    }
+
+    // Empty ground within range plants immediately; an occupied hex opens its
+    // panel (from any distance - browsing your garden from afar is fine,
+    // only *acting* on a plant requires being physically close).
+    map.on('click', function (e) {
+      var h = latLngToHex(e.latlng.lat, e.latlng.lng);
+      var key = hexKey(h.q, h.r);
+      if (state.plants[key]) { openPlantPanel(key); return; }
+      if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
+      var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
+      if (hexDist(uh.q, uh.r, h.q, h.r) > PLANT_RANGE_HEX) {
+        toast('Walk closer to plant a seed here \u{1F6B6}');
+        return;
+      }
+      plantSeedAt(h.q, h.r);
+    });
+
+    // ---------------------------------------------------------------------
+    //  GPS
+    // ---------------------------------------------------------------------
+    var userMarker = null, rangeCircle = null, viewingKey = null;
+
+    if (!navigator.geolocation) {
+      document.getElementById('gps-status').textContent = 'NO GPS';
+      document.getElementById('hud-status-line').textContent = 'Geolocation is not supported on this device.';
+    } else {
+      navigator.geolocation.watchPosition(onLocationUpdate, onLocationError, {
+        enableHighAccuracy: true, maximumAge: 3000, timeout: 15000
+      });
+    }
+
+    function onLocationUpdate(pos) {
+      var lat = pos.coords.latitude, lng = pos.coords.longitude;
+      state.userPos = { lat: lat, lng: lng };
+      if (!userMarker) {
+        userMarker = L.marker([lat, lng], { icon: userIcon(), zIndexOffset: 1000, interactive: false }).addTo(map);
+        rangeCircle = L.circle([lat, lng], {
+          radius: RANGE_METERS, color: '#4caf6d', weight: 1.5,
+          fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
+        }).addTo(map);
+        map.setView([lat, lng], 17);
+        onGpsLocked();
+      } else {
+        userMarker.setLatLng([lat, lng]);
+        rangeCircle.setLatLng([lat, lng]);
+        if (state.following) map.panTo([lat, lng], { animate: true, duration: 0.4 });
+      }
+      if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
+      updateHUD();
+    }
+
+    function onLocationError(err) {
+      var msgs = { 1: 'Location permission denied.', 2: 'Position unavailable.', 3: 'GPS timed out, retrying...' };
+      var badge = document.getElementById('gps-status');
+      badge.textContent = 'NO GPS'; badge.className = 'err';
+      document.getElementById('hud-status-line').textContent = msgs[err.code] || err.message;
+    }
+
+    function onGpsLocked() {
+      var badge = document.getElementById('gps-status');
+      badge.textContent = 'GPS LOCKED';
+      badge.className = 'locked';
+      setTimeout(function () { badge.style.display = 'none'; }, 3000);
+      // Longitude scale depends on latitude - lock it once so hexes stay
+      // visually even-sided near where the player actually is.
+      if (!localStorage.getItem('bloom_cell_lng')) {
+        CELL_LNG_DEG = CELL_LAT_DEG / Math.cos(state.userPos.lat * Math.PI / 180);
+        localStorage.setItem('bloom_cell_lng', CELL_LNG_DEG);
+      }
+      vibrate(30);
+      tickPlants();
+      if (!state.seenWelcome) openWelcome();
+    }
+
+    // ---------------------------------------------------------------------
+    //  PLANT PANEL
+    // ---------------------------------------------------------------------
+    function formatAgo(ts) {
+      var min = Math.floor((Date.now() - ts) / 60000);
+      if (min < 1) return 'just now';
+      if (min < 60) return min + (min === 1 ? ' minute ago' : ' minutes ago');
+      var hr = Math.floor(min / 60);
+      if (hr < 24) return hr + (hr === 1 ? ' hour ago' : ' hours ago');
+      var day = Math.floor(hr / 24);
+      return day + (day === 1 ? ' day ago' : ' days ago');
+    }
+
+    function openPlantPanel(key) {
+      viewingKey = key;
+      renderPlantPanel(key);
+      document.getElementById('plant-panel').classList.add('open');
+    }
+    function closePlantPanel() {
+      viewingKey = null;
+      document.getElementById('plant-panel').classList.remove('open');
+    }
+
+    function renderPlantPanel(key) {
+      var p = state.plants[key];
+      if (!p) { closePlantPanel(); return; }
+      var d = recomputePlant(p, Date.now());
+      var species = speciesFor(p.species);
+
+      var v = buildPlantVisual(species, d.stage, d.wilted, 88);
+      var iconEl = document.getElementById('plant-icon-big');
+      iconEl.innerHTML = v.html;
+      iconEl.style.width = v.w + 'px';
+      iconEl.style.height = v.h + 'px';
+
+      document.getElementById('plant-title').textContent = species.name + ' - ' + STAGE_LABELS[d.stage];
+      document.getElementById('plant-meta').textContent = 'Planted ' + formatAgo(p.plantedAt);
+
+      var pct = Math.round(d.waterFrac * 100);
+      document.getElementById('water-bar-fill').style.width = pct + '%';
+      document.getElementById('water-bar-label').textContent = pct + '% watered';
+
+      var statusEl = document.getElementById('plant-status-line');
+      if (d.wilted) { statusEl.textContent = 'Wilting - water it to help it bounce back'; statusEl.className = 'status-wilt'; }
+      else if (d.waterFrac < 0.34) { statusEl.textContent = 'Getting thirsty - water it soon'; statusEl.className = 'status-thirsty'; }
+      else { statusEl.textContent = 'Thriving'; statusEl.className = 'status-good'; }
+
+      var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
+      var inRange = uh && hexDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE_HEX;
+      var btn = document.getElementById('plant-action-btn');
+      if (inRange) {
+        btn.disabled = false;
+        btn.textContent = 'Water \u{1F4A7}';
+        btn.onclick = function () { waterPlant(key); };
+      } else {
+        btn.disabled = true;
+        btn.textContent = 'Walk closer to water';
+        btn.onclick = null;
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    //  HUD / MENU / MODAL / TOAST
+    // ---------------------------------------------------------------------
+    function updateHUD() {
+      var keys = Object.keys(state.plants);
+      var total = keys.length;
+      var thirsty = keys.filter(function (k) {
+        var d = state.plants[k]._d;
+        return d && (d.wilted || d.waterFrac < 0.34);
+      }).length;
+
+      var line;
+      if (total === 0) line = 'Tap the map near you to plant your first seed \u{1F331}';
+      else if (thirsty > 0) {
+        line = thirsty + (thirsty === 1 ? ' flower is' : ' flowers are') + ' thirsty \u{1F4A7} &bull; ' +
+          state.stats.bloomed + ' in bloom';
+      } else {
+        line = '\u{1F338} ' + total + ' growing &bull; ' + state.stats.bloomed + ' in bloom &bull; all watered';
+      }
+      document.getElementById('hud-status-line').innerHTML = line;
+    }
+
+    function toggleMenu() { document.getElementById('menu-dropdown').classList.toggle('open'); }
+    document.addEventListener('click', function (e) {
+      var menu = document.getElementById('menu-dropdown'), btn = document.getElementById('top-menu-btn');
+      if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) menu.classList.remove('open');
+    });
+
+    function onRecenter() {
+      state.following = true;
+      saveState();
+      if (state.userPos) map.panTo([state.userPos.lat, state.userPos.lng], { animate: true });
+    }
+
+    function onResetGarden() {
+      toggleMenu();
+      if (!confirm('Clear your whole garden? This cannot be undone.')) return;
+      state.plants = {};
+      state.stats = { planted: 0, bloomed: 0, flourished: 0, lost: 0 };
+      saveState();
+      renderPlants();
+      updateHUD();
+      closePlantPanel();
+      toast('Garden cleared. Fresh soil, ready when you are.');
+    }
+
+    function openWelcome() {
+      document.getElementById('modal-title').textContent = 'Welcome to Bloom';
+      document.getElementById('modal-body').innerHTML =
+        '<p>Bloom gives you a gentle reason to get out and walk. Plant seeds in the ground near you, ' +
+        'then swing back by every so often to water them.</p>' +
+        '<p>Seeds grow into a single flower, then a whole flourishing cluster, over a few real days. ' +
+        'Leave them too thirsty for too long and they\'ll wilt - water always brings them back, ' +
+        'unless they\'re left dry for a very long while.</p>' +
+        '<p>No score, no clock, no rush. Just walk your usual routes and watch your neighborhood fill with color.</p>';
+      document.getElementById('modal-ok-btn').textContent = "Let's grow! \u{1F331}";
+      document.getElementById('modal-ok-btn').onclick = function () {
+        state.seenWelcome = true; saveState(); closeModal();
+      };
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function openHowToPlay() {
+      toggleMenu();
+      document.getElementById('modal-title').textContent = 'How to Play';
+      var s = state.stats;
+      document.getElementById('modal-body').innerHTML =
+        '<p><b>Plant</b> - tap the ground within a couple hexes of you to plant a random seed.</p>' +
+        '<p><b>Water</b> - tap a growing flower, then walk close enough for the Water button to light up.</p>' +
+        '<p><b>Grow</b> - watered plants move from seed to sprout to a single bloom to a full flourishing cluster over a few days.</p>' +
+        '<p><b>Don\'t forget them</b> - flowers left dry for a long stretch wilt, then eventually return to the earth. A watering visit any time before that brings them right back.</p>' +
+        '<p style="color:var(--text-dim);margin-top:14px">So far: ' + s.planted + ' planted &bull; ' +
+        s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished</p>';
+      document.getElementById('modal-ok-btn').textContent = 'Got it';
+      document.getElementById('modal-ok-btn').onclick = closeModal;
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+    function toast(msg) {
+      var c = document.getElementById('toast-container');
+      var t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      c.appendChild(t);
+      requestAnimationFrame(function () { t.classList.add('show'); });
+      setTimeout(function () {
+        t.classList.remove('show');
+        setTimeout(function () { t.remove(); }, 300);
+      }, 2600);
+    }
+
+    function vibrate(ms) {
+      if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} }
+    }
+
+    // ---------------------------------------------------------------------
+    //  INIT
+    // ---------------------------------------------------------------------
+    tickPlants();               // recompute any growth/wilt accrued while closed
+    updateHUD();
+    setInterval(tickPlants, 60000);
+  </script>
+</body>
+</html>

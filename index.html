@@ -257,7 +257,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.3.1</span>
+      <span id="game-version">v1.4.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -563,15 +563,14 @@
       return key;
     }
 
-    // Decides which seed to plant on an empty, in-range hex: skips the picker
-    // entirely if the player only owns one tier (the common case stays a
-    // single tap, same as before seeds existed), asks when they own more than
-    // one, and points them at the shop when they're out.
+    // Decides how to plant on an empty, in-range hex: always confirms via the
+    // seed-tier picker first (even with only one tier owned) so a stray tap
+    // on the map never silently spends a seed - points at the shop instead
+    // when there's nothing to plant.
     function attemptPlant(q, r) {
       var owned = TIERS.map(function (t, i) { return { i: i, t: t, count: state.seeds[t.key] || 0 }; })
         .filter(function (o) { return o.count > 0; });
       if (owned.length === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
-      if (owned.length === 1) { plantSeedAt(q, r, owned[0].i); return; }
       openSeedPicker(q, r, owned);
     }
 
@@ -687,9 +686,24 @@
       return { html: html, w: w, h: h };
     }
 
+    // Flower icons are sized relative to the current zoom (a fixed real-world
+    // size, not a fixed screen-pixel size) so zooming in genuinely makes them
+    // bigger and easier to see instead of staying constant while everything
+    // else on the map grows. Leaflet's built-in zoom animation already scales
+    // markers up visually mid-gesture, but snaps them back to their built-in
+    // iconSize once the gesture settles - rebuilding icons on 'zoomend' (see
+    // the map.on binding below) is what makes the bigger size actually stick.
+    // Clamped so icons stay legible at minZoom and don't get absurd at maxZoom.
+    var PLANT_ICON_REF_ZOOM = 17; // the zoom PLANT_ICON_REF_PX looks "normal" at
+    var PLANT_ICON_REF_PX = 44;
+    function plantIconBase() {
+      var scale = Math.pow(2, map.getZoom() - PLANT_ICON_REF_ZOOM);
+      return PLANT_ICON_REF_PX * Math.max(0.5, Math.min(2.5, scale));
+    }
+
     function makePlantIcon(plant) {
       var d = recomputePlant(plant, Date.now());
-      var v = buildPlantVisual(speciesFor(plant.species), d.stage, d.wilted, 44);
+      var v = buildPlantVisual(speciesFor(plant.species), d.stage, d.wilted, plantIconBase());
       var html = v.html;
       if (d.wilted) {
         html = '<div style="position:relative;width:' + v.w + 'px;height:' + v.h + 'px">' + html +
@@ -787,6 +801,10 @@
         if (!seen[key]) { map.removeLayer(plantMarkers[key]); delete plantMarkers[key]; }
       });
     }
+    // Rebuild every icon at the new zoom's size once a zoom gesture settles -
+    // see plantIconBase()/makePlantIcon above for why this is what actually
+    // makes zooming in grow the flowers instead of them snapping back.
+    map.on('zoomend', renderPlants);
 
     // Empty ground within range plants immediately; an occupied hex opens its
     // panel (from any distance - browsing your garden from afar is fine,
@@ -996,14 +1014,23 @@
         var d = state.plants[k]._d;
         return d && (d.wilted || d.waterFrac < 0.34);
       }).length;
+      // state.stats.bloomed is a lifetime "ever reached bloom" counter (it
+      // never decrements, even after that plant is harvested) - that's right
+      // for the How to Play footer, but wrong here: "N in bloom" needs to
+      // count what's actually blooming right now, so a harvested flower
+      // stops being counted immediately instead of lingering forever.
+      var blooming = keys.filter(function (k) {
+        var d = state.plants[k]._d;
+        return d && d.stage >= 2;
+      }).length;
 
       var line;
       if (total === 0) line = 'Tap the map near you to plant your first seed \u{1F331}';
       else if (thirsty > 0) {
         line = thirsty + (thirsty === 1 ? ' flower is' : ' flowers are') + ' thirsty \u{1F4A7} &bull; ' +
-          state.stats.bloomed + ' in bloom';
+          blooming + ' in bloom';
       } else {
-        line = '\u{1F338} ' + total + ' growing &bull; ' + state.stats.bloomed + ' in bloom &bull; all watered';
+        line = '\u{1F338} ' + total + ' growing &bull; ' + blooming + ' in bloom &bull; all watered';
       }
       document.getElementById('hud-status-line').innerHTML = line;
     }
@@ -1064,8 +1091,8 @@
       document.getElementById('modal-title').textContent = 'How to Play';
       var s = state.stats;
       document.getElementById('modal-body').innerHTML =
-        '<p><b>Plant</b> - tap the ground within a couple hexes of you to plant a seed. Only asks which ' +
-        'tier if you own more than one.</p>' +
+        '<p><b>Plant</b> - tap the ground within a couple hexes of you, then confirm which seed to plant ' +
+        '- a quick safety check so a stray tap never spends one by accident.</p>' +
         '<p><b>Water</b> - tap a growing flower, then walk close enough for the Water button to light up.</p>' +
         '<p><b>Grow</b> - watered plants move from seed to sprout to a single bloom to a full flourishing ' +
         'cluster over a few days.</p>' +
@@ -1083,9 +1110,10 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    // Seed-tier picker for planting when the player owns more than one tier
-    // (see attemptPlant). Reuses the same generic modal as Welcome/How to
-    // Play/etc, just with the OK button hidden in favor of one button per tier.
+    // Seed-tier picker shown on every plant attempt (see attemptPlant) as a
+    // confirm step, even with only one tier owned - reuses the same generic
+    // modal as Welcome/How to Play/etc, just with the OK button hidden in
+    // favor of one button per owned tier.
     function openSeedPicker(q, r, owned) {
       resetModalChrome();
       document.getElementById('modal-title').textContent = 'Choose a Seed';

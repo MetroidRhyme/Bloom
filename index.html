@@ -189,7 +189,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.1.0</span>
+      <span id="game-version">v1.1.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -521,18 +521,6 @@
       return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h / 2], className: '' });
     }
 
-    function userIcon() {
-      return L.divIcon({
-        html: '<div style="background:#1a3050;border:3px solid #fff;border-radius:50%;width:40px;height:40px;' +
-          'display:flex;align-items:center;justify-content:center;font-size:22px;' +
-          'box-shadow:0 2px 12px rgba(0,0,0,0.35)">\u{1F6B6}</div>',
-        // className:'' clears Leaflet's default .leaflet-div-icon box (a white
-        // square with a border) - without it that box shows behind the round
-        // marker. makePlantIcon already does this; this one was missed.
-        iconSize: [40, 40], iconAnchor: [20, 20], className: ''
-      });
-    }
-
     // ---------------------------------------------------------------------
     //  MAP
     // ---------------------------------------------------------------------
@@ -589,7 +577,7 @@
       var maxR = Math.max.apply(null, corners.map(function (c) { return c.r; })) + 1;
       if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_HEXES) return;
 
-      ctx.strokeStyle = 'rgba(70,120,80,0.32)';
+      ctx.strokeStyle = 'rgba(70,120,80,0.14)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (var q = minQ; q <= maxQ; q++) {
@@ -640,7 +628,12 @@
     // ---------------------------------------------------------------------
     //  GPS
     // ---------------------------------------------------------------------
-    var userMarker = null, rangeCircle = null, viewingKey = null;
+    // No player marker - only the translucent range circle marks the player,
+    // so it never sits on top of (and hides) a flower planted right next to
+    // them. userHexQ/userHexR is the hex the circle is currently snapped to.
+    var rangeCircle = null, viewingKey = null;
+    var userHexQ = null, userHexR = null;
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (!navigator.geolocation) {
       document.getElementById('gps-status').textContent = 'NO GPS';
@@ -651,21 +644,50 @@
       });
     }
 
+    // Eases the range circle from one hex center to the next over ~450ms
+    // instead of jumping. Only runs on an actual hex change (see
+    // onLocationUpdate), so ordinary GPS jitter within the same hex never
+    // moves the circle at all - that's the real fix for the twitchiness,
+    // this animation just makes real hex-to-hex steps read as movement
+    // rather than a teleport.
+    var _circleAnimRAF = null;
+    function animateCircleTo(fromLat, fromLng, toLat, toLng) {
+      if (_circleAnimRAF) cancelAnimationFrame(_circleAnimRAF);
+      if (reduceMotion) { rangeCircle.setLatLng([toLat, toLng]); return; }
+      var start = performance.now(), dur = 450;
+      function step(now) {
+        var t = Math.min(1, (now - start) / dur);
+        var e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out-quad
+        rangeCircle.setLatLng([fromLat + (toLat - fromLat) * e, fromLng + (toLng - fromLng) * e]);
+        _circleAnimRAF = (t < 1) ? requestAnimationFrame(step) : null;
+      }
+      _circleAnimRAF = requestAnimationFrame(step);
+    }
+
     function onLocationUpdate(pos) {
       var lat = pos.coords.latitude, lng = pos.coords.longitude;
       state.userPos = { lat: lat, lng: lng };
-      if (!userMarker) {
-        userMarker = L.marker([lat, lng], { icon: userIcon(), zIndexOffset: 1000, interactive: false }).addTo(map);
-        rangeCircle = L.circle([lat, lng], {
+
+      // Snap the displayed position to the current hex's center rather than
+      // following raw GPS - range checks elsewhere already work in hex
+      // distance (hexDist), not raw lat/lng, so this changes nothing about
+      // what counts as "in range", only how steady the circle looks.
+      var h = latLngToHex(lat, lng);
+      var c = hexCenter(h.q, h.r);
+
+      if (!rangeCircle) {
+        userHexQ = h.q; userHexR = h.r;
+        rangeCircle = L.circle([c.lat, c.lng], {
           radius: RANGE_METERS, color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
         }).addTo(map);
-        map.setView([lat, lng], 17);
+        map.setView([c.lat, c.lng], 17);
         onGpsLocked();
-      } else {
-        userMarker.setLatLng([lat, lng]);
-        rangeCircle.setLatLng([lat, lng]);
-        if (state.following) map.panTo([lat, lng], { animate: true, duration: 0.4 });
+      } else if (h.q !== userHexQ || h.r !== userHexR) {
+        var from = hexCenter(userHexQ, userHexR);
+        userHexQ = h.q; userHexR = h.r;
+        animateCircleTo(from.lat, from.lng, c.lat, c.lng);
+        if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
       if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
       updateHUD();
@@ -790,7 +812,13 @@
     function onRecenter() {
       state.following = true;
       saveState();
-      if (state.userPos) map.panTo([state.userPos.lat, state.userPos.lng], { animate: true });
+      // Pan to the snapped hex center (where the range circle actually is),
+      // not raw GPS - otherwise recenter can land slightly off from the
+      // visible circle.
+      if (userHexQ !== null) {
+        var c = hexCenter(userHexQ, userHexR);
+        map.panTo([c.lat, c.lng], { animate: true });
+      }
     }
 
     function onResetGarden() {

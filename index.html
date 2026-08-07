@@ -110,6 +110,22 @@
     }
     #recenter-btn:active { background: rgba(0,0,0,0.06); }
 
+    /* ================= TUTORIAL BANNER ================= */
+    /* First-run only (see the TUTORIAL section in the script). Sits just
+       below the top bar, using --hud-top-h so it never overlaps it. */
+    #tutorial-banner {
+      position: fixed; left: 12px; right: 12px; top: calc(var(--hud-top-h) + 10px); z-index: 950;
+      background: linear-gradient(135deg, #fff6e0, #ffffff);
+      border: 2px solid var(--amber); border-radius: 16px; box-shadow: var(--shadow);
+      padding: 12px 16px; text-align: center; display: none;
+    }
+    #tutorial-banner.open { display: block; }
+    #tutorial-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
+    #tutorial-skip-link {
+      display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700;
+      color: var(--text-dim); text-decoration: underline; cursor: pointer;
+    }
+
     /* ================= PLANT PANEL ================= */
     #plant-panel {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100;
@@ -241,7 +257,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.2.0</span>
+      <span id="game-version">v1.3.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -257,6 +273,11 @@
   </div>
 
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
+
+  <div id="tutorial-banner">
+    <div id="tutorial-text">&nbsp;</div>
+    <span id="tutorial-skip-link" onclick="skipTutorial()">Skip tutorial</span>
+  </div>
 
   <div id="hud-bottom">
     <div id="hud-status-line">Finding your location&hellip;</div>
@@ -538,6 +559,7 @@
       updateHUD();
       toast('\u{1F331} ' + tier.name + ' seed planted! Come back and water it soon.');
       vibrate(20);
+      tutorialOnPlant(key);
       return key;
     }
 
@@ -566,6 +588,7 @@
       updateHUD();
       toast('\u{1F4A7} Watered!');
       vibrate(15);
+      tutorialOnWater(key);
     }
 
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
@@ -873,7 +896,12 @@
       scheduleGridRedraw();
       vibrate(30);
       tickPlants();
+      // Brand-new player: show the welcome modal, then the tutorial starts
+      // once they dismiss it (see openWelcome). Returning to a save where the
+      // tutorial was started but never finished/skipped (app closed mid-way)
+      // skips straight to resuming it, since they've already seen Welcome.
       if (!state.seenWelcome) openWelcome();
+      else if (!state.tutorialDone) startTutorial();
     }
 
     // ---------------------------------------------------------------------
@@ -954,7 +982,8 @@
     // Thin wrapper so the tutorial (see TUTORIAL section) can observe a real
     // harvest without renderPlantPanel needing to know it exists.
     function onHarvestClick(key, sell) {
-      harvestPlant(key, sell);
+      var value = harvestPlant(key, sell);
+      tutorialOnHarvest(key, sell, value);
     }
 
     // ---------------------------------------------------------------------
@@ -1027,6 +1056,7 @@
       document.getElementById('modal-ok-btn').textContent = "Let's grow! \u{1F331}";
       document.getElementById('modal-ok-btn').onclick = function () {
         state.seenWelcome = true; saveState(); closeModal();
+        if (!state.tutorialDone) startTutorial();
       };
       document.getElementById('modal-overlay').classList.add('open');
     }
@@ -1117,6 +1147,7 @@
       updateCurrencyPill();
       toast('Bought a ' + t.name + ' seed \u{1F331}');
       vibrate(15);
+      tutorialOnBuy();
     }
 
     // Opened both from the menu ("Seed Shop") and by tapping the currency
@@ -1144,6 +1175,127 @@
 
     function vibrate(ms) {
       if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} }
+    }
+
+    // ---------------------------------------------------------------------
+    //  TUTORIAL (first run only)
+    //  A brand-new save (see loadState's tutorialDone default) walks through
+    //  one real plant -> water -> water -> harvest -> shop cycle. The growth
+    //  waits are simulated (tutorialFastForward jumps the ONE tutorial plant's
+    //  own growthMs, not a global time multiplier - see the growth engine's
+    //  recomputePlant, which treats a jumped growthMs no differently from real
+    //  elapsed time on every later call), so a new player sees the whole loop
+    //  in under a minute instead of waiting real days. Every other step -
+    //  actually planting, actually tapping Water, actually harvesting, actually
+    //  buying - is a real action the player performs; nothing is auto-clicked
+    //  for them. Always skippable via the banner's persistent link.
+    // ---------------------------------------------------------------------
+    var tutorial = { active: false, step: null, plantKey: null };
+
+    function showTutorialBanner(html) {
+      document.getElementById('tutorial-text').innerHTML = html;
+      document.getElementById('tutorial-banner').classList.add('open');
+    }
+    function hideTutorialBanner() { document.getElementById('tutorial-banner').classList.remove('open'); }
+
+    function startTutorial() {
+      tutorial.active = true;
+      tutorial.step = 'plant';
+      tutorial.plantKey = null;
+      showTutorialBanner('Let\'s plant your first seed - tap the ground within the green circle \u{1F331}');
+    }
+
+    function skipTutorial() {
+      tutorial.active = false;
+      state.tutorialDone = true;
+      saveState();
+      hideTutorialBanner();
+    }
+
+    function finishTutorial() {
+      tutorial.active = false;
+      state.tutorialDone = true;
+      saveState();
+      showTutorialBanner('You\'ve got the hang of it! Plant, water, harvest, and shop for better seeds ' +
+        'whenever you like. Have fun out there! \u{1F337}');
+      setTimeout(hideTutorialBanner, 6000);
+    }
+
+    // Jumps the one tutorial plant straight past the next stage's growth
+    // threshold. recomputePlant can't tell this apart from real elapsed
+    // time on any later call, so nothing needs to be "reverted" once the
+    // tutorial ends - it's just a normal plant with a running start.
+    function tutorialFastForward(p, targetStage) {
+      var now = Date.now();
+      p.growthMs = GROWTH_THRESHOLDS[targetStage] + 1000;
+      p.lastGrowthCheckAt = now;
+      var d = recomputePlant(p, now);
+      if (d.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
+      if (d.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+      saveState();
+      renderPlants();
+      if (viewingKey === hexKey(p.q, p.r)) renderPlantPanel(viewingKey);
+      updateHUD();
+    }
+
+    function tutorialOnPlant(key) {
+      if (!tutorial.active || tutorial.step !== 'plant') return;
+      tutorial.plantKey = key;
+      tutorial.step = 'grow-sprout';
+      showTutorialBanner('Nice! Watch it grow&hellip; \u{1F331}');
+      setTimeout(function () {
+        var p = state.plants[tutorial.plantKey];
+        if (!p || !tutorial.active) return; // lost, or skipped while waiting - leave it be
+        tutorialFastForward(p, 1);
+        tutorial.step = 'water1';
+        showTutorialBanner('It sprouted! Tap it, then tap Water to help it keep growing \u{1F4A7}');
+      }, 2500);
+    }
+
+    function tutorialOnWater(key) {
+      if (!tutorial.active || key !== tutorial.plantKey) return;
+      if (tutorial.step === 'water1') {
+        tutorial.step = 'grow-bloom';
+        showTutorialBanner('Great, it\'s drinking that in&hellip; \u{1F4A7}');
+        setTimeout(function () {
+          var p = state.plants[tutorial.plantKey];
+          if (!p || !tutorial.active) return;
+          tutorialFastForward(p, 2);
+          tutorial.step = 'water2';
+          showTutorialBanner('It\'s in bloom! \u{1F338} One more visit and it\'ll flourish - tap it, then Water again \u{1F4A7}');
+        }, 2500);
+      } else if (tutorial.step === 'water2') {
+        tutorial.step = 'grow-flourish';
+        showTutorialBanner('Almost there&hellip; \u{1F4A7}');
+        setTimeout(function () {
+          var p = state.plants[tutorial.plantKey];
+          if (!p || !tutorial.active) return;
+          tutorialFastForward(p, 3);
+          tutorial.step = 'harvest';
+          showTutorialBanner('Flourishing! Tap it, then Keep it for yourself or Sell it to the shop \u{1F337}');
+        }, 2500);
+      }
+    }
+
+    function tutorialOnHarvest(key, sell, value) {
+      if (!tutorial.active || tutorial.step !== 'harvest' || key !== tutorial.plantKey) return;
+      // A flat bonus (on top of any sale) guarantees a first seed is
+      // affordable either way - Keep is never presented as the "wrong"
+      // choice, this just makes sure the shop step isn't a wall for it.
+      var bonus = 15;
+      state.currency += bonus;
+      saveState();
+      updateCurrencyPill();
+      tutorial.step = 'shop';
+      var msg = sell
+        ? 'Nice sale! Plus a first-harvest bonus of +' + bonus + ' \u{1F338}.'
+        : 'Kept for your collection! Here\'s a first-harvest bonus of +' + bonus + ' \u{1F338} to get you started.';
+      showTutorialBanner(msg + ' Open the Shop (top right) and buy your next seed \u{1F337}');
+    }
+
+    function tutorialOnBuy() {
+      if (!tutorial.active || tutorial.step !== 'shop') return;
+      finishTutorial();
     }
 
     // ---------------------------------------------------------------------

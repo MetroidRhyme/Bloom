@@ -11,6 +11,7 @@ There's no score, no timer, and no way to "lose" quickly - it's just a colorful,
 ## How to play
 
 1. **Grant GPS access** when prompted. The map centers on your location once locked.
+   - First time playing? A short guided tutorial walks you through planting, watering, harvesting, and buying your next seed - it speeds up growth just for that one demo flower so you see the whole loop in under a minute. Skippable anytime via the banner's link.
 2. **Tap the ground** near you to plant a seed from your inventory (you start with 3 Common seeds). If you own more than one tier, you'll be asked which to plant.
 3. **Walk back** every so often and tap a growing flower, then tap **Water** once you're close enough.
 4. Watered flowers grow from seed, to sprout, to a single bloom, to a full flourishing cluster over a few real days.

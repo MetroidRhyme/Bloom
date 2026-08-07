@@ -189,7 +189,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.0.0</span>
+      <span id="game-version">v1.1.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -347,6 +347,32 @@
       return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
     }
 
+    // Same six directions Porter uses, paired with hexVerticesPx's edge index
+    // (edge `e`, between vertices e and e+1, borders the neighbor at HEX_NEIGHBORS[e]).
+    var HEX_NEIGHBORS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+
+    // Six corner points (in Leaflet layer-point space) of the hex at (q, r),
+    // used only by the grid-mesh renderer below - plant markers are placed by
+    // lat/lng center (hexCenter), not by these pixel vertices.
+    function hexVerticesPx(q, r) {
+      var verts = [];
+      for (var i = 0; i < 6; i++) {
+        var angle = Math.PI / 3 * i;
+        var lat = (SQ3 / 2 * q + SQ3 * r + Math.sin(angle)) * CELL_LAT_DEG;
+        var lng = (3 / 2 * q + Math.cos(angle)) * CELL_LNG_DEG;
+        verts.push(map.latLngToLayerPoint([lat, lng]));
+      }
+      return verts;
+    }
+    // Cheap cull against gridRenderer's own (padded) bounds, in layer points.
+    function hexOnScreen(verts) {
+      var b = gridRenderer && gridRenderer._bounds;
+      if (!b) return true;
+      return verts.some(function (v) {
+        return v.x >= b.min.x - 4 && v.x <= b.max.x + 4 && v.y >= b.min.y - 4 && v.y <= b.max.y + 4;
+      });
+    }
+
     // ---------------------------------------------------------------------
     //  GROWTH ENGINE
     //  Fully timestamp-derived so it stays correct across long offline gaps
@@ -500,7 +526,10 @@
         html: '<div style="background:#1a3050;border:3px solid #fff;border-radius:50%;width:40px;height:40px;' +
           'display:flex;align-items:center;justify-content:center;font-size:22px;' +
           'box-shadow:0 2px 12px rgba(0,0,0,0.35)">\u{1F6B6}</div>',
-        iconSize: [40, 40], iconAnchor: [20, 20]
+        // className:'' clears Leaflet's default .leaflet-div-icon box (a white
+        // square with a border) - without it that box shows behind the round
+        // marker. makePlantIcon already does this; this one was missed.
+        iconSize: [40, 40], iconAnchor: [20, 20], className: ''
       });
     }
 
@@ -513,8 +542,69 @@
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       subdomains: 'abcd', maxZoom: 20
     }).addTo(map);
+
+    // Pane ladder (bottom -> top): tilePane 200 < gridPane 350 (hex mesh) <
+    // overlayPane 400 (range circle, Leaflet default) < markerPane 600 (plants/
+    // user, Leaflet default). Much shorter than Porter's ladder since Bloom has
+    // no zones or connection lines to layer in between.
+    map.createPane('gridPane').style.zIndex = 350;
+    var gridRenderer = L.canvas({ pane: 'gridPane', padding: 1.0 });
+    gridRenderer.addTo(map);
+
     map.setView([20, 0], 3);
     map.on('dragstart', function () { state.following = false; });
+
+    // Hex mesh is only drawn once zoomed in this close - below it the hex count
+    // in view would grow into the thousands (this is a full-viewport mesh, not
+    // a bounded zone like Porter's), so it simply fades away on a wide view
+    // rather than costing a redraw budget to render or read.
+    var GRID_MIN_ZOOM = 17;
+    var GRID_MAX_HEXES = 3000; // safety cap in case the viewport math overshoots
+
+    var _gridRedrawPending = false;
+    function scheduleGridRedraw() {
+      if (_gridRedrawPending) return;
+      _gridRedrawPending = true;
+      requestAnimationFrame(function () { _gridRedrawPending = false; renderGridMesh(); });
+    }
+
+    // Soft outline mesh over the current viewport so planting spots read at a
+    // glance. Every edge is shared by exactly two hexes; only drawing edge
+    // indices 0-2 of each hex (see HEX_NEIGHBORS / hexVerticesPx) still covers
+    // every edge exactly once, so there's no dedup pass and no doubled lines.
+    function renderGridMesh() {
+      if (!gridRenderer._ctx || !gridRenderer._bounds) return;
+      var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
+      ctx.clearRect(b.min.x, b.min.y, sz.x, sz.y);
+      if (map.getZoom() < GRID_MIN_ZOOM) return;
+
+      var vb = map.getBounds().pad(0.25);
+      var corners = [
+        latLngToHex(vb.getSouth(), vb.getWest()), latLngToHex(vb.getNorth(), vb.getEast()),
+        latLngToHex(vb.getSouth(), vb.getEast()), latLngToHex(vb.getNorth(), vb.getWest())
+      ];
+      var minQ = Math.min.apply(null, corners.map(function (c) { return c.q; })) - 1;
+      var maxQ = Math.max.apply(null, corners.map(function (c) { return c.q; })) + 1;
+      var minR = Math.min.apply(null, corners.map(function (c) { return c.r; })) - 1;
+      var maxR = Math.max.apply(null, corners.map(function (c) { return c.r; })) + 1;
+      if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_HEXES) return;
+
+      ctx.strokeStyle = 'rgba(70,120,80,0.32)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (var q = minQ; q <= maxQ; q++) {
+        for (var r = minR; r <= maxR; r++) {
+          var verts = hexVerticesPx(q, r);
+          if (!hexOnScreen(verts)) continue;
+          for (var e = 0; e < 3; e++) {
+            ctx.moveTo(verts[e].x, verts[e].y);
+            ctx.lineTo(verts[(e + 1) % 6].x, verts[(e + 1) % 6].y);
+          }
+        }
+      }
+      ctx.stroke();
+    }
+    map.on('moveend zoomend viewreset resize', scheduleGridRedraw);
 
     var plantMarkers = {};
     function renderPlants() {
@@ -599,6 +689,10 @@
         CELL_LNG_DEG = CELL_LAT_DEG / Math.cos(state.userPos.lat * Math.PI / 180);
         localStorage.setItem('bloom_cell_lng', CELL_LNG_DEG);
       }
+      // The map.setView() a moment ago in onLocationUpdate already fired
+      // 'moveend' (and so a grid redraw) before CELL_LNG_DEG was corrected
+      // above - redraw once more now so the very first mesh isn't stretched.
+      scheduleGridRedraw();
       vibrate(30);
       tickPlants();
       if (!state.seenWelcome) openWelcome();

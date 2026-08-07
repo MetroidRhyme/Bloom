@@ -257,7 +257,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.3.0</span>
+      <span id="game-version">v1.3.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -269,7 +269,7 @@
   <div id="menu-dropdown">
     <button onclick="toggleMenu();openShop()">Seed Shop</button>
     <button onclick="openHowToPlay()">How to Play</button>
-    <button class="danger" onclick="onResetGarden()">Reset Garden</button>
+    <button class="danger" onclick="onResetSave()">Reset Save</button>
   </div>
 
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
@@ -399,7 +399,7 @@
     // A factory, not a shared object literal - state.seeds gets mutated in
     // place by plantSeedAt/buySeed, so every caller needs its own fresh copy
     // (a shared literal here would let gameplay silently mutate the "starter"
-    // values themselves, corrupting what Reset Garden restores).
+    // values themselves, corrupting what a fresh/reset save starts with).
     function starterSeeds() { return { common: 3, rare: 0, prized: 0 }; }
 
     function loadState() {
@@ -1026,20 +1026,17 @@
       }
     }
 
-    function onResetGarden() {
+    // Wipes the whole save (garden, seeds, Petals, stats, and the welcome/
+    // tutorial flags) and reloads, rather than resetting each state field by
+    // hand - that way a full reset can never drift out of sync as new state
+    // fields get added later (it always matches whatever loadState()'s
+    // defaults are, since a reload with no saved key runs the exact same
+    // brand-new-player path, tutorial included).
+    function onResetSave() {
       toggleMenu();
-      if (!confirm('Clear your whole garden, seeds, and Petals? This cannot be undone.')) return;
-      state.plants = {};
-      state.stats = { planted: 0, bloomed: 0, flourished: 0, lost: 0, kept: 0, sold: 0, earned: 0 };
-      state.seeds = starterSeeds();
-      state.currency = 0;
-      saveState();
-      renderPlants();
-      updateHUD();
-      updateCurrencyPill();
-      closePlantPanel();
-      closeShop();
-      toast('Garden cleared. Fresh soil and starter seeds, ready when you are.');
+      if (!confirm('Erase your save completely - garden, seeds, Petals, and all progress? This cannot be undone.')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      location.reload();
     }
 
     function openWelcome() {

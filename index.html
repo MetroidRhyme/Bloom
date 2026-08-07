@@ -59,6 +59,13 @@
     #gps-status.locked { background: rgba(76,175,109,0.16); color: var(--green-dark); }
     #gps-status.err { background: rgba(240,169,58,0.22); color: #a06a00; }
 
+    #currency-pill {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.3px; padding: 5px 10px;
+      border-radius: 999px; background: rgba(240,169,58,0.16); color: #a06a00;
+      white-space: nowrap; cursor: pointer;
+    }
+    #currency-pill:active { background: rgba(240,169,58,0.26); }
+
     #top-menu-btn {
       width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--panel-border);
       background: rgba(255,255,255,0.9); color: var(--text); font-size: 18px; cursor: pointer;
@@ -137,6 +144,44 @@
     }
     #plant-action-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
 
+    /* Hidden by default - renderPlantPanel shows this only once a plant has
+       reached single-bloom or flourishing stage and the player is in range. */
+    #harvest-row { display: none; gap: 10px; margin-top: 10px; }
+    .harvest-btn {
+      flex: 1; padding: 13px; border-radius: 14px; font-size: 14px; font-weight: 800;
+      cursor: pointer; box-shadow: var(--shadow-sm);
+    }
+    .keep-btn { background: #fff; color: var(--green-dark); border: 2px solid var(--green); }
+    .sell-btn { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; border: none; }
+
+    /* ================= SHOP PANEL ================= */
+    #shop-panel {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100;
+      background: var(--panel-bg); border-radius: 24px 24px 0 0; box-shadow: var(--shadow);
+      padding: 10px 22px calc(22px + env(safe-area-inset-bottom, 0px));
+      transform: translateY(105%);
+      transition: transform 0.28s ease;
+    }
+    #shop-panel.open { transform: translateY(0); }
+    #shop-close-btn {
+      position: absolute; top: 14px; right: 16px; width: 30px; height: 30px; border-radius: 50%;
+      border: none; background: rgba(0,0,0,0.05); font-size: 17px; color: var(--text-dim); cursor: pointer;
+    }
+    #shop-title { text-align: center; font-size: 18px; font-weight: 800; margin: 4px 0 2px; }
+    #shop-balance { text-align: center; font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    .shop-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 14px; border: 2px solid; border-radius: 16px; margin-bottom: 10px;
+    }
+    .shop-row-name { font-size: 14.5px; font-weight: 800; }
+    .shop-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+    .shop-buy-btn {
+      flex-shrink: 0; padding: 10px 16px; border: none; border-radius: 12px;
+      font-size: 13.5px; font-weight: 800; cursor: pointer; color: #fff;
+      background: linear-gradient(90deg, var(--green), var(--green-dark)); box-shadow: var(--shadow-sm);
+    }
+    .shop-buy-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
+
     /* ================= MODAL ================= */
     #modal-overlay {
       position: fixed; inset: 0; z-index: 1500; background: rgba(30,25,15,0.4);
@@ -150,6 +195,13 @@
     #modal-title { font-size: 20px; font-weight: 800; margin-bottom: 12px; }
     #modal-body { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 18px; text-align: left; }
     #modal-body p { margin: 0 0 10px; }
+    .seed-pick-list { display: flex; flex-direction: column; gap: 10px; }
+    .seed-pick-btn {
+      display: flex; align-items: center; justify-content: space-between; width: 100%;
+      padding: 13px 16px; border: 2px solid; border-radius: 14px; background: #fff;
+      font-size: 14.5px; font-weight: 800; cursor: pointer;
+    }
+    .seed-pick-btn span:last-child { color: var(--text-dim); font-weight: 700; }
     #modal-body p:last-child { margin-bottom: 0; }
     #modal-ok-btn {
       display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
@@ -189,15 +241,17 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.1.1</span>
+      <span id="game-version">v1.2.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
+      <span id="currency-pill" onclick="openShop()" title="Open the Seed Shop">&#x1F338; 0</span>
       <button id="top-menu-btn" onclick="toggleMenu()">&#8942;</button>
     </div>
   </div>
 
   <div id="menu-dropdown">
+    <button onclick="toggleMenu();openShop()">Seed Shop</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetGarden()">Reset Garden</button>
   </div>
@@ -218,6 +272,18 @@
     <div id="water-bar-label">&nbsp;</div>
     <div id="plant-status-line">&nbsp;</div>
     <button id="plant-action-btn">Water</button>
+    <div id="harvest-row">
+      <button id="keep-btn" class="harvest-btn keep-btn">Keep &#x1F33C;</button>
+      <button id="sell-btn" class="harvest-btn sell-btn">Sell</button>
+    </div>
+  </div>
+
+  <div id="shop-panel">
+    <div class="panel-handle"></div>
+    <button id="shop-close-btn" onclick="closeShop()">&times;</button>
+    <div id="shop-title">Seed Shop</div>
+    <div id="shop-balance">&nbsp;</div>
+    <div id="shop-rows"></div>
   </div>
 
   <div id="modal-overlay">
@@ -270,18 +336,37 @@
     var GROWTH_THRESHOLDS = [0, 8 * HOUR, 20 * HOUR, 40 * HOUR];
     var STAGE_LABELS = ['Seed', 'Sprout', 'In Bloom', 'Flourishing'];
 
+    // `tier` (0/1/2) maps each species onto TIERS below - it's what a seed's
+    // price/sell value and the shop actually key off, species itself is just
+    // which flower you get within that tier.
     var SPECIES = [
-      { key: 'sunflower',  emoji: '\u{1F33B}', name: 'Sunflower', color: '#ffd23f' },
-      { key: 'tulip',      emoji: '\u{1F337}', name: 'Tulip',     color: '#ff7fae' },
-      { key: 'daisy',      emoji: '\u{1F33C}', name: 'Daisy',     color: '#fff2a8' },
-      { key: 'rose',       emoji: '\u{1F339}', name: 'Rose',      color: '#f0637f' },
-      { key: 'hibiscus',   emoji: '\u{1F33A}', name: 'Hibiscus',  color: '#ff8aa8' },
-      { key: 'blossom',    emoji: '\u{1F338}', name: 'Blossom',   color: '#ffc7e0' },
-      { key: 'lotus',      emoji: '\u{1FAB7}', name: 'Lotus',     color: '#caa8f5' }
+      { key: 'sunflower',  emoji: '\u{1F33B}', name: 'Sunflower', color: '#ffd23f', tier: 0 },
+      { key: 'tulip',      emoji: '\u{1F337}', name: 'Tulip',     color: '#ff7fae', tier: 0 },
+      { key: 'daisy',      emoji: '\u{1F33C}', name: 'Daisy',     color: '#fff2a8', tier: 0 },
+      { key: 'hibiscus',   emoji: '\u{1F33A}', name: 'Hibiscus',  color: '#ff8aa8', tier: 1 },
+      { key: 'blossom',    emoji: '\u{1F338}', name: 'Blossom',   color: '#ffc7e0', tier: 1 },
+      { key: 'rose',       emoji: '\u{1F339}', name: 'Rose',      color: '#f0637f', tier: 2 },
+      { key: 'lotus',      emoji: '\u{1FAB7}', name: 'Lotus',     color: '#caa8f5', tier: 2 }
     ];
     function speciesFor(key) {
       for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return SPECIES[i];
       return SPECIES[0];
+    }
+    function speciesOfTier(tierIdx) { return SPECIES.filter(function (s) { return s.tier === tierIdx; }); }
+
+    // Seed cost and harvest value by tier. sellSingle is a near-breakeven
+    // price on purpose (roughly the seed's own cost) so cashing out early
+    // isn't clearly "correct" - sellCluster is the real payoff, rewarding
+    // patience (and a couple of watering visits) without punishing anyone
+    // who harvests early or just wants to Keep a flower instead of selling.
+    var TIERS = [
+      { key: 'common', name: 'Common', color: '#4caf6d', seedCost: 10, sellSingle: 8,  sellCluster: 18 },
+      { key: 'rare',   name: 'Rare',   color: '#4aa3ff', seedCost: 30, sellSingle: 25, sellCluster: 55 },
+      { key: 'prized', name: 'Prized', color: '#f0a93a', seedCost: 70, sellSingle: 60, sellCluster: 130 }
+    ];
+    function harvestValue(p, stage) {
+      var t = TIERS[speciesFor(p.species).tier];
+      return stage >= 3 ? t.sellCluster : t.sellSingle;
     }
 
     // ---------------------------------------------------------------------
@@ -290,13 +375,21 @@
     //  Bloom's whole state is just a dictionary of plants plus a few stats.
     // ---------------------------------------------------------------------
     var STORAGE_KEY = 'bloom_state_v1';
+    // A factory, not a shared object literal - state.seeds gets mutated in
+    // place by plantSeedAt/buySeed, so every caller needs its own fresh copy
+    // (a shared literal here would let gameplay silently mutate the "starter"
+    // values themselves, corrupting what Reset Garden restores).
+    function starterSeeds() { return { common: 3, rare: 0, prized: 0 }; }
 
     function loadState() {
       var def = {
         plants: {},
-        stats: { planted: 0, bloomed: 0, flourished: 0, lost: 0 },
+        stats: { planted: 0, bloomed: 0, flourished: 0, lost: 0, kept: 0, sold: 0, earned: 0 },
+        seeds: starterSeeds(),
+        currency: 0,
         following: true,
-        seenWelcome: false
+        seenWelcome: false,
+        tutorialDone: false // brand-new save -> the onboarding tutorial should run
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -305,8 +398,16 @@
         return {
           plants: parsed.plants || {},
           stats: Object.assign({}, def.stats, parsed.stats || {}),
+          // A save that predates seeds/currency (v1.1.x) gets starter seeds
+          // bootstrapped in rather than being left unable to plant anything -
+          // the old free-plant mechanic this replaces never cost seeds.
+          seeds: parsed.seeds || starterSeeds(),
+          currency: typeof parsed.currency === 'number' ? parsed.currency : 0,
           following: parsed.following !== false,
-          seenWelcome: !!parsed.seenWelcome
+          seenWelcome: !!parsed.seenWelcome,
+          // Any save that already exists predates the tutorial - never
+          // interrupt an already-playing garden with onboarding.
+          tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -318,8 +419,8 @@
 
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        plants: state.plants, stats: state.stats,
-        following: state.following, seenWelcome: state.seenWelcome
+        plants: state.plants, stats: state.stats, seeds: state.seeds, currency: state.currency,
+        following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone
       }));
     }
 
@@ -411,9 +512,19 @@
       return d;
     }
 
-    function plantSeedAt(q, r) {
+    // Consumes one seed of the given tier from inventory and plants a random
+    // species from that tier. Callers are expected to have already confirmed
+    // a seed of this tier is actually owned (see attemptPlant/openSeedPicker) -
+    // this only re-checks defensively, it doesn't surface its own error UI.
+    // Returns the new plant's hex key, or null if there was no seed to spend.
+    function plantSeedAt(q, r, tierIdx) {
+      var tier = TIERS[tierIdx], seedKey = tier.key;
+      if (!(state.seeds[seedKey] > 0)) return null;
+      state.seeds[seedKey]--;
+
       var now = Date.now();
-      var species = SPECIES[Math.floor(Math.random() * SPECIES.length)].key;
+      var pool = speciesOfTier(tierIdx);
+      var species = pool[Math.floor(Math.random() * pool.length)].key;
       var c = hexCenter(q, r);
       var key = hexKey(q, r);
       state.plants[key] = {
@@ -425,8 +536,21 @@
       saveState();
       renderPlants();
       updateHUD();
-      toast('\u{1F331} Seed planted! Come back and water it soon.');
+      toast('\u{1F331} ' + tier.name + ' seed planted! Come back and water it soon.');
       vibrate(20);
+      return key;
+    }
+
+    // Decides which seed to plant on an empty, in-range hex: skips the picker
+    // entirely if the player only owns one tier (the common case stays a
+    // single tap, same as before seeds existed), asks when they own more than
+    // one, and points them at the shop when they're out.
+    function attemptPlant(q, r) {
+      var owned = TIERS.map(function (t, i) { return { i: i, t: t, count: state.seeds[t.key] || 0 }; })
+        .filter(function (o) { return o.count > 0; });
+      if (owned.length === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
+      if (owned.length === 1) { plantSeedAt(q, r, owned[0].i); return; }
+      openSeedPicker(q, r, owned);
     }
 
     function waterPlant(key) {
@@ -442,6 +566,38 @@
       updateHUD();
       toast('\u{1F4A7} Watered!');
       vibrate(15);
+    }
+
+    // Picks a fully-grown plant (single bloom or flourishing cluster) whether
+    // to Keep (a free personal-collection tally, no currency) or Sell (clears
+    // the hex for Petals via harvestValue). Either way the hex frees up for
+    // replanting - "harvesting" always removes the plant from the ground.
+    function harvestPlant(key, sell) {
+      var p = state.plants[key];
+      if (!p) return;
+      var d = recomputePlant(p, Date.now());
+      var species = speciesFor(p.species);
+      var label = species.name + (d.stage >= 3 ? ' cluster' : '');
+      delete state.plants[key];
+
+      if (sell) {
+        var val = harvestValue(p, d.stage);
+        state.currency += val;
+        state.stats.sold++;
+        state.stats.earned += val;
+        toast('Sold your ' + label + ' for ' + val + ' \u{1F338}');
+      } else {
+        state.stats.kept++;
+        toast('Kept your ' + label + ' \u{1F33C}');
+      }
+
+      saveState();
+      renderPlants();
+      updateHUD();
+      updateCurrencyPill();
+      closePlantPanel();
+      vibrate(20);
+      return sell ? harvestValue(p, d.stage) : 0; // used by the tutorial's bonus top-up
     }
 
     // Runs on load and every minute: advances growth, tracks first-time
@@ -622,7 +778,7 @@
         toast('Walk closer to plant a seed here \u{1F6B6}');
         return;
       }
-      plantSeedAt(h.q, h.r);
+      attemptPlant(h.q, h.r);
     });
 
     // ---------------------------------------------------------------------
@@ -734,6 +890,7 @@
     }
 
     function openPlantPanel(key) {
+      closeShop(); // the shop and plant panel are both bottom sheets - only one at a time
       viewingKey = key;
       renderPlantPanel(key);
       document.getElementById('plant-panel').classList.add('open');
@@ -779,6 +936,25 @@
         btn.textContent = 'Walk closer to water';
         btn.onclick = null;
       }
+
+      // Harvesting (Keep or Sell) only shows up once a plant has something to
+      // harvest - single bloom or flourishing cluster - and only when close
+      // enough to act on it, same proximity rule as watering.
+      var harvestRow = document.getElementById('harvest-row');
+      if (d.stage >= 2 && inRange) {
+        harvestRow.style.display = 'flex';
+        document.getElementById('sell-btn').textContent = 'Sell ' + harvestValue(p, d.stage) + ' \u{1F338}';
+        document.getElementById('sell-btn').onclick = function () { onHarvestClick(key, true); };
+        document.getElementById('keep-btn').onclick = function () { onHarvestClick(key, false); };
+      } else {
+        harvestRow.style.display = 'none';
+      }
+    }
+
+    // Thin wrapper so the tutorial (see TUTORIAL section) can observe a real
+    // harvest without renderPlantPanel needing to know it exists.
+    function onHarvestClick(key, sell) {
+      harvestPlant(key, sell);
     }
 
     // ---------------------------------------------------------------------
@@ -823,25 +999,31 @@
 
     function onResetGarden() {
       toggleMenu();
-      if (!confirm('Clear your whole garden? This cannot be undone.')) return;
+      if (!confirm('Clear your whole garden, seeds, and Petals? This cannot be undone.')) return;
       state.plants = {};
-      state.stats = { planted: 0, bloomed: 0, flourished: 0, lost: 0 };
+      state.stats = { planted: 0, bloomed: 0, flourished: 0, lost: 0, kept: 0, sold: 0, earned: 0 };
+      state.seeds = starterSeeds();
+      state.currency = 0;
       saveState();
       renderPlants();
       updateHUD();
+      updateCurrencyPill();
       closePlantPanel();
-      toast('Garden cleared. Fresh soil, ready when you are.');
+      closeShop();
+      toast('Garden cleared. Fresh soil and starter seeds, ready when you are.');
     }
 
     function openWelcome() {
+      resetModalChrome();
       document.getElementById('modal-title').textContent = 'Welcome to Bloom';
       document.getElementById('modal-body').innerHTML =
-        '<p>Bloom gives you a gentle reason to get out and walk. Plant seeds in the ground near you, ' +
-        'then swing back by every so often to water them.</p>' +
-        '<p>Seeds grow into a single flower, then a whole flourishing cluster, over a few real days. ' +
-        'Leave them too thirsty for too long and they\'ll wilt - water always brings them back, ' +
-        'unless they\'re left dry for a very long while.</p>' +
-        '<p>No score, no clock, no rush. Just walk your usual routes and watch your neighborhood fill with color.</p>';
+        '<p>Bloom gives you a gentle reason to get out and walk. Plant one of your starter seeds in the ' +
+        'ground near you, then swing back by every so often to water it.</p>' +
+        '<p>It grows into a single flower, then a whole flourishing cluster, over a few real days. Harvest ' +
+        'it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on seeds for rarer, ' +
+        'more valuable flowers.</p>' +
+        '<p>Leave a flower too thirsty for too long and it\'ll wilt - water always brings it back, unless ' +
+        'it\'s left dry for a very long while. No score, no clock, no rush.</p>';
       document.getElementById('modal-ok-btn').textContent = "Let's grow! \u{1F331}";
       document.getElementById('modal-ok-btn').onclick = function () {
         state.seenWelcome = true; saveState(); closeModal();
@@ -851,21 +1033,101 @@
 
     function openHowToPlay() {
       toggleMenu();
+      resetModalChrome();
       document.getElementById('modal-title').textContent = 'How to Play';
       var s = state.stats;
       document.getElementById('modal-body').innerHTML =
-        '<p><b>Plant</b> - tap the ground within a couple hexes of you to plant a random seed.</p>' +
+        '<p><b>Plant</b> - tap the ground within a couple hexes of you to plant a seed. Only asks which ' +
+        'tier if you own more than one.</p>' +
         '<p><b>Water</b> - tap a growing flower, then walk close enough for the Water button to light up.</p>' +
-        '<p><b>Grow</b> - watered plants move from seed to sprout to a single bloom to a full flourishing cluster over a few days.</p>' +
-        '<p><b>Don\'t forget them</b> - flowers left dry for a long stretch wilt, then eventually return to the earth. A watering visit any time before that brings them right back.</p>' +
+        '<p><b>Grow</b> - watered plants move from seed to sprout to a single bloom to a full flourishing ' +
+        'cluster over a few days.</p>' +
+        '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and Keep it for ' +
+        'yourself or Sell it for Petals \u{1F338} - clusters sell for much more than a single bloom.</p>' +
+        '<p><b>Shop</b> - tap your Petals total (top right) to buy Common, Rare, or Prized seeds. Rarer ' +
+        'tiers cost more but sell for a lot more too.</p>' +
+        '<p><b>Don\'t forget them</b> - flowers left dry for a long stretch wilt, then eventually return to ' +
+        'the earth. A watering visit any time before that brings them right back.</p>' +
         '<p style="color:var(--text-dim);margin-top:14px">So far: ' + s.planted + ' planted &bull; ' +
-        s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished</p>';
+        s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished &bull; ' + s.sold + ' sold for ' +
+        s.earned + ' Petals &bull; ' + s.kept + ' kept</p>';
       document.getElementById('modal-ok-btn').textContent = 'Got it';
       document.getElementById('modal-ok-btn').onclick = closeModal;
       document.getElementById('modal-overlay').classList.add('open');
     }
 
+    // Seed-tier picker for planting when the player owns more than one tier
+    // (see attemptPlant). Reuses the same generic modal as Welcome/How to
+    // Play/etc, just with the OK button hidden in favor of one button per tier.
+    function openSeedPicker(q, r, owned) {
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Choose a Seed';
+      document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
+        owned.map(function (o) {
+          return '<button class="seed-pick-btn" style="border-color:' + o.t.color + '" onclick="plantSeedAt(' +
+            q + ',' + r + ',' + o.i + ');closeModal();"><span style="color:' + o.t.color + '">' + o.t.name +
+            '</span><span>x' + o.count + '</span></button>';
+        }).join('') + '</div>';
+      document.getElementById('modal-ok-btn').style.display = 'none';
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // Modals normally show one full-width OK button; the seed picker hides it
+    // in favor of its own buttons. Called at the top of every other opener so
+    // that state doesn't leak between modal uses.
+    function resetModalChrome() { document.getElementById('modal-ok-btn').style.display = ''; }
+
     function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+    // Tapping the dimmed backdrop (not the card itself) closes whatever
+    // modal is open - mainly so the seed picker has a way to back out
+    // without planting, since it hides the usual OK/close button.
+    document.getElementById('modal-overlay').addEventListener('click', function (e) {
+      if (e.target.id === 'modal-overlay') closeModal();
+    });
+
+    // ---------------------------------------------------------------------
+    //  SHOP
+    // ---------------------------------------------------------------------
+    function updateCurrencyPill() {
+      document.getElementById('currency-pill').innerHTML = '\u{1F338} ' + state.currency;
+    }
+
+    function renderShopRows() {
+      document.getElementById('shop-balance').innerHTML = 'You have <b>' + state.currency + '</b> \u{1F338} Petals';
+      document.getElementById('shop-rows').innerHTML = TIERS.map(function (t, i) {
+        var owned = state.seeds[t.key] || 0;
+        var afford = state.currency >= t.seedCost;
+        return '<div class="shop-row" style="border-color:' + t.color + '">' +
+          '<div class="shop-row-info">' +
+          '<div class="shop-row-name" style="color:' + t.color + '">' + t.name + ' Seed</div>' +
+          '<div class="shop-row-meta">You have ' + owned + ' &bull; sells ' + t.sellSingle + '-' +
+          t.sellCluster + ' \u{1F338}</div></div>' +
+          '<button class="shop-buy-btn"' + (afford ? '' : ' disabled') + ' onclick="buySeed(' + i + ')">' +
+          t.seedCost + ' \u{1F338}</button></div>';
+      }).join('');
+    }
+
+    function buySeed(i) {
+      var t = TIERS[i];
+      if (state.currency < t.seedCost) return;
+      state.currency -= t.seedCost;
+      state.seeds[t.key] = (state.seeds[t.key] || 0) + 1;
+      saveState();
+      renderShopRows();
+      updateCurrencyPill();
+      toast('Bought a ' + t.name + ' seed \u{1F331}');
+      vibrate(15);
+    }
+
+    // Opened both from the menu ("Seed Shop") and by tapping the currency
+    // pill directly - callers handle closing the menu dropdown themselves
+    // (see the menu button's onclick) so this doesn't force it open/closed.
+    function openShop() {
+      closePlantPanel(); // the shop and plant panel are both bottom sheets - only one at a time
+      renderShopRows();
+      document.getElementById('shop-panel').classList.add('open');
+    }
+    function closeShop() { document.getElementById('shop-panel').classList.remove('open'); }
 
     function toast(msg) {
       var c = document.getElementById('toast-container');
@@ -889,6 +1151,7 @@
     // ---------------------------------------------------------------------
     tickPlants();               // recompute any growth/wilt accrued while closed
     updateHUD();
+    updateCurrencyPill();
     setInterval(tickPlants, 60000);
   </script>
 </body>

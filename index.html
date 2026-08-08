@@ -257,7 +257,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.4.0</span>
+      <span id="game-version">v1.5.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -345,10 +345,6 @@
     var CELL_LNG_DEG = parseFloat(localStorage.getItem('bloom_cell_lng')) || CELL_LAT_DEG;
 
     var PLANT_RANGE_HEX = 2;   // how close (in hexes) you must be to plant or water
-    // Visual-only radius for the glow circle around the player; derived from
-    // the same hex lattice so it roughly matches the real (hex-distance)
-    // interaction range without needing a second magic number.
-    var RANGE_METERS = PLANT_RANGE_HEX * CELL_LAT_DEG * 111111 * SQ3;
 
     var WATER_DURATION_MS = 48 * HOUR;  // full water drains to empty over 2 days
     var GRACE_MS          = 24 * HOUR;  // then it can sit dry a day before wilting
@@ -356,6 +352,16 @@
     // growthMs thresholds for [seed, sprout, single bloom, flourishing cluster]
     var GROWTH_THRESHOLDS = [0, 8 * HOUR, 20 * HOUR, 40 * HOUR];
     var STAGE_LABELS = ['Seed', 'Sprout', 'In Bloom', 'Flourishing'];
+
+    // Wildflowers are ambient, unplanted flowers scattered across the whole
+    // map for free - a small "walking around pays off" bonus on top of your
+    // own garden. They're placed deterministically by hex position (see
+    // wildflowerForBlock) rather than stored for the whole world, so the
+    // world doesn't need a database - any client derives the same spots.
+    var WILD_BLOCK_HEX   = 6;        // avg spacing: one candidate spot per NxN hex block
+    var WILD_SPAWN_CHANCE = 0.45;    // not every block actually gets one - keeps it "random"
+    var WILD_SCAN_RADIUS  = 4;       // how many blocks out from the player to keep populated
+    var WILD_RESPAWN_MS   = 20 * HOUR; // cooldown before a picked/died spot can regrow
 
     // `tier` (0/1/2) maps each species onto TIERS below - it's what a seed's
     // price/sell value and the shop actually key off, species itself is just
@@ -410,7 +416,8 @@
         currency: 0,
         following: true,
         seenWelcome: false,
-        tutorialDone: false // brand-new save -> the onboarding tutorial should run
+        tutorialDone: false, // brand-new save -> the onboarding tutorial should run
+        wildRemoved: {} // key -> timestamp last picked/died, for wildflower respawn cooldown
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -428,7 +435,8 @@
           seenWelcome: !!parsed.seenWelcome,
           // Any save that already exists predates the tutorial - never
           // interrupt an already-playing garden with onboarding.
-          tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true
+          tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true,
+          wildRemoved: parsed.wildRemoved || {}
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -441,7 +449,8 @@
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, stats: state.stats, seeds: state.seeds, currency: state.currency,
-        following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone
+        following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
+        wildRemoved: state.wildRemoved
       }));
     }
 
@@ -522,6 +531,17 @@
       p.growthMs += added;
       p.lastGrowthCheckAt = now;
 
+      // Wildflowers are a free ambient find, not something planted - they're
+      // only ever worth the minimum (see harvestValue/tier 0) and cap at a
+      // single bloom on their own. Only an actual watering visit (see
+      // waterPlant's wildWateredOnce) lifts the cap so it can go on to become
+      // a full cluster; left untouched it sits at single bloom until the
+      // normal wilt/death clock below quietly takes it, so it never reaches
+      // a cluster without a visit.
+      if (p.wild && !p.wildWateredOnce) {
+        p.growthMs = Math.min(p.growthMs, GROWTH_THRESHOLDS[2]);
+      }
+
       var dryMs = Math.max(0, now - p.lastWateredAt - WATER_DURATION_MS);
       var d = {
         waterFrac: Math.max(0, Math.min(1, 1 - (now - p.lastWateredAt) / WATER_DURATION_MS)),
@@ -580,6 +600,7 @@
       var now = Date.now();
       recomputePlant(p, now);   // accrue any growth earned before the dry spell
       p.lastWateredAt = now;
+      if (p.wild) p.wildWateredOnce = true; // lifts the single-bloom cap, see recomputePlant
       recomputePlant(p, now);   // refresh derived state for immediate UI feedback
       saveState();
       renderPlants();
@@ -601,6 +622,9 @@
       var species = speciesFor(p.species);
       var label = species.name + (d.stage >= 3 ? ' cluster' : '');
       delete state.plants[key];
+      // Picking a wildflower clears its spot for a while rather than letting
+      // it instantly regrow in the same place - see spawnWildflowersNear.
+      if (p.wild) state.wildRemoved[key] = Date.now();
 
       if (sell) {
         var val = harvestValue(p, d.stage);
@@ -630,9 +654,20 @@
       Object.keys(state.plants).forEach(function (key) {
         var p = state.plants[key];
         var d = recomputePlant(p, now);
-        if (d.dead) { delete state.plants[key]; state.stats.lost++; removed++; return; }
+        if (d.dead) {
+          delete state.plants[key];
+          if (p.wild) state.wildRemoved[key] = now; // see spawnWildflowersNear
+          state.stats.lost++; removed++; return;
+        }
         if (d.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
         if (d.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+      });
+      // wildRemoved only needs to remember spots inside their respawn
+      // cooldown - once a cooldown has fully elapsed the entry has no more
+      // effect on spawnWildflowersNear, so drop it rather than let this
+      // dictionary grow forever as the player wanders.
+      Object.keys(state.wildRemoved).forEach(function (key) {
+        if (now - state.wildRemoved[key] >= WILD_RESPAWN_MS) delete state.wildRemoved[key];
       });
       saveState();
       renderPlants();
@@ -643,6 +678,70 @@
           ? 'A flower quietly returned to the earth. \u{1F90D}'
           : removed + ' flowers quietly returned to the earth. \u{1F90D}');
       }
+    }
+
+    // ---------------------------------------------------------------------
+    //  WILDFLOWERS
+    //  Free, unplanted flowers scattered across the whole map so a walk is
+    //  never *only* about your own garden. Placement is a pure function of
+    //  hex position (see wildflowerForBlock) rather than anything stored -
+    //  the world doesn't need generating or remembering, only the plant's
+    //  own growth/water state (in state.plants, same as anything planted)
+    //  and, briefly, when a spot was last cleared (state.wildRemoved).
+    // ---------------------------------------------------------------------
+
+    // Cheap deterministic 0..1 hash of two integers - same inputs always
+    // produce the same output, which is what lets every client agree on
+    // where wildflowers are without the world being simulated anywhere.
+    function hash01(x, y) {
+      var h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+      return h - Math.floor(h);
+    }
+
+    // Decides, for one WILD_BLOCK_HEX x WILD_BLOCK_HEX block of hexes, both
+    // whether it holds a wildflower at all and (if so) exactly which hex and
+    // species - always the same answer for the same block, so a spot doesn't
+    // shift around or duplicate as the player wanders in and out of range.
+    function wildflowerForBlock(bq, br) {
+      if (hash01(bq * 3.1 + 0.13, br * 7.7 - 0.42) > WILD_SPAWN_CHANCE) return null;
+      var offQ = Math.floor(hash01(bq * 17.3 + 1, br * 13.9 + 2) * WILD_BLOCK_HEX);
+      var offR = Math.floor(hash01(bq * 29.7 + 3, br * 19.1 + 4) * WILD_BLOCK_HEX);
+      var q = bq * WILD_BLOCK_HEX + offQ, r = br * WILD_BLOCK_HEX + offR;
+      // Common tier only - wildflowers are always the minimum-value flowers
+      // (see harvestValue), never rare/prized, no matter how they're grown.
+      var pool = speciesOfTier(0);
+      var species = pool[Math.floor(hash01(q * 5.3 + 9, r * 11.9 + 6) * pool.length)].key;
+      return { q: q, r: r, species: species };
+    }
+
+    // Populates any missing wildflowers within WILD_SCAN_RADIUS blocks of
+    // hex (q, r) - called whenever the player's hex changes. Skips hexes
+    // that are already occupied (planted or wild) and spots still on their
+    // wildRemoved cooldown. Returns true if anything was actually added, so
+    // callers only need to save/re-render when something changed.
+    function spawnWildflowersNear(q, r) {
+      var bq0 = Math.floor(q / WILD_BLOCK_HEX), br0 = Math.floor(r / WILD_BLOCK_HEX);
+      var now = Date.now(), changed = false;
+      for (var dbq = -WILD_SCAN_RADIUS; dbq <= WILD_SCAN_RADIUS; dbq++) {
+        for (var dbr = -WILD_SCAN_RADIUS; dbr <= WILD_SCAN_RADIUS; dbr++) {
+          if (hexDist(0, 0, dbq, dbr) > WILD_SCAN_RADIUS) continue;
+          var w = wildflowerForBlock(bq0 + dbq, br0 + dbr);
+          if (!w) continue;
+          var key = hexKey(w.q, w.r);
+          if (state.plants[key]) continue;
+          var removedAt = state.wildRemoved[key];
+          if (removedAt && now - removedAt < WILD_RESPAWN_MS) continue;
+          var c = hexCenter(w.q, w.r);
+          state.plants[key] = {
+            q: w.q, r: w.r, lat: c.lat, lng: c.lng, species: w.species,
+            plantedAt: now, lastWateredAt: now, growthMs: 0, lastGrowthCheckAt: now,
+            reachedBloom: false, reachedFlourish: false,
+            wild: true, wildWateredOnce: false
+          };
+          changed = true;
+        }
+      }
+      return changed;
     }
 
     // ---------------------------------------------------------------------
@@ -725,12 +824,16 @@
     }).addTo(map);
 
     // Pane ladder (bottom -> top): tilePane 200 < gridPane 350 (hex mesh) <
-    // overlayPane 400 (range circle, Leaflet default) < markerPane 600 (plants/
-    // user, Leaflet default). Much shorter than Porter's ladder since Bloom has
-    // no zones or connection lines to layer in between.
+    // rangePane 400 (player range highlight) < markerPane 600 (plants/user,
+    // Leaflet default). Much shorter than Porter's ladder since Bloom has no
+    // zones or connection lines to layer in between.
     map.createPane('gridPane').style.zIndex = 350;
     var gridRenderer = L.canvas({ pane: 'gridPane', padding: 1.0 });
     gridRenderer.addTo(map);
+
+    map.createPane('rangePane').style.zIndex = 400;
+    var rangeRenderer = L.canvas({ pane: 'rangePane', padding: 1.0 });
+    rangeRenderer.addTo(map);
 
     map.setView([20, 0], 3);
     map.on('dragstart', function () { state.following = false; });
@@ -787,6 +890,60 @@
     }
     map.on('moveend zoomend viewreset resize', scheduleGridRedraw);
 
+    var _rangeRedrawPending = false;
+    function scheduleRangeRedraw() {
+      if (_rangeRedrawPending) return;
+      _rangeRedrawPending = true;
+      requestAnimationFrame(function () { _rangeRedrawPending = false; renderRangeHex(); });
+    }
+
+    // Draws the player's in-range hexes as a soft green "blob" instead of a
+    // circle: every hex within PLANT_RANGE_HEX of the player's own hex
+    // (userHexQ/userHexR - see the GPS section) gets a light fill, and only
+    // the edges that actually sit on the outside of that blob (i.e. the
+    // neighbor across that edge is out of range) get the harder outline -
+    // shared interior edges between two in-range hexes are never stroked, so
+    // it reads as one solid range shape rather than a honeycomb of borders.
+    function renderRangeHex() {
+      if (!rangeRenderer._ctx || !rangeRenderer._bounds || userHexQ === null) return;
+      var ctx = rangeRenderer._ctx, b = rangeRenderer._bounds, sz = b.getSize();
+      ctx.clearRect(b.min.x, b.min.y, sz.x, sz.y);
+
+      var hexes = [];
+      for (var dq = -PLANT_RANGE_HEX; dq <= PLANT_RANGE_HEX; dq++) {
+        for (var dr = -PLANT_RANGE_HEX; dr <= PLANT_RANGE_HEX; dr++) {
+          if (hexDist(0, 0, dq, dr) <= PLANT_RANGE_HEX) hexes.push({ q: userHexQ + dq, r: userHexR + dr });
+        }
+      }
+      var inRange = {};
+      hexes.forEach(function (h) { inRange[hexKey(h.q, h.r)] = true; });
+
+      ctx.fillStyle = 'rgba(76,175,109,0.14)';
+      hexes.forEach(function (h) {
+        var verts = hexVerticesPx(h.q, h.r);
+        ctx.beginPath();
+        verts.forEach(function (v, i) { i === 0 ? ctx.moveTo(v.x, v.y) : ctx.lineTo(v.x, v.y); });
+        ctx.closePath();
+        ctx.fill();
+      });
+
+      ctx.strokeStyle = '#3d8f57';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      hexes.forEach(function (h) {
+        var verts = hexVerticesPx(h.q, h.r);
+        for (var e = 0; e < 6; e++) {
+          var nb = HEX_NEIGHBORS[e];
+          if (!inRange[hexKey(h.q + nb[0], h.r + nb[1])]) {
+            ctx.moveTo(verts[e].x, verts[e].y);
+            ctx.lineTo(verts[(e + 1) % 6].x, verts[(e + 1) % 6].y);
+          }
+        }
+      });
+      ctx.stroke();
+    }
+    map.on('moveend zoomend viewreset resize', scheduleRangeRedraw);
+
     var plantMarkers = {};
     function renderPlants() {
       var seen = {};
@@ -825,12 +982,12 @@
     // ---------------------------------------------------------------------
     //  GPS
     // ---------------------------------------------------------------------
-    // No player marker - only the translucent range circle marks the player,
-    // so it never sits on top of (and hides) a flower planted right next to
-    // them. userHexQ/userHexR is the hex the circle is currently snapped to.
-    var rangeCircle = null, viewingKey = null;
+    // No player marker - only the translucent range highlight marks the
+    // player, so it never sits on top of (and hides) a flower planted right
+    // next to them. userHexQ/userHexR is the hex it's currently snapped to.
+    var viewingKey = null;
     var userHexQ = null, userHexR = null;
-    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var gpsLockedOnce = false;
 
     if (!navigator.geolocation) {
       document.getElementById('gps-status').textContent = 'NO GPS';
@@ -841,24 +998,10 @@
       });
     }
 
-    // Eases the range circle from one hex center to the next over ~450ms
-    // instead of jumping. Only runs on an actual hex change (see
-    // onLocationUpdate), so ordinary GPS jitter within the same hex never
-    // moves the circle at all - that's the real fix for the twitchiness,
-    // this animation just makes real hex-to-hex steps read as movement
-    // rather than a teleport.
-    var _circleAnimRAF = null;
-    function animateCircleTo(fromLat, fromLng, toLat, toLng) {
-      if (_circleAnimRAF) cancelAnimationFrame(_circleAnimRAF);
-      if (reduceMotion) { rangeCircle.setLatLng([toLat, toLng]); return; }
-      var start = performance.now(), dur = 450;
-      function step(now) {
-        var t = Math.min(1, (now - start) / dur);
-        var e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out-quad
-        rangeCircle.setLatLng([fromLat + (toLat - fromLat) * e, fromLng + (toLng - fromLng) * e]);
-        _circleAnimRAF = (t < 1) ? requestAnimationFrame(step) : null;
-      }
-      _circleAnimRAF = requestAnimationFrame(step);
+    // Adds any newly-in-range wildflowers and saves/re-renders only if that
+    // actually changed something - see spawnWildflowersNear.
+    function syncWildflowers(q, r) {
+      if (spawnWildflowersNear(q, r)) { saveState(); renderPlants(); }
     }
 
     function onLocationUpdate(pos) {
@@ -868,22 +1011,26 @@
       // Snap the displayed position to the current hex's center rather than
       // following raw GPS - range checks elsewhere already work in hex
       // distance (hexDist), not raw lat/lng, so this changes nothing about
-      // what counts as "in range", only how steady the circle looks.
+      // what counts as "in range", only how steady the highlight looks.
+      // Ordinary GPS jitter within the same hex never moves or redraws
+      // anything below - only an actual hex-to-hex step does.
       var h = latLngToHex(lat, lng);
       var c = hexCenter(h.q, h.r);
 
-      if (!rangeCircle) {
+      if (!gpsLockedOnce) {
+        gpsLockedOnce = true;
         userHexQ = h.q; userHexR = h.r;
-        rangeCircle = L.circle([c.lat, c.lng], {
-          radius: RANGE_METERS, color: '#4caf6d', weight: 1.5,
-          fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
-        }).addTo(map);
         map.setView([c.lat, c.lng], 17);
+        // onGpsLocked may correct CELL_LNG_DEG (and, with it, userHexQ/R -
+        // see there) on a device's very first-ever lock, before anything
+        // hex-indexed below gets a chance to run on the stale scale.
         onGpsLocked();
+        scheduleRangeRedraw();
+        syncWildflowers(userHexQ, userHexR);
       } else if (h.q !== userHexQ || h.r !== userHexR) {
-        var from = hexCenter(userHexQ, userHexR);
         userHexQ = h.q; userHexR = h.r;
-        animateCircleTo(from.lat, from.lng, c.lat, c.lng);
+        scheduleRangeRedraw();
+        syncWildflowers(h.q, h.r);
         if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
       if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
@@ -907,11 +1054,22 @@
       if (!localStorage.getItem('bloom_cell_lng')) {
         CELL_LNG_DEG = CELL_LAT_DEG / Math.cos(state.userPos.lat * Math.PI / 180);
         localStorage.setItem('bloom_cell_lng', CELL_LNG_DEG);
+        // userHexQ/R (and the map view) were set a moment ago in
+        // onLocationUpdate using the old, uncorrected scale - every hex
+        // index computed from here on uses the corrected one, so both need
+        // recomputing now or they'd point at a wildly different spot than
+        // the grid mesh/range highlight/wildflowers that follow.
+        var hh = latLngToHex(state.userPos.lat, state.userPos.lng);
+        userHexQ = hh.q; userHexR = hh.r;
+        var cc = hexCenter(hh.q, hh.r);
+        map.setView([cc.lat, cc.lng], map.getZoom());
       }
       // The map.setView() a moment ago in onLocationUpdate already fired
-      // 'moveend' (and so a grid redraw) before CELL_LNG_DEG was corrected
-      // above - redraw once more now so the very first mesh isn't stretched.
+      // 'moveend' (and so a grid/range redraw) before CELL_LNG_DEG was
+      // corrected above - redraw once more now so the very first mesh and
+      // range highlight aren't stretched.
       scheduleGridRedraw();
+      scheduleRangeRedraw();
       vibrate(30);
       tickPlants();
       // Brand-new player: show the welcome modal, then the tutorial starts
@@ -958,8 +1116,15 @@
       iconEl.style.width = v.w + 'px';
       iconEl.style.height = v.h + 'px';
 
-      document.getElementById('plant-title').textContent = species.name + ' - ' + STAGE_LABELS[d.stage];
-      document.getElementById('plant-meta').textContent = 'Planted ' + formatAgo(p.plantedAt);
+      document.getElementById('plant-title').textContent =
+        (p.wild ? 'Wild ' : '') + species.name + ' - ' + STAGE_LABELS[d.stage];
+      if (p.wild) {
+        document.getElementById('plant-meta').textContent = p.wildWateredOnce
+          ? 'Found growing here ' + formatAgo(p.plantedAt)
+          : 'Found growing here - water it to grow a cluster';
+      } else {
+        document.getElementById('plant-meta').textContent = 'Planted ' + formatAgo(p.plantedAt);
+      }
 
       var pct = Math.round(d.waterFrac * 100);
       document.getElementById('water-bar-fill').style.width = pct + '%';
@@ -1076,7 +1241,9 @@
         'it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on seeds for rarer, ' +
         'more valuable flowers.</p>' +
         '<p>Leave a flower too thirsty for too long and it\'ll wilt - water always brings it back, unless ' +
-        'it\'s left dry for a very long while. No score, no clock, no rush.</p>';
+        'it\'s left dry for a very long while. No score, no clock, no rush.</p>' +
+        '<p>Keep an eye out for wildflowers \u{1F33C} growing free out in the world as you walk - free to ' +
+        'pick up, though they stay a single bloom unless you water them too.</p>';
       document.getElementById('modal-ok-btn').textContent = "Let's grow! \u{1F331}";
       document.getElementById('modal-ok-btn').onclick = function () {
         state.seenWelcome = true; saveState(); closeModal();
@@ -1102,6 +1269,9 @@
         'tiers cost more but sell for a lot more too.</p>' +
         '<p><b>Don\'t forget them</b> - flowers left dry for a long stretch wilt, then eventually return to ' +
         'the earth. A watering visit any time before that brings them right back.</p>' +
+        '<p><b>Wildflowers</b> - scattered around the map for free, no seed needed. They only reach a ' +
+        'single bloom on their own, but a watering visit lets one grow into a full cluster like any other ' +
+        'flower.</p>' +
         '<p style="color:var(--text-dim);margin-top:14px">So far: ' + s.planted + ' planted &bull; ' +
         s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished &bull; ' + s.sold + ' sold for ' +
         s.earned + ' Petals &bull; ' + s.kept + ' kept</p>';

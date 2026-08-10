@@ -271,18 +271,8 @@
        pushing the modal's buttons off-screen. */
     .seed-pick-list { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow-y: auto; }
 
-    /* Collection screen. Every species gets a row whether or not it's been
-       found, so the gaps read as "still to find" rather than the list simply
-       being short. */
-    .inv-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; margin-bottom: 4px; }
-    .inv-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      padding: 10px 13px; border: 2px solid; border-radius: 14px;
-    }
-    .inv-row.missing { border-color: rgba(60,40,20,0.10); opacity: 0.5; }
-    .inv-name { font-size: 14px; font-weight: 800; }
+    /* Journal blocks. */
     .inv-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-    .inv-count { font-size: 15px; font-weight: 800; flex-shrink: 0; }
     .inv-stack-title { font-size: 13.5px; font-weight: 800; margin-top: 12px; }
     /* Two per row on a phone; Sell and Extract sit side by side so the choice
        between them is visible rather than sequential. */
@@ -314,25 +304,40 @@
     .color-cell.slot { position: relative; border: 2px solid transparent; padding-top: 9px; }
     .color-cell.slot.held { cursor: pointer; }
     .color-cell.slot.picked { border-color: var(--green); background: #fff; }
+    /* An unfound color is a plain grey question mark, not a ghosted flower.
+       Showing the silhouette gave away the shape-plus-colour combination and
+       read as something half-owned; a blank spot is meant to read as blank. */
+    .color-cell.slot.blank { background: rgba(255,255,255,0.3); color: #a49d90; }
+    .slot-unknown {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: 50%; font-size: 15px; font-weight: 800;
+      background: rgba(60,40,20,0.07); color: #a49d90;
+    }
     .slot-count {
       position: absolute; top: 2px; right: 2px; min-width: 17px; padding: 0 4px;
       border-radius: 9px; font-size: 10px; font-weight: 800; line-height: 17px;
       background: rgba(60,40,20,0.12); color: var(--text-dim);
     }
     .slot-count.some { background: var(--green); color: #fff; }
-    /* Page flipping. The species name is already the modal title, so the strip
-       only has to say where in the journal you are. */
-    .journal-nav {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      margin-bottom: 10px;
+
+    /* Bookmarks along the top of the journal - one tab per species, so
+       switching flower is one tap from anywhere instead of a trip back out to
+       a contents page. The superscript is how many of that species you are
+       holding, which is the thing you'd flip through looking for. */
+    .journal-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .journal-tab {
+      position: relative; flex: 1 1 0; min-width: 0; padding: 7px 2px 6px; line-height: 0;
+      border: 2px solid transparent; border-radius: 13px 13px 7px 7px;
+      background: rgba(255,255,255,0.5); cursor: pointer;
     }
-    .journal-flip {
-      width: 38px; height: 34px; flex-shrink: 0; border: 2px solid var(--panel-border);
-      border-radius: 11px; background: #fff; font-size: 16px; font-weight: 800;
-      color: var(--text); cursor: pointer;
+    .journal-tab.active { border-color: var(--green); background: #fff; box-shadow: var(--shadow-sm); }
+    .journal-tab.blank { opacity: 0.4; }
+    .journal-tab-count {
+      position: absolute; top: -4px; right: -3px; min-width: 15px; padding: 0 3px;
+      border-radius: 8px; background: var(--green); color: #fff;
+      font-size: 9px; font-weight: 800; line-height: 15px; text-align: center;
     }
-    .journal-flip:disabled { opacity: 0.3; cursor: default; }
-    .journal-page-no { font-size: 11.5px; font-weight: 700; color: var(--text-dim); }
+    .journal-caption { font-size: 11.5px; font-weight: 700; color: var(--text-dim); text-align: center; margin: 0 0 10px; }
     .journal-hint { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0 0 4px; }
     /* One bordered block per color held, so a Red and a Purple of the same
        species never look like one interchangeable pile. */
@@ -407,7 +412,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.18.0</span>
+      <span id="game-version">v1.19.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -2478,11 +2483,6 @@
       return (isCluster ? e.cluster : e.single) || 0;
     }
     function heldTotalOf(vk) { return heldOf(vk, false) + heldOf(vk, true); }
-    function totalHeld() {
-      return Object.keys(state.inventory).reduce(function (n, vk) {
-        return n + heldTotalOf(vk);
-      }, 0);
-    }
     // Every variant of one species that has ever been kept, rarest last.
     function discoveredColorsOf(speciesKey) {
       return sortVariants(Object.keys(state.inventory).filter(function (vk) {
@@ -2564,70 +2564,51 @@
       });
     }
 
-    // Every flower you've chosen to Keep, kept as a journal: a contents page,
-    // then one page per species with a spot for each of the fourteen colors.
-    // All seven species and all fourteen spots are always drawn, so a gap
-    // reads as "still to breed" rather than as a list that happens to be
-    // short. Both levels share the one modal.
+    // Every flower you've chosen to Keep, kept as a journal: one page per
+    // species, with a spot for each of the fourteen colors and a row of
+    // bookmarks along the top to switch between them. All seven bookmarks and
+    // all fourteen spots are always drawn, so a gap reads as "still to breed"
+    // rather than as a list that happens to be short.
+    //
+    // There was a contents page in front of this. It was removed because it
+    // had one job - pick a species - and the bookmarks do that from anywhere,
+    // so it had become a screen you tapped through on the way to the journal.
     var journalSpecies = null;  // which page is open
     var journalPick = null;     // which spot on it is selected, if any
 
+    // Opening the journal cold lands on a page with something on it rather
+    // than always on Sunflower, which may well be blank.
+    function defaultJournalSpecies() {
+      for (var i = 0; i < SPECIES.length; i++) {
+        if (heldOfSpecies(SPECIES[i].key) > 0) return SPECIES[i].key;
+      }
+      for (var j = 0; j < SPECIES.length; j++) {
+        if (discoveredColorsOf(SPECIES[j].key).length) return SPECIES[j].key;
+      }
+      return SPECIES[0].key;
+    }
+
     function openInventory() {
       toggleMenu();
-      renderJournalContents();
+      // journalSpecies persists for the session, so re-opening the journal
+      // returns to the page you were last reading.
+      openJournalPage(journalSpecies || defaultJournalSpecies());
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    function renderJournalContents() {
-      resetModalChrome();
-      document.getElementById('modal-title').textContent = 'Flower Journal \u{1F33C}';
-
-      var held = totalHeld();
-      var foundVariants = Object.keys(state.inventory).length;
-      var html = '<p>Holding <b>' + held + '</b> flower' + (held === 1 ? '' : 's') +
-        ' &bull; <b>' + foundVariants + ' of ' + TOTAL_VARIANTS + '</b> flowers discovered.</p>';
-
-      // One row per species, not per variant: 98 rows would bury the seven
-      // shapes the game actually has. Each row opens that species' page,
-      // where the colors and the sell/extract actions live.
-      html += '<div class="inv-list">' + SPECIES.map(function (s) {
+    // The bookmark strip: the species' flower, in the rarest color of it you
+    // own, with a superscript count of how many you're holding.
+    function journalTabsHtml(activeKey) {
+      return '<div class="journal-tabs">' + SPECIES.map(function (s) {
         var found = discoveredColorsOf(s.key);
-        // Every species has a page whether or not anything is on it, so an
-        // untouched species can still be flipped to and read as blank spots.
-        var open = ' style="cursor:pointer" onclick="openJournalPage(\'' + s.key + '\')"';
-        if (!found.length) {
-          return '<div class="inv-row missing"' + open + '>' +
-            '<div><div class="inv-name">' + speciesChip(s) + ' ' + s.name + '</div>' +
-            '<div class="inv-meta">Not found yet</div></div>' +
-            '<div class="inv-count">-</div></div>';
-        }
-        var total = heldOfSpecies(s.key);
-        var firstAt = found.reduce(function (t, vk) {
-          return Math.min(t, state.inventory[vk].firstAt);
-        }, Infinity);
-        // The row is coloured by the rarest color of this species you own, so
-        // the contents page itself shows off what you've bred.
-        var best = colorFor(parseVariant(found[found.length - 1]).color);
-        return '<div class="inv-row" style="border-color:' + best.line + ';cursor:pointer" ' +
-          'onclick="openJournalPage(\'' + s.key + '\')">' +
-          '<div><div class="inv-name" style="color:' + best.ink + '">' +
-          found.slice(-4).map(function (vk) { return variantChip(vk); }).join('') +
-          ' ' + s.name + '</div>' +
-          '<div class="inv-meta">' + found.length + ' of ' + COLORS.length + ' colors &bull; ' +
-          (total > 0 ? total + ' held' : 'none held right now') +
-          ' &bull; first kept ' + formatAgo(firstAt) + '</div></div>' +
-          '<div class="inv-count">' + (total > 0 ? 'x' + total : '0') + '</div></div>';
+        var held = heldOfSpecies(s.key);
+        var color = found.length ? parseVariant(found[found.length - 1]).color : s.base;
+        return '<button class="journal-tab' + (s.key === activeKey ? ' active' : '') +
+          (found.length ? '' : ' blank') + '" title="' + s.name +
+          '" onclick="openJournalPage(\'' + s.key + '\')">' +
+          (held > 0 ? '<span class="journal-tab-count">' + held + '</span>' : '') +
+          speciesChip(s, color, 26) + '</button>';
       }).join('') + '</div>';
-
-      var st = state.stats;
-      html += '<p style="color:var(--text-dim)">Kept ' + st.kept + ' all time &bull; sold ' + st.sold +
-        ' for ' + st.earned + ' Petals &bull; ' + st.extracted + ' seeds extracted</p>';
-      html += '<p style="color:var(--text-dim)">Open a page to see every color of that flower, and to ' +
-        'sell or pull apart the ones you are holding.</p>';
-
-      document.getElementById('modal-body').innerHTML = html;
-      document.getElementById('modal-ok-btn').textContent = 'Got it';
-      document.getElementById('modal-ok-btn').onclick = closeModal;
     }
 
     // One stack (blooms or clusters) and its actions. Offers "1" and "all N"
@@ -2664,13 +2645,6 @@
       journalPick = held.length === 1 ? held[0] : null;
       renderJournalPage(speciesKey);
     }
-    // Turning a page never carries the selection with it - the picked spot
-    // belongs to the species you were looking at.
-    function flipJournal(dir) {
-      var i = speciesRank(journalSpecies) + dir;
-      if (i < 0 || i >= SPECIES.length) return;
-      openJournalPage(SPECIES[i].key);
-    }
     function pickJournalSpot(vk) {
       // Tapping the open spot again closes it, so the page can go back to
       // being just the album.
@@ -2682,11 +2656,15 @@
       var s = speciesFor(speciesKey);
       journalSpecies = speciesKey;
       resetModalChrome();
-      // innerHTML, not textContent - the chip is inline SVG markup.
-      document.getElementById('modal-title').innerHTML = speciesChip(s, null, 22) + ' ' + s.name;
 
-      var page = speciesRank(speciesKey);
       var found = discoveredColorsOf(speciesKey);
+      // Title and bookmark show the same flower in the same color - the
+      // rarest of this species you own - so they don't read as two things.
+      var headColor = found.length ? parseVariant(found[found.length - 1]).color : s.base;
+      // innerHTML, not textContent - the chip is inline SVG markup.
+      document.getElementById('modal-title').innerHTML =
+        speciesChip(s, headColor, 22) + ' ' + s.name;
+
       var known = discoveredColorSet();
 
       // Resolved before the grid is drawn: selling the last of a color has to
@@ -2697,13 +2675,10 @@
         journalPick = null;
       }
 
-      var html = '<div class="journal-nav">' +
-        '<button class="journal-flip" onclick="flipJournal(-1)"' +
-        (page === 0 ? ' disabled' : '') + '>&lsaquo;</button>' +
-        '<span class="journal-page-no">Page ' + (page + 1) + ' of ' + SPECIES.length +
-        ' &bull; <b>' + found.length + ' of ' + COLORS.length + '</b> colors found</span>' +
-        '<button class="journal-flip" onclick="flipJournal(1)"' +
-        (page === SPECIES.length - 1 ? ' disabled' : '') + '>&rsaquo;</button></div>';
+      var html = journalTabsHtml(speciesKey) +
+        '<p class="journal-caption"><b>' + found.length + ' of ' + COLORS.length + '</b> ' +
+        s.name + ' colors &bull; <b>' + Object.keys(state.inventory).length + ' of ' +
+        TOTAL_VARIANTS + '</b> flowers found</p>';
 
       // A spot for every color, always. An empty spot is the point of the
       // page: it is what you have left to breed. The badge is the count you
@@ -2716,13 +2691,14 @@
         // The name shows once the color is known from ANY species - the spot
         // stays empty, but you are no longer being asked to guess a name you
         // have already earned elsewhere.
-        var label = known[c.id] ? c.name : '???';
-        var cls = 'color-cell slot' + (kept ? '' : ' missing') + (n > 0 ? ' held' : '') +
+        var label = known[c.id] ? c.name : '?';
+        var cls = 'color-cell slot' + (kept ? '' : ' blank') + (n > 0 ? ' held' : '') +
           (vk === journalPick ? ' picked' : '');
-        return '<div class="' + cls + '" title="' + label + '"' +
+        return '<div class="' + cls + '" title="' + (kept ? label : 'Not found yet') + '"' +
           (n > 0 ? ' onclick="pickJournalSpot(\'' + vk + '\')"' : '') + '>' +
           (kept ? '<span class="slot-count' + (n > 0 ? ' some' : '') + '">' + n + '</span>' : '') +
-          speciesChip(s, c.id, 30) + '<span>' + label + '</span></div>';
+          (kept ? speciesChip(s, c.id, 30) : '<span class="slot-unknown">?</span>') +
+          '<span>' + label + '</span></div>';
       }).join('') + '</div>';
 
       // The picked spot's actions, in one block under the album rather than a
@@ -2737,7 +2713,8 @@
           ' ' + variantName(journalPick) + '</div>' +
           inventoryStackHtml(journalPick, false) + inventoryStackHtml(journalPick, true) +
           '<div class="inv-meta">' + seeds + ' seed' + (seeds === 1 ? '' : 's') +
-          ' in your pouch &bull; selling pays Petals, extracting gives back seeds of ' +
+          ' in your pouch &bull; first kept ' + formatAgo(state.inventory[journalPick].firstAt) +
+          ' &bull; selling pays Petals, extracting gives back seeds of ' +
           'this exact color</div></div>';
       } else if (heldCount > 0) {
         html += '<p class="journal-hint">Tap a spot with a number on it to sell those flowers ' +
@@ -2747,9 +2724,16 @@
           ' right now. Keep one to fill a spot back in.</p>';
       }
 
+      // The lifetime tally lived on the contents page; it belongs somewhere,
+      // and the foot of any page is as good as a screen of its own.
+      var st = state.stats;
+      html += '<p style="color:var(--text-dim);font-size:11.5px;text-align:center;margin:0">Kept ' +
+        st.kept + ' all time &bull; sold ' + st.sold + ' for ' + st.earned +
+        ' Petals &bull; ' + st.extracted + ' seeds extracted</p>';
+
       document.getElementById('modal-body').innerHTML = html;
-      document.getElementById('modal-ok-btn').textContent = 'Contents';
-      document.getElementById('modal-ok-btn').onclick = renderJournalContents;
+      document.getElementById('modal-ok-btn').textContent = 'Close';
+      document.getElementById('modal-ok-btn').onclick = closeModal;
     }
 
     // The player's own notebook of crossings. It deliberately shows only what

@@ -38,9 +38,11 @@ Seeds carry their color, so a "Red Tulip seed" is a specific thing: planting one
 
 ### The Flower Journal
 
-The **Flower Journal** in the menu is where kept flowers go, laid out like a stamp album: a contents page, then one page per species, and on each page a spot for every one of the 14 colors. All **98** spots are always drawn, so an empty one reads as something still to breed rather than as a list that happens to be short.
+The **Flower Journal** in the menu is where kept flowers go, laid out like a stamp album: one page per species, and on each page a spot for every one of the 14 colors. All **98** spots are always drawn, so an empty one - a plain grey `?` - reads as something still to breed rather than as a list that happens to be short.
 
-A spot you've filled shows how many of that flower you're holding right now. Tap one and its actions open underneath - sell them for Petals, or pull them apart for seeds of that exact color - along with how many of its seeds are already in your pouch. Arrows at the top of the page flip between species.
+**Bookmarks** across the top switch between species from any page, each showing that flower with a superscript of how many you're holding.
+
+A spot you've filled shows how many of that flower you have right now. Tap one and its actions open underneath - sell them for Petals, or pull them apart for seeds of that exact color - along with how many of its seeds are already in your pouch and when you first kept one.
 
 A color you've found on one species is named on every page, so once you've bred your first Purple you can see which Purples you're still missing. A spot stays filled in once earned, even after you sell the last one - the journal records what you've found, not just what's in hand.
 

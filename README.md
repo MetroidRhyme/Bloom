@@ -16,7 +16,7 @@ There's no score, no timer, and no way to "lose" quickly - it's just a colorful,
 3. **Walk back** every so often and tap a growing flower, then tap **Water** once you're close enough.
 4. Watering is what advances a stage - not elapsed time. A flower becomes *ready* 12 hours after it was planted or last grew, and your next visit is what moves it up. Seed to sprout to bloom to flourishing cluster is three separate walks back.
 5. Once a flower is in bloom or flourishing, **Keep** it for your collection or **Sell** it to the shop for Petals - clusters sell for far more than a single bloom.
-6. Spend Petals in the **Seed Shop** (tap your Petals total, top right) on more seeds.
+6. Spend Petals in the **Seed Shop** (tap your Petals total, top right) on more seeds. Every purchase confirms first - showing the exact flower, the price, and the balance you'd be left with - so a stray tap on a small swatch never quietly costs you 20 Petals.
 
 You can tap any flower on the map to check on it from a distance - only *watering*, *harvesting*, and *planting* require being physically close (within 2 hex cells, about a short walk).
 

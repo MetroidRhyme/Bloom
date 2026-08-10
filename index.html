@@ -246,6 +246,13 @@
       background: linear-gradient(90deg, var(--green), var(--green-dark)); box-shadow: var(--shadow-sm);
     }
     .shop-fert-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
+    /* Purchase confirmation: what you are about to buy, drawn big enough to
+       tell a Red Tulip from a Pink one before the Petals are gone. */
+    .buy-preview {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 14px; margin-bottom: 12px; border: 2px solid; border-radius: 16px;
+      font-size: 15.5px; font-weight: 800; text-align: center;
+    }
 
     /* ================= MODAL ================= */
     #modal-overlay {
@@ -373,7 +380,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.16.0</span>
+      <span id="game-version">v1.17.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -608,15 +615,50 @@
       var c = hexRgb(h);
       return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
     }
+    // WCAG relative luminance / contrast ratio. lumHex above is a cheap
+    // perceptual average, fine for comparing two flower fills - but text
+    // legibility needs the real thing, because a bright yellow and a white
+    // sit far apart on that cheap scale and both read as unreadable on a
+    // white panel.
+    function relLum(h) {
+      var c = hexRgb(h).map(function (v) {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    }
+    function contrastRatio(a, b) {
+      var x = relLum(a), y = relLum(b);
+      return ((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05));
+    }
+    // Darken a hue until it clears a contrast ratio against the given ground.
+    // Keeps the hue and only spends lightness, so a Pink stays recognisably
+    // pink instead of falling back to a neutral grey.
+    function darkenToContrast(h, ratio, bg) {
+      var out = h, guard = 0;
+      while (contrastRatio(out, bg) < ratio && guard++ < 40) out = shadeHex(out, 0.92);
+      return out;
+    }
 
     // Run once at startup - COLORS is static, so there is no reason to redo
     // this per render (icons are rebuilt on every zoom and every tick).
     var DISC_BG = '#f4efe1';   // parchment backing the flower is drawn on
     var DISC_CONTRAST = 0.14;  // min petal-vs-disc luminance gap
+    // Panels are near-white, so a petal hex used raw as text was unreadable
+    // for the pale colors (White, Cream, Sky, Yellow) and marginal for several
+    // more. `ink` is the petal darkened until it is genuinely readable as
+    // text; `line` is the same idea at a much lower bar, enough that a border
+    // or swatch ring is visible without turning every outline charcoal.
+    // Never paint text with `petal` - use `ink`.
+    var PANEL_BG = '#fdfdfd';  // panel-bg over --bg, near enough to white
+    var INK_CONTRAST = 4;      // readable bold body text
+    var LINE_CONTRAST = 1.6;   // a border you can actually see
     (function resolveColors() {
       COLORS.forEach(function (c) {
         c.deep = shadeHex(c.petal, 0.86);  // inner petal rows
         c.edge = shadeHex(c.petal, 0.66);  // petal outline
+        c.ink = darkenToContrast(c.petal, INK_CONTRAST, PANEL_BG);
+        c.line = darkenToContrast(c.petal, LINE_CONTRAST, PANEL_BG);
         // The disc is tinted by the flower it holds, but a white or cream
         // flower on a parchment disc is very nearly invisible - the naive tint
         // left a 0.03 luminance gap. So the tint is pushed AWAY from the petal
@@ -682,9 +724,14 @@
                (colorRank(x.color) - colorRank(y.color));
       });
     }
-    // UI accent for text/borders that used to read species.color. Derived so
-    // it always matches whatever the species' base color actually is.
-    SPECIES.forEach(function (s) { s.color = colorFor(s.base).petal; });
+    // UI accent for text/borders that used to read species.color. Split in
+    // two so each is legible on a white panel, and deliberately NOT called
+    // `color` any more - a species carrying a hex under the same field name
+    // that a plant uses for a color *id* was a standing trap.
+    SPECIES.forEach(function (s) {
+      s.ink = colorFor(s.base).ink;
+      s.line = colorFor(s.base).line;
+    });
 
     // One flat price for every seed, and one flat payout for every flower.
     // SELL_SINGLE sits just under SEED_COST on purpose so cashing out at the
@@ -2234,9 +2281,9 @@
           var o = state.plants[pk];
           var vk = variantKey(o.species, colorOfPlant(o));
           var c = colorFor(colorOfPlant(o));
-          return '<button class="seed-pick-btn" style="border-color:' + c.petal +
+          return '<button class="seed-pick-btn" style="border-color:' + c.line +
             '" onclick="openBreedConfirm(\'' + key + '\',\'' + pk + '\')">' +
-            '<span style="color:' + c.petal + '">' + variantChip(vk) + ' ' + variantName(vk) +
+            '<span style="color:' + c.ink + '">' + variantChip(vk) + ' ' + variantName(vk) +
             '</span></button>';
         }).join('') + '</div>';
       document.getElementById('modal-ok-btn').style.display = 'none';
@@ -2509,9 +2556,9 @@
         // The row is coloured by the rarest color of this species you own, so
         // the list itself shows off what you've bred.
         var best = colorFor(parseVariant(found[found.length - 1]).color);
-        return '<div class="inv-row" style="border-color:' + best.petal + ';cursor:pointer" ' +
+        return '<div class="inv-row" style="border-color:' + best.line + ';cursor:pointer" ' +
           'onclick="renderInventoryDetail(\'' + s.key + '\')">' +
-          '<div><div class="inv-name" style="color:' + best.petal + '">' +
+          '<div><div class="inv-name" style="color:' + best.ink + '">' +
           found.slice(-4).map(function (vk) { return variantChip(vk); }).join('') +
           ' ' + s.name + '</div>' +
           '<div class="inv-meta">' + found.length + ' of ' + COLORS.length + ' colors &bull; ' +
@@ -2587,8 +2634,8 @@
         if (!stacks) return;
         anyHeld = true;
         var c = colorFor(parseVariant(vk).color);
-        html += '<div class="inv-variant" style="border-color:' + c.petal + '">' +
-          '<div class="inv-variant-name" style="color:' + c.petal + '">' + variantChip(vk, 20) +
+        html += '<div class="inv-variant" style="border-color:' + c.line + '">' +
+          '<div class="inv-variant-name" style="color:' + c.ink + '">' + variantChip(vk, 20) +
           ' ' + variantName(vk) + '</div>' + stacks +
           '<div class="inv-meta">' + (state.seeds[vk] || 0) + ' seed' +
           ((state.seeds[vk] || 0) === 1 ? '' : 's') + ' in your pouch</div></div>';
@@ -2720,9 +2767,9 @@
       document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
         owned.map(function (o) {
           var c = colorFor(parseVariant(o.vk).color);
-          return '<button class="seed-pick-btn" style="border-color:' + c.petal +
+          return '<button class="seed-pick-btn" style="border-color:' + c.line +
             '" onclick="plantSeedAt(' + q + ',' + r + ',\'' + o.vk + '\');closeModal();">' +
-            '<span style="color:' + c.petal + '">' + variantChip(o.vk) + ' ' + variantName(o.vk) +
+            '<span style="color:' + c.ink + '">' + variantChip(o.vk) + ' ' + variantName(o.vk) +
             '</span><span>x' + o.count + '</span></button>';
         }).join('') + '</div>';
       document.getElementById('modal-ok-btn').style.display = 'none';
@@ -2771,7 +2818,7 @@
         '<div class="shop-row-meta">Cross two flourishing neighbours &bull; you have ' +
         state.fertilizer + '</div></div>' +
         '<button class="shop-fert-btn"' + (state.currency >= FERTILIZER_COST ? '' : ' disabled') +
-        ' onclick="buyFertilizer()">' + FERTILIZER_COST + ' \u{1F338}</button></div>';
+        ' onclick="confirmBuyFertilizer()">' + FERTILIZER_COST + ' \u{1F338}</button></div>';
 
       document.getElementById('shop-rows').innerHTML = fertRow + SPECIES.map(function (s) {
         var owned = Object.keys(state.seeds).reduce(function (n, vk) {
@@ -2784,16 +2831,67 @@
           var c = colorFor(cid);
           return '<button class="shop-swatch"' + (afford ? '' : ' disabled') +
             ' title="' + c.name + ' ' + s.name + ' - ' + SEED_COST + ' Petals"' +
-            ' style="background:' + c.soft + ';border-color:' + c.petal + '"' +
-            ' onclick="buySeed(\'' + variantKey(s.key, cid) + '\')">' +
+            ' style="background:' + c.soft + ';border-color:' + c.line + '"' +
+            ' onclick="confirmBuySeed(\'' + variantKey(s.key, cid) + '\')">' +
             speciesChip(s, cid, 26) + '</button>';
         }).join('');
-        return '<div class="shop-row" style="border-color:' + s.color + '">' +
+        return '<div class="shop-row" style="border-color:' + s.line + '">' +
           '<div class="shop-row-info">' +
-          '<div class="shop-row-name" style="color:' + s.color + '">' + s.name + '</div>' +
+          '<div class="shop-row-name" style="color:' + s.ink + '">' + s.name + '</div>' +
           '<div class="shop-row-meta">You have ' + owned + '</div></div>' +
           '<div class="shop-swatches">' + swatches + '</div></div>';
       }).join('');
+    }
+
+    // Nothing in the shop spends Petals on a single tap. The buy controls are
+    // small - four 38px swatches per species row on a phone - and a mis-tap
+    // used to cost 20 Petals with only a toast to show for it, and no undo.
+    // Same reasoning as the seed picker on every plant attempt: the confirm
+    // is cheap, the mistake isn't. Costs and the balance you'd be left with
+    // are both stated before the button, not after.
+    function openPurchaseConfirm(opts) {
+      if (state.currency < opts.cost) return;
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = opts.title;
+      document.getElementById('modal-body').innerHTML = opts.preview +
+        '<p style="color:var(--text-dim)">Costs <b>' + opts.cost + ' \u{1F338} Petals</b>. ' +
+        'You have ' + state.currency + ' and would be left with <b>' +
+        (state.currency - opts.cost) + '</b>.</p>';
+      var ok = document.getElementById('modal-ok-btn');
+      ok.textContent = opts.okText;
+      // Close first: the shop sheet sits underneath and stays open, so the
+      // purchase lands back on a shop that re-renders with the new balance.
+      ok.onclick = function () { closeModal(); opts.onOk(); };
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function confirmBuySeed(vk) {
+      if (STANDARD_COLORS.indexOf(parseVariant(vk).color) < 0) return;
+      var c = colorFor(parseVariant(vk).color);
+      var have = state.seeds[vk] || 0;
+      openPurchaseConfirm({
+        title: 'Buy this seed?',
+        preview: '<div class="buy-preview" style="border-color:' + c.line + '">' +
+          variantChip(vk, 40) + '<span style="color:' + c.ink + '">' + variantName(vk) +
+          ' seed</span></div>' +
+          '<p>You have <b>' + have + '</b> of these in your pouch.</p>',
+        cost: SEED_COST,
+        okText: 'Buy it \u{1F331}',
+        onOk: function () { buySeed(vk); }
+      });
+    }
+
+    function confirmBuyFertilizer() {
+      openPurchaseConfirm({
+        title: 'Buy fertilizer?',
+        preview: '<p>One bag of fertilizer crosses two <b>flourishing</b> flowers standing on ' +
+          'neighbouring hexes, and a seedling comes up in the gap between them.</p>' +
+          '<p>You have <b>' + state.fertilizer + '</b> bag' +
+          (state.fertilizer === 1 ? '' : 's') + '.</p>',
+        cost: FERTILIZER_COST,
+        okText: 'Buy it \u{1F331}',
+        onOk: buyFertilizer
+      });
     }
 
     function buySeed(vk) {

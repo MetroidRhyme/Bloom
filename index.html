@@ -188,6 +188,9 @@
     }
     #shop-title { text-align: center; font-size: 18px; font-weight: 800; margin: 4px 0 2px; }
     #shop-balance { text-align: center; font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    /* Seven species now, so the sheet scrolls internally instead of growing
+       past the top of the screen on a short phone. */
+    #shop-rows { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .shop-row {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
       padding: 12px 14px; border: 2px solid; border-radius: 16px; margin-bottom: 10px;
@@ -214,7 +217,9 @@
     #modal-title { font-size: 20px; font-weight: 800; margin-bottom: 12px; }
     #modal-body { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 18px; text-align: left; }
     #modal-body p { margin: 0 0 10px; }
-    .seed-pick-list { display: flex; flex-direction: column; gap: 10px; }
+    /* Up to seven owned species can be listed, so this scrolls rather than
+       pushing the modal's buttons off-screen. */
+    .seed-pick-list { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow-y: auto; }
     .seed-pick-btn {
       display: flex; align-items: center; justify-content: space-between; width: 100%;
       padding: 13px 16px; border: 2px solid; border-radius: 14px; background: #fff;
@@ -260,7 +265,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.7.0</span>
+      <span id="game-version">v1.8.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -383,38 +388,35 @@
       'It flourished into a full cluster! \u{1F337}'
     ];
 
-    // `tier` (0/1/2) maps each species onto TIERS below - it's what a seed's
-    // price/sell value and the shop actually key off, species itself is just
-    // which flower you get within that tier.
+    // Every species is bought by name and every species is worth exactly the
+    // same, so which flower you plant is a matter of taste rather than a
+    // power decision. (The old common/rare/prized tiers made higher tiers
+    // strictly dominant: growth time did not vary by tier, so once you could
+    // afford the top one there was no reason to ever plant anything else,
+    // and two thirds of the shop became dead content.)
     var SPECIES = [
-      { key: 'sunflower',  emoji: '\u{1F33B}', name: 'Sunflower', color: '#ffd23f', tier: 0 },
-      { key: 'tulip',      emoji: '\u{1F337}', name: 'Tulip',     color: '#ff7fae', tier: 0 },
-      { key: 'daisy',      emoji: '\u{1F33C}', name: 'Daisy',     color: '#fff2a8', tier: 0 },
-      { key: 'hibiscus',   emoji: '\u{1F33A}', name: 'Hibiscus',  color: '#ff8aa8', tier: 1 },
-      { key: 'blossom',    emoji: '\u{1F338}', name: 'Blossom',   color: '#ffc7e0', tier: 1 },
-      { key: 'rose',       emoji: '\u{1F339}', name: 'Rose',      color: '#f0637f', tier: 2 },
-      { key: 'lotus',      emoji: '\u{1FAB7}', name: 'Lotus',     color: '#caa8f5', tier: 2 }
+      { key: 'sunflower',  emoji: '\u{1F33B}', name: 'Sunflower', color: '#ffd23f' },
+      { key: 'tulip',      emoji: '\u{1F337}', name: 'Tulip',     color: '#ff7fae' },
+      { key: 'daisy',      emoji: '\u{1F33C}', name: 'Daisy',     color: '#fff2a8' },
+      { key: 'hibiscus',   emoji: '\u{1F33A}', name: 'Hibiscus',  color: '#ff8aa8' },
+      { key: 'blossom',    emoji: '\u{1F338}', name: 'Blossom',   color: '#ffc7e0' },
+      { key: 'rose',       emoji: '\u{1F339}', name: 'Rose',      color: '#f0637f' },
+      { key: 'lotus',      emoji: '\u{1FAB7}', name: 'Lotus',     color: '#caa8f5' }
     ];
     function speciesFor(key) {
       for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return SPECIES[i];
       return SPECIES[0];
     }
-    function speciesOfTier(tierIdx) { return SPECIES.filter(function (s) { return s.tier === tierIdx; }); }
 
-    // Seed cost and harvest value by tier. sellSingle is a near-breakeven
-    // price on purpose (roughly the seed's own cost) so cashing out early
-    // isn't clearly "correct" - sellCluster is the real payoff, rewarding
-    // patience (and a couple of watering visits) without punishing anyone
-    // who harvests early or just wants to Keep a flower instead of selling.
-    var TIERS = [
-      { key: 'common', name: 'Common', color: '#4caf6d', seedCost: 10, sellSingle: 8,  sellCluster: 18 },
-      { key: 'rare',   name: 'Rare',   color: '#4aa3ff', seedCost: 30, sellSingle: 25, sellCluster: 55 },
-      { key: 'prized', name: 'Prized', color: '#f0a93a', seedCost: 70, sellSingle: 60, sellCluster: 130 }
-    ];
-    function harvestValue(p, stage) {
-      var t = TIERS[speciesFor(p.species).tier];
-      return stage >= 3 ? t.sellCluster : t.sellSingle;
-    }
+    // One flat price for every seed, and one flat payout for every flower.
+    // SELL_SINGLE sits just under SEED_COST on purpose so cashing out at the
+    // single-bloom stage is never clearly "correct" - SELL_CLUSTER is the real
+    // payoff, rewarding the extra watering visit without punishing anyone who
+    // harvests early or just wants to Keep a flower instead of selling it.
+    var SEED_COST = 20;
+    var SELL_SINGLE = 16;
+    var SELL_CLUSTER = 40;
+    function harvestValue(p, stage) { return stage >= MAX_STAGE ? SELL_CLUSTER : SELL_SINGLE; }
 
     // ---------------------------------------------------------------------
     //  STATE & PERSISTENCE
@@ -426,7 +428,34 @@
     // place by plantSeedAt/buySeed, so every caller needs its own fresh copy
     // (a shared literal here would let gameplay silently mutate the "starter"
     // values themselves, corrupting what a fresh/reset save starts with).
-    function starterSeeds() { return { common: 3, rare: 0, prized: 0 }; }
+    // One of each of the first three, rather than three of one - a new player
+    // meets the "pick which flower" choice on their very first plant.
+    function starterSeeds() { return { sunflower: 1, tulip: 1, daisy: 1 }; }
+
+    // Seeds used to be counted per tier (common/rare/prized) and the species
+    // was rolled at random within the tier. They are counted per species now,
+    // so a pre-v1.8 save's tier counts are handed out round-robin across the
+    // species that tier used to be able to produce - same number of seeds, no
+    // refund maths, and nothing in the player's pocket disappears.
+    var OLD_TIER_SPECIES = {
+      common: ['sunflower', 'tulip', 'daisy'],
+      rare:   ['hibiscus', 'blossom'],
+      prized: ['rose', 'lotus']
+    };
+    function migrateSeeds(seeds) {
+      if (!seeds) return starterSeeds();
+      var isTierKeyed = Object.keys(seeds).some(function (k) { return OLD_TIER_SPECIES[k]; });
+      if (!isTierKeyed) return seeds;
+      var out = {};
+      Object.keys(OLD_TIER_SPECIES).forEach(function (tierKey) {
+        var pool = OLD_TIER_SPECIES[tierKey];
+        for (var i = 0; i < (seeds[tierKey] || 0); i++) {
+          var s = pool[i % pool.length];
+          out[s] = (out[s] || 0) + 1;
+        }
+      });
+      return out;
+    }
 
     // Saves from before the water-gated growth model (v1.4.x and earlier)
     // stored a `growthMs` accumulator instead of an explicit `stage`. Convert
@@ -471,8 +500,9 @@
           stats: Object.assign({}, def.stats, parsed.stats || {}),
           // A save that predates seeds/currency (v1.1.x) gets starter seeds
           // bootstrapped in rather than being left unable to plant anything -
-          // the old free-plant mechanic this replaces never cost seeds.
-          seeds: parsed.seeds || starterSeeds(),
+          // the old free-plant mechanic this replaces never cost seeds. A
+          // v1.2-v1.7 save gets its tier counts converted to species counts.
+          seeds: migrateSeeds(parsed.seeds),
           currency: typeof parsed.currency === 'number' ? parsed.currency : 0,
           following: parsed.following !== false,
           seenWelcome: !!parsed.seenWelcome,
@@ -571,19 +601,18 @@
       return d;
     }
 
-    // Consumes one seed of the given tier from inventory and plants a random
-    // species from that tier. Callers are expected to have already confirmed
-    // a seed of this tier is actually owned (see attemptPlant/openSeedPicker) -
-    // this only re-checks defensively, it doesn't surface its own error UI.
-    // Returns the new plant's hex key, or null if there was no seed to spend.
-    function plantSeedAt(q, r, tierIdx) {
-      var tier = TIERS[tierIdx], seedKey = tier.key;
-      if (!(state.seeds[seedKey] > 0)) return null;
-      state.seeds[seedKey]--;
+    // Consumes one seed of the given species from inventory and plants exactly
+    // that flower - no randomness, you get what you chose. Callers are expected
+    // to have already confirmed a seed of this species is actually owned (see
+    // attemptPlant/openSeedPicker) - this only re-checks defensively, it
+    // doesn't surface its own error UI. Returns the new plant's hex key, or
+    // null if there was no seed to spend.
+    function plantSeedAt(q, r, speciesKey) {
+      if (!(state.seeds[speciesKey] > 0)) return null;
+      state.seeds[speciesKey]--;
 
       var now = Date.now();
-      var pool = speciesOfTier(tierIdx);
-      var species = pool[Math.floor(Math.random() * pool.length)].key;
+      var species = speciesFor(speciesKey).key;
       var c = hexCenter(q, r);
       var key = hexKey(q, r);
       state.plants[key] = {
@@ -595,7 +624,7 @@
       saveState();
       renderPlants();
       updateHUD();
-      toast('\u{1F331} ' + tier.name + ' seed planted! It will be ready for water in ' +
+      toast('\u{1F331} ' + speciesFor(speciesKey).name + ' planted! It will be ready for water in ' +
         formatDuration(STAGE_READY_MS) + '.');
       vibrate(20);
       tutorialOnPlant(key);
@@ -607,7 +636,7 @@
     // on the map never silently spends a seed - points at the shop instead
     // when there's nothing to plant.
     function attemptPlant(q, r) {
-      var owned = TIERS.map(function (t, i) { return { i: i, t: t, count: state.seeds[t.key] || 0 }; })
+      var owned = SPECIES.map(function (s) { return { s: s, count: state.seeds[s.key] || 0 }; })
         .filter(function (o) { return o.count > 0; });
       if (owned.length === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
       openSeedPicker(q, r, owned);
@@ -1173,8 +1202,8 @@
         '<p>Watering is what makes it grow. About every 12 hours a plant is ready for a drink, and each ' +
         'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
         'back, three stages.</p>' +
-        '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on seeds ' +
-        'for rarer, more valuable flowers.</p>' +
+        '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on more ' +
+        'seeds. Every flower costs and sells for the same, so plant whichever ones you like the look of.</p>' +
         '<p>Nothing here can be lost. Go a couple of days without watering and a flower just looks a bit ' +
         'wilted until your next visit - it never dies, and it never stops being ready to grow. No score, ' +
         'no clock, no rush.</p>';
@@ -1201,8 +1230,8 @@
         'never wasted - it still tops up the tank and holds off wilting.</p>' +
         '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and Keep it for ' +
         'yourself or Sell it for Petals \u{1F338} - clusters sell for much more than a single bloom.</p>' +
-        '<p><b>Shop</b> - tap your Petals total (top right) to buy Common, Rare, or Prized seeds. Rarer ' +
-        'tiers cost more but sell for a lot more too.</p>' +
+        '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds. All seven flowers cost the same ' +
+        'and sell for the same, so pick by looks, not by value.</p>' +
         '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
         'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +
@@ -1223,9 +1252,9 @@
       document.getElementById('modal-title').textContent = 'Choose a Seed';
       document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
         owned.map(function (o) {
-          return '<button class="seed-pick-btn" style="border-color:' + o.t.color + '" onclick="plantSeedAt(' +
-            q + ',' + r + ',' + o.i + ');closeModal();"><span style="color:' + o.t.color + '">' + o.t.name +
-            '</span><span>x' + o.count + '</span></button>';
+          return '<button class="seed-pick-btn" style="border-color:' + o.s.color + '" onclick="plantSeedAt(' +
+            q + ',' + r + ',\'' + o.s.key + '\');closeModal();"><span style="color:' + o.s.color + '">' +
+            o.s.emoji + ' ' + o.s.name + '</span><span>x' + o.count + '</span></button>';
         }).join('') + '</div>';
       document.getElementById('modal-ok-btn').style.display = 'none';
       document.getElementById('modal-overlay').classList.add('open');
@@ -1251,30 +1280,33 @@
       document.getElementById('currency-pill').innerHTML = '\u{1F338} ' + state.currency;
     }
 
+    // Every row is the same price and the same payout, so the shop is a
+    // catalogue to pick a favourite from rather than a power ladder to climb.
     function renderShopRows() {
-      document.getElementById('shop-balance').innerHTML = 'You have <b>' + state.currency + '</b> \u{1F338} Petals';
-      document.getElementById('shop-rows').innerHTML = TIERS.map(function (t, i) {
-        var owned = state.seeds[t.key] || 0;
-        var afford = state.currency >= t.seedCost;
-        return '<div class="shop-row" style="border-color:' + t.color + '">' +
+      document.getElementById('shop-balance').innerHTML = 'You have <b>' + state.currency +
+        '</b> \u{1F338} Petals &bull; every seed is ' + SEED_COST + ' \u{1F338}, sells ' +
+        SELL_SINGLE + '-' + SELL_CLUSTER + ' \u{1F338}';
+      var afford = state.currency >= SEED_COST;
+      document.getElementById('shop-rows').innerHTML = SPECIES.map(function (s) {
+        var owned = state.seeds[s.key] || 0;
+        return '<div class="shop-row" style="border-color:' + s.color + '">' +
           '<div class="shop-row-info">' +
-          '<div class="shop-row-name" style="color:' + t.color + '">' + t.name + ' Seed</div>' +
-          '<div class="shop-row-meta">You have ' + owned + ' &bull; sells ' + t.sellSingle + '-' +
-          t.sellCluster + ' \u{1F338}</div></div>' +
-          '<button class="shop-buy-btn"' + (afford ? '' : ' disabled') + ' onclick="buySeed(' + i + ')">' +
-          t.seedCost + ' \u{1F338}</button></div>';
+          '<div class="shop-row-name" style="color:' + s.color + '">' + s.emoji + ' ' + s.name + '</div>' +
+          '<div class="shop-row-meta">You have ' + owned + '</div></div>' +
+          '<button class="shop-buy-btn"' + (afford ? '' : ' disabled') +
+          ' onclick="buySeed(\'' + s.key + '\')">' + SEED_COST + ' \u{1F338}</button></div>';
       }).join('');
     }
 
-    function buySeed(i) {
-      var t = TIERS[i];
-      if (state.currency < t.seedCost) return;
-      state.currency -= t.seedCost;
-      state.seeds[t.key] = (state.seeds[t.key] || 0) + 1;
+    function buySeed(speciesKey) {
+      if (state.currency < SEED_COST) return;
+      var s = speciesFor(speciesKey);
+      state.currency -= SEED_COST;
+      state.seeds[s.key] = (state.seeds[s.key] || 0) + 1;
       saveState();
       renderShopRows();
       updateCurrencyPill();
-      toast('Bought a ' + t.name + ' seed \u{1F331}');
+      toast('Bought a ' + s.name + ' seed \u{1F331}');
       vibrate(15);
       tutorialOnBuy();
     }
@@ -1412,10 +1444,12 @@
     // out on its own, so the step move to 'shop' below can't be clobbered.
     function tutorialOnHarvest(key, sell, value) {
       if (!tutorial.active || key !== tutorial.plantKey) return;
-      // A flat bonus (on top of any sale) guarantees a first seed is
-      // affordable either way - Keep is never presented as the "wrong"
-      // choice, this just makes sure the shop step isn't a wall for it.
-      var bonus = 15;
+      // A bonus (on top of any sale) guarantees a first seed is affordable
+      // either way - Keep is never presented as the "wrong" choice, this just
+      // makes sure the shop step isn't a wall for it. Tied to SEED_COST rather
+      // than a literal so it cannot silently stop covering a seed if the price
+      // is ever retuned; Keep pays nothing, so this bonus is the whole budget.
+      var bonus = SEED_COST;
       state.currency += bonus;
       saveState();
       updateCurrencyPill();

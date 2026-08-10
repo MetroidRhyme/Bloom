@@ -217,35 +217,62 @@
     }
     #shop-title { text-align: center; font-size: 18px; font-weight: 800; margin: 4px 0 2px; }
     #shop-balance { text-align: center; font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
-    /* Seven species now, so the sheet scrolls internally instead of growing
-       past the top of the screen on a short phone. */
-    #shop-rows { max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    .shop-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 12px 14px; border: 2px solid; border-radius: 16px; margin-bottom: 10px;
+    /* The stand: a wooden farmer's-market counter under a striped awning,
+       with a hand-painted price sign leaning over it. Pure CSS/gradients, no
+       image assets, matching the rest of the game's inline-SVG art. One
+       crate per seed on sale sits on the counter; fertilizer gets its own
+       sack off to the side rather than blending in with the seed row. */
+    #stand-scene { margin: 0 -22px; padding: 0 22px 4px; }
+    #stand-canopy {
+      height: 20px; margin: 0 -22px 4px;
+      background: repeating-linear-gradient(-45deg, #c0453c 0 16px, #f6ecd8 16px 32px);
+      border-bottom: 3px solid #6b4423;
     }
-    /* min-width:0 so the name column yields to the buy controls instead of
-       overflowing the row on a narrow phone - four swatches plus a species
-       name is the tightest thing in the shop. */
-    .shop-row-info { min-width: 0; }
-    .shop-row-name { font-size: 14.5px; font-weight: 800; }
-    .shop-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
-    /* One buy button per standard color, showing the flower it actually buys
-       rather than naming it - four labelled rows per species would make the
-       shop seven times longer for no extra information. */
-    .shop-swatches { display: flex; gap: 5px; flex-shrink: 0; }
-    .shop-swatch {
-      width: 38px; height: 38px; border: 2px solid; border-radius: 50%; padding: 0;
-      display: flex; align-items: center; justify-content: center; cursor: pointer;
-      box-shadow: var(--shadow-sm);
+    #stand-sign {
+      position: relative; left: 50%; transform: translateX(-50%) rotate(-2.5deg);
+      width: fit-content; margin: -22px 0 12px;
+      background: #7a5330; color: #fff6e0; border: 3px solid #5a3d22; border-radius: 8px;
+      padding: 7px 16px; font-size: 12.5px; font-weight: 800; text-align: center; line-height: 1.35;
+      box-shadow: var(--shadow-sm); white-space: nowrap;
     }
-    .shop-swatch:disabled { filter: grayscale(65%); opacity: 0.45; cursor: default; box-shadow: none; }
-    .shop-fert-btn {
-      flex-shrink: 0; padding: 10px 16px; border: none; border-radius: 12px;
-      font-size: 13.5px; font-weight: 800; cursor: pointer; color: #fff;
-      background: linear-gradient(90deg, var(--green), var(--green-dark)); box-shadow: var(--shadow-sm);
+    #stand-counter {
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;
+      background: repeating-linear-gradient(180deg, #b8824a 0 13px, #a06f3d 13px 15px);
+      border: 3px solid #6b4423; border-radius: 14px;
+      padding: 16px 14px 14px; box-shadow: inset 0 3px 10px rgba(0,0,0,0.28);
+      max-height: 44vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
-    .shop-fert-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
+    /* Seven crates, one per species on sale that day - auto-fill so the grid
+       stays tidy on any phone width without a hardcoded column count. */
+    #stand-seeds {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+      gap: 9px; flex: 3 1 220px;
+    }
+    .stand-item {
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%;
+      background: linear-gradient(180deg, #fff6e0, #ecdcb2); border: 2px solid #6b4423;
+      border-radius: 12px; padding: 8px 3px 6px; cursor: pointer; box-shadow: var(--shadow-sm);
+    }
+    .stand-item:disabled { filter: grayscale(60%); opacity: 0.5; cursor: default; box-shadow: none; }
+    .stand-item-name { font-size: 9.5px; font-weight: 800; color: #5a3d22; text-align: center; line-height: 1.15; }
+    .stand-item-price { font-size: 8.5px; font-weight: 700; color: #a06a00; }
+    .stand-item-owned { font-size: 8px; font-weight: 700; color: #8a7550; }
+    /* Fertilizer stands apart from the seed grid - its own sack, its own
+       column, a dashed line between them rather than one more crate. */
+    #stand-fert {
+      flex: 0 0 86px; display: flex; flex-direction: column; align-items: center;
+      padding-left: 14px; border-left: 2px dashed rgba(255,246,224,0.45);
+    }
+    .stand-fert-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%;
+      background: linear-gradient(180deg, #e8cfa0, #c9a565); border: 2px solid #6b4423;
+      border-radius: 12px; padding: 10px 6px 7px; cursor: pointer; box-shadow: var(--shadow-sm);
+    }
+    .stand-fert-btn:disabled { filter: grayscale(60%); opacity: 0.5; cursor: default; box-shadow: none; }
+    .stand-fert-icon { font-size: 26px; line-height: 1; }
+    .stand-fert-label { font-size: 9.5px; font-weight: 800; color: #5a3d22; text-align: center; }
+    .stand-fert-price { font-size: 8.5px; font-weight: 700; color: #a06a00; }
+    .stand-fert-owned { font-size: 8px; font-weight: 700; color: #8a7550; margin-top: 4px; }
     /* Purchase confirmation: what you are about to buy, drawn big enough to
        tell a Red Tulip from a Pink one before the Petals are gone. */
     .buy-preview {
@@ -425,7 +452,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.21.0</span>
+      <span id="game-version">v1.22.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -476,7 +503,14 @@
     <button id="shop-close-btn" onclick="closeShop()">&times;</button>
     <div id="shop-title">Seed Shop</div>
     <div id="shop-balance">&nbsp;</div>
-    <div id="shop-rows"></div>
+    <div id="stand-scene">
+      <div id="stand-canopy"></div>
+      <div id="stand-sign">&nbsp;</div>
+      <div id="stand-counter">
+        <div id="stand-seeds"></div>
+        <div id="stand-fert"></div>
+      </div>
+    </div>
   </div>
 
   <div id="modal-overlay">
@@ -696,6 +730,44 @@
         glow: '#5b4c85', spark: '#9ff0dc' }
     ];
     var STANDARD_COLORS = ['white', 'red', 'yellow', 'blue'];
+
+    // ---- Daily seed stand stock -------------------------------------------
+    // The shop is a market stand that restocks once per calendar day (local
+    // time), not on every open. Stock is a deterministic function of the
+    // date rather than stored state: one crate per species (there are
+    // exactly seven, hence "seven seeds on the stand today"), each wearing a
+    // random STANDARD color. Same day -> same seven, no matter how many
+    // times the panel is opened or the page reloaded; the color mix simply
+    // reshuffles the next time the date rolls over.
+    function dailyStockSeed(dateKey) {
+      var h = 0;
+      for (var i = 0; i < dateKey.length; i++) h = (Math.imul(31, h) + dateKey.charCodeAt(i)) | 0;
+      return h >>> 0;
+    }
+    // mulberry32 - small, seedable, good enough for picking paint colors.
+    function mulberry32(seed) {
+      return function () {
+        seed = (seed + 0x6D2B79F5) | 0;
+        var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    // Reuses localDayKey (see the WILD FLOWERS section below) so the stand
+    // rolls over at the same local midnight a wild flower's day does -
+    // one definition of "a new day" for the whole game.
+    var _dailyStockCache = null;
+    function dailyStock() {
+      var key = localDayKey();
+      if (_dailyStockCache && _dailyStockCache.key === key) return _dailyStockCache.list;
+      var rand = mulberry32(dailyStockSeed(key));
+      var list = SPECIES.map(function (s) {
+        var cid = STANDARD_COLORS[Math.floor(rand() * STANDARD_COLORS.length)];
+        return variantKey(s.key, cid);
+      });
+      _dailyStockCache = { key: key, list: list };
+      return list;
+    }
 
     // A color's species lock, or null if any species can wear it.
     function exclusiveSpeciesOf(colorId) { return colorFor(colorId).species || null; }
@@ -3156,51 +3228,43 @@
       document.getElementById('currency-pill').innerHTML = '\u{1F338} ' + state.currency;
     }
 
-    // Every row is the same price and the same payout, so the shop is a
-    // catalogue to pick a favourite from rather than a power ladder to climb.
-    //
-    // The shop stocks the STANDARD colors only. Everything past tier 0 has to
-    // be bred, so the shop is where you get raw material and breeding is the
-    // only route to the rest - buying a Purple outright would make the whole
-    // crossing loop optional.
+    // A farmer's-market stand rather than a catalogue: one crate per species
+    // sits out on the counter, restocked once a day (see dailyStock above),
+    // each wearing whichever STANDARD color today's shuffle gave it. Every
+    // crate is the same price, so the stand is a pick-a-favourite display,
+    // not a power ladder - and since it only ever shows STANDARD colors,
+    // breeding stays the only route to everything past tier 0.
     function renderShopRows() {
       document.getElementById('shop-balance').innerHTML = 'You have <b>' + state.currency +
-        '</b> \u{1F338} Petals &bull; every seed is ' + SEED_COST + ' \u{1F338}, sells ' +
-        SELL_SINGLE + '-' + SELL_CLUSTER + ' \u{1F338} &bull; standard colors only, ' +
-        'the rest are bred';
+        '</b> \u{1F338} Petals &bull; sells ' + SELL_SINGLE + '-' + SELL_CLUSTER +
+        ' \u{1F338} &bull; today\'s stand has one of each flower - the rest are bred';
+      document.getElementById('stand-sign').innerHTML = 'ALL ITEMS<br>' + SEED_COST + ' \u{1F338}';
       var afford = state.currency >= SEED_COST;
 
-      // Fertilizer leads the shop: it is the only non-seed thing for sale and
-      // the only way into the ten colors the rest of the shop cannot stock.
-      var fertRow = '<div class="shop-row" style="border-color:var(--green)">' +
-        '<div class="shop-row-info">' +
-        '<div class="shop-row-name" style="color:var(--green-dark)">Fertilizer</div>' +
-        '<div class="shop-row-meta">Cross two flourishing neighbours &bull; you have ' +
-        state.fertilizer + '</div></div>' +
-        '<button class="shop-fert-btn"' + (state.currency >= FERTILIZER_COST ? '' : ' disabled') +
-        ' onclick="confirmBuyFertilizer()">' + FERTILIZER_COST + ' \u{1F338}</button></div>';
-
-      document.getElementById('shop-rows').innerHTML = fertRow + SPECIES.map(function (s) {
-        var owned = Object.keys(state.seeds).reduce(function (n, vk) {
-          return n + (parseVariant(vk).species === s.key ? state.seeds[vk] : 0);
-        }, 0);
-        // A swatch per standard color, drawn as the actual flower it buys -
-        // shorter than four labelled rows per species, and it shows what you
-        // are getting rather than naming it.
-        var swatches = STANDARD_COLORS.map(function (cid) {
-          var c = colorFor(cid);
-          return '<button class="shop-swatch"' + (afford ? '' : ' disabled') +
-            ' title="' + c.name + ' ' + s.name + ' - ' + SEED_COST + ' Petals"' +
-            ' style="background:' + c.soft + ';border-color:' + c.line + '"' +
-            ' onclick="confirmBuySeed(\'' + variantKey(s.key, cid) + '\')">' +
-            speciesChip(s, cid, 26) + '</button>';
-        }).join('');
-        return '<div class="shop-row" style="border-color:' + s.line + '">' +
-          '<div class="shop-row-info">' +
-          '<div class="shop-row-name" style="color:' + s.ink + '">' + s.name + '</div>' +
-          '<div class="shop-row-meta">You have ' + owned + '</div></div>' +
-          '<div class="shop-swatches">' + swatches + '</div></div>';
+      document.getElementById('stand-seeds').innerHTML = dailyStock().map(function (vk) {
+        var v = parseVariant(vk), s = speciesFor(v.species), c = colorFor(v.color);
+        var owned = state.seeds[vk] || 0;
+        return '<button class="stand-item"' + (afford ? '' : ' disabled') +
+          ' title="' + c.name + ' ' + s.name + ' - ' + SEED_COST + ' Petals"' +
+          ' onclick="confirmBuySeed(\'' + vk + '\')">' +
+          speciesChip(s, v.color, 34) +
+          '<span class="stand-item-name">' + c.name + '<br>' + s.name + '</span>' +
+          '<span class="stand-item-price">' + SEED_COST + ' \u{1F338}</span>' +
+          (owned > 0 ? '<span class="stand-item-owned">have ' + owned + '</span>' : '') +
+          '</button>';
       }).join('');
+
+      // Fertilizer stands apart from the seed crates - the only non-seed
+      // thing for sale, and the only way into the colors the stand never
+      // stocks - so it gets its own sack instead of blending into the row.
+      document.getElementById('stand-fert').innerHTML =
+        '<button class="stand-fert-btn"' + (state.currency >= FERTILIZER_COST ? '' : ' disabled') +
+        ' title="Fertilizer - ' + FERTILIZER_COST + ' Petals" onclick="confirmBuyFertilizer()">' +
+        '<span class="stand-fert-icon">\u{1F33E}</span>' +
+        '<span class="stand-fert-label">Fertilizer</span>' +
+        '<span class="stand-fert-price">' + FERTILIZER_COST + ' \u{1F338}</span>' +
+        '<span class="stand-fert-owned">have ' + state.fertilizer + '</span>' +
+        '</button>';
     }
 
     // Nothing in the shop spends Petals on a single tap. The buy controls are

@@ -200,12 +200,16 @@
     }
     .shop-row-name { font-size: 14.5px; font-weight: 800; }
     .shop-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
-    .shop-buy-btn {
-      flex-shrink: 0; padding: 10px 16px; border: none; border-radius: 12px;
-      font-size: 13.5px; font-weight: 800; cursor: pointer; color: #fff;
-      background: linear-gradient(90deg, var(--green), var(--green-dark)); box-shadow: var(--shadow-sm);
+    /* One buy button per standard color, showing the flower it actually buys
+       rather than naming it - four labelled rows per species would make the
+       shop seven times longer for no extra information. */
+    .shop-swatches { display: flex; gap: 6px; flex-shrink: 0; }
+    .shop-swatch {
+      width: 42px; height: 42px; border: 2px solid; border-radius: 50%; padding: 0;
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      box-shadow: var(--shadow-sm);
     }
-    .shop-buy-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
+    .shop-swatch:disabled { filter: grayscale(65%); opacity: 0.45; cursor: default; box-shadow: none; }
 
     /* ================= MODAL ================= */
     #modal-overlay {
@@ -246,6 +250,27 @@
     }
     .inv-btn.sell { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; }
     .inv-btn.extract { background: #fff; color: var(--green-dark); border: 2px solid var(--green); }
+
+    /* Every color of one species, undiscovered ones dimmed - the collection's
+       real goal, so a gap reads as "still to breed". Auto-fill rather than a
+       fixed column count so it stays square on any phone width. */
+    .color-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+      gap: 7px; margin-bottom: 12px;
+    }
+    .color-cell {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 7px 2px; border-radius: 12px; background: rgba(255,255,255,0.55);
+      font-size: 9.5px; font-weight: 700; color: var(--text-dim); text-align: center;
+    }
+    .color-cell.missing { opacity: 0.26; filter: grayscale(70%); }
+    /* One bordered block per color held, so a Red and a Purple of the same
+       species never look like one interchangeable pile. */
+    .inv-variant {
+      border: 2px solid; border-radius: 14px; padding: 10px 13px 12px; margin-bottom: 10px;
+    }
+    .inv-variant-name { font-size: 14px; font-weight: 800; }
+    .inv-variant .inv-stack-title:first-of-type { margin-top: 8px; }
     .seed-pick-btn {
       display: flex; align-items: center; justify-content: space-between; width: 100%;
       padding: 13px 16px; border: 2px solid; border-radius: 14px; background: #fff;
@@ -296,7 +321,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.14.0</span>
+      <span id="game-version">v1.15.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -563,6 +588,46 @@
     // a wild flower. The fallback covers a record written before colors
     // existed that somehow escaped the load-time migration.
     function paletteOf(obj) { return colorFor(obj.color || baseColorOf(obj.species)); }
+
+    // ---- Variants --------------------------------------------------------
+    // A flower is a species AND a color, and both the seed pouch and the
+    // collection are keyed by the pair. One flat "species:color" string rather
+    // than a nested object keeps the save a simple dictionary (and keeps the
+    // migration from the old species-only keys to a single rename pass).
+    function variantKey(speciesKey, colorId) { return speciesKey + ':' + colorId; }
+    function parseVariant(vk) {
+      var i = vk.indexOf(':');
+      // A key with no colon predates colors; treat it as the species' base.
+      if (i < 0) return { species: vk, color: baseColorOf(vk) };
+      return { species: vk.slice(0, i), color: vk.slice(i + 1) };
+    }
+    // "Red Tulip". Color leads because within a species the color is the thing
+    // you bred for and the thing you are looking for in a list.
+    function variantName(vk) {
+      var v = parseVariant(vk);
+      return colorFor(v.color).name + ' ' + speciesFor(v.species).name;
+    }
+    function variantChip(vk, px) {
+      var v = parseVariant(vk);
+      return speciesChip(speciesFor(v.species), v.color, px);
+    }
+    // Colors sort by breeding tier so rarer things sink to the bottom of a
+    // list rather than scattering through it alphabetically.
+    function colorRank(id) {
+      for (var i = 0; i < COLORS.length; i++) if (COLORS[i].id === id) return i;
+      return 99;
+    }
+    function speciesRank(key) {
+      for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return i;
+      return 99;
+    }
+    function sortVariants(keys) {
+      return keys.sort(function (a, b) {
+        var x = parseVariant(a), y = parseVariant(b);
+        return (speciesRank(x.species) - speciesRank(y.species)) ||
+               (colorRank(x.color) - colorRank(y.color));
+      });
+    }
     // UI accent for text/borders that used to read species.color. Derived so
     // it always matches whatever the species' base color actually is.
     SPECIES.forEach(function (s) { s.color = colorFor(s.base).petal; });
@@ -636,7 +701,13 @@
     // values themselves, corrupting what a fresh/reset save starts with).
     // One of each of the first three, rather than three of one - a new player
     // meets the "pick which flower" choice on their very first plant.
-    function starterSeeds() { return { sunflower: 1, tulip: 1, daisy: 1 }; }
+    function starterSeeds() {
+      var out = {};
+      ['sunflower', 'tulip', 'daisy'].forEach(function (k) {
+        out[variantKey(k, baseColorOf(k))] = 1;
+      });
+      return out;
+    }
 
     // Seeds used to be counted per tier (common/rare/prized) and the species
     // was rolled at random within the tier. They are counted per species now,
@@ -650,15 +721,28 @@
     };
     function migrateSeeds(seeds) {
       if (!seeds) return starterSeeds();
+
+      // v1.2-v1.7: tier counts -> species counts.
       var isTierKeyed = Object.keys(seeds).some(function (k) { return OLD_TIER_SPECIES[k]; });
-      if (!isTierKeyed) return seeds;
+      if (isTierKeyed) {
+        var bySpecies = {};
+        Object.keys(OLD_TIER_SPECIES).forEach(function (tierKey) {
+          var pool = OLD_TIER_SPECIES[tierKey];
+          for (var i = 0; i < (seeds[tierKey] || 0); i++) {
+            var s = pool[i % pool.length];
+            bySpecies[s] = (bySpecies[s] || 0) + 1;
+          }
+        });
+        seeds = bySpecies;
+      }
+
+      // v1.8-v1.14: species counts -> species:color counts. A colorless seed
+      // becomes its species' base color, which is a standard the shop sells -
+      // never a bred color the player didn't earn.
       var out = {};
-      Object.keys(OLD_TIER_SPECIES).forEach(function (tierKey) {
-        var pool = OLD_TIER_SPECIES[tierKey];
-        for (var i = 0; i < (seeds[tierKey] || 0); i++) {
-          var s = pool[i % pool.length];
-          out[s] = (out[s] || 0) + 1;
-        }
+      Object.keys(seeds).forEach(function (k) {
+        var vk = k.indexOf(':') >= 0 ? k : variantKey(k, baseColorOf(k));
+        out[vk] = (out[vk] || 0) + (seeds[k] || 0);
       });
       return out;
     }
@@ -693,8 +777,15 @@
     // stage, so those totals are credited to `single` - wild picks are always
     // single blooms and so were most early keeps, and crediting clusters the
     // player may not have earned would hand out seeds they never worked for.
+    //
+    // v1.15 re-keys the collection from species to species:color. Pre-color
+    // keeps become their species' base color - the same standard the shop
+    // stocks - so an old collection reads as "found the common one", never as
+    // credit for a cross that was never bred. Merging is additive and keeps
+    // the earliest firstAt, so nothing is lost if both keys somehow exist.
     function migrateInventory(inv) {
       if (!inv) return {};
+      var out = {};
       Object.keys(inv).forEach(function (k) {
         var e = inv[k];
         if (typeof e.count === 'number' && typeof e.single !== 'number') {
@@ -704,8 +795,15 @@
         if (typeof e.single !== 'number') e.single = 0;
         if (typeof e.cluster !== 'number') e.cluster = 0;
         if (!e.firstAt) e.firstAt = Date.now();
+
+        var vk = k.indexOf(':') >= 0 ? k : variantKey(k, baseColorOf(k));
+        var prev = out[vk];
+        if (!prev) { out[vk] = e; return; }
+        prev.single += e.single;
+        prev.cluster += e.cluster;
+        prev.firstAt = Math.min(prev.firstAt, e.firstAt);
       });
-      return inv;
+      return out;
     }
 
     function loadState() {
@@ -858,16 +956,19 @@
     // attemptPlant/openSeedPicker) - this only re-checks defensively, it
     // doesn't surface its own error UI. Returns the new plant's hex key, or
     // null if there was no seed to spend.
-    function plantSeedAt(q, r, speciesKey) {
-      if (!(state.seeds[speciesKey] > 0)) return null;
-      state.seeds[speciesKey]--;
+    // Takes a variant key ("tulip:red"), not a bare species - a seed is a
+    // species and a color, and planting spends exactly the one chosen.
+    function plantSeedAt(q, r, vk) {
+      if (!(state.seeds[vk] > 0)) return null;
+      state.seeds[vk]--;
+      if (state.seeds[vk] <= 0) delete state.seeds[vk]; // keep the pouch tidy
 
       var now = Date.now();
-      var species = speciesFor(speciesKey).key;
+      var v = parseVariant(vk);
       var c = hexCenter(q, r);
       var key = hexKey(q, r);
       state.plants[key] = {
-        q: q, r: r, lat: c.lat, lng: c.lng, species: species, color: baseColorOf(species),
+        q: q, r: r, lat: c.lat, lng: c.lng, species: v.species, color: v.color,
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + STAGE_READY_MS,
         reachedBloom: false, reachedFlourish: false
       };
@@ -875,7 +976,7 @@
       saveState();
       renderPlants();
       updateHUD();
-      toast('\u{1F331} ' + speciesFor(speciesKey).name + ' planted! It will be ready for water in ' +
+      toast('\u{1F331} ' + variantName(vk) + ' planted! It will be ready for water in ' +
         formatDuration(STAGE_READY_MS) + '.');
       vibrate(20);
       tutorialOnPlant(key);
@@ -887,8 +988,9 @@
     // on the map never silently spends a seed - points at the shop instead
     // when there's nothing to plant.
     function attemptPlant(q, r) {
-      var owned = SPECIES.map(function (s) { return { s: s, count: state.seeds[s.key] || 0 }; })
-        .filter(function (o) { return o.count > 0; });
+      var owned = sortVariants(Object.keys(state.seeds).filter(function (vk) {
+        return state.seeds[vk] > 0;
+      })).map(function (vk) { return { vk: vk, count: state.seeds[vk] }; });
       if (owned.length === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
       openSeedPicker(q, r, owned);
     }
@@ -934,9 +1036,9 @@
     // running total, so the flower vanished off the map leaving no trace of
     // what it had been - this is what makes Keep a real choice rather than a
     // discard, and what the collection screen lists.
-    function addToInventory(speciesKey, isCluster) {
-      var e = state.inventory[speciesKey];
-      if (!e) e = state.inventory[speciesKey] = { single: 0, cluster: 0, firstAt: Date.now() };
+    function addToInventory(vk, isCluster) {
+      var e = state.inventory[vk];
+      if (!e) e = state.inventory[vk] = { single: 0, cluster: 0, firstAt: Date.now() };
       if (isCluster) e.cluster++; else e.single++;
     }
 
@@ -948,8 +1050,8 @@
       var p = state.plants[key];
       if (!p) return;
       var d = recomputePlant(p, Date.now());
-      var species = speciesFor(p.species);
-      var label = species.name + (d.stage >= 3 ? ' cluster' : '');
+      var vk = variantKey(p.species, p.color || baseColorOf(p.species));
+      var label = variantName(vk) + (d.stage >= 3 ? ' cluster' : '');
       delete state.plants[key];
 
       if (sell) {
@@ -960,7 +1062,7 @@
         toast('Sold your ' + label + ' for ' + val + ' \u{1F338}');
       } else {
         state.stats.kept++;
-        addToInventory(p.species, d.stage >= MAX_STAGE);
+        addToInventory(vk, d.stage >= MAX_STAGE);
         toast('Kept your ' + label + ' \u{1F33C} - it\'s in your collection');
       }
 
@@ -1630,7 +1732,8 @@
       iconEl.style.width = v.w + 'px';
       iconEl.style.height = v.h + 'px';
 
-      document.getElementById('plant-title').textContent = 'Wild ' + species.name;
+      document.getElementById('plant-title').textContent =
+        'Wild ' + variantName(variantKey(w.species, w.color || baseColorOf(w.species)));
       document.getElementById('plant-meta').textContent = 'Found growing wild \u{1F33C} ' + formatAgo(w.spawnedAt);
 
       // The growth bar is reused as a life bar here - a wild flower doesn't
@@ -1674,18 +1777,18 @@
     function pickWild(key, sell) {
       var w = state.wild[key];
       if (!w) return;
-      var species = speciesFor(w.species);
+      var vk = variantKey(w.species, w.color || baseColorOf(w.species));
       delete state.wild[key];
 
       if (sell) {
         state.currency += SELL_SINGLE;
         state.stats.sold++;
         state.stats.earned += SELL_SINGLE;
-        toast('Sold a wild ' + species.name + ' for ' + SELL_SINGLE + ' \u{1F338}');
+        toast('Sold a wild ' + variantName(vk) + ' for ' + SELL_SINGLE + ' \u{1F338}');
       } else {
         state.stats.kept++;
-        addToInventory(w.species, false); // wild blooms are always single-stage
-        toast('Picked a wild ' + species.name + ' \u{1F33C} - it\'s in your collection');
+        addToInventory(vk, false); // wild blooms are always single-stage
+        toast('Picked a wild ' + variantName(vk) + ' \u{1F33C} - it\'s in your collection');
       }
 
       saveState();
@@ -1713,7 +1816,9 @@
       iconEl.style.width = v.w + 'px';
       iconEl.style.height = v.h + 'px';
 
-      document.getElementById('plant-title').textContent = species.name + ' - ' + STAGE_LABELS[d.stage];
+      document.getElementById('plant-title').textContent =
+        variantName(variantKey(p.species, p.color || baseColorOf(p.species))) +
+        ' - ' + STAGE_LABELS[d.stage];
       document.getElementById('plant-meta').textContent = 'Planted ' + formatAgo(p.plantedAt);
 
       // The bar fills across the readiness wait, so it reads as "this plant is
@@ -1904,9 +2009,14 @@
         'never wasted - it still tops up the tank and holds off wilting.</p>' +
         '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and Keep it or Sell ' +
         'it for Petals \u{1F338} - clusters sell for much more than a single bloom. Kept flowers go into ' +
-        'Your Collection in the menu, where you can see every kind you\'ve found.</p>' +
-        '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds. All seven flowers cost the same ' +
-        'and sell for the same, so pick by looks, not by value.</p>' +
+        'Your Collection in the menu, which tracks all ' + TOTAL_VARIANTS +
+        ' flowers - every color of every species.</p>' +
+        '<p><b>Color</b> - every flower has a species (its shape) and a color, and any color can turn ' +
+        'up on any species. Four colors are standard - White, Red, Yellow and Blue - and those are the ' +
+        'only ones the shop sells or wild flowers grow in. The other ' + (COLORS.length - 4) +
+        ' have to be bred.</p>' +
+        '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds, one swatch per standard color. ' +
+        'Every seed costs the same and every flower sells for the same, so pick by looks, not by value.</p>' +
         '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, up to ten wild blooms are scattered ' +
         'around you, marked with a soft glow. They cost nothing - just walk over and pick one. Unlike your ' +
         'own flowers they don\'t last: a wild bloom wilts after 12 hours and is gone 6 hours later, so ' +
@@ -1922,22 +2032,36 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    function heldOf(speciesKey, isCluster) {
-      var e = state.inventory[speciesKey];
+    function heldOf(vk, isCluster) {
+      var e = state.inventory[vk];
       if (!e) return 0;
       return (isCluster ? e.cluster : e.single) || 0;
     }
-    function heldTotalOf(speciesKey) { return heldOf(speciesKey, false) + heldOf(speciesKey, true); }
+    function heldTotalOf(vk) { return heldOf(vk, false) + heldOf(vk, true); }
     function totalHeld() {
-      return SPECIES.reduce(function (n, s) { return n + heldTotalOf(s.key); }, 0);
+      return Object.keys(state.inventory).reduce(function (n, vk) {
+        return n + heldTotalOf(vk);
+      }, 0);
     }
+    // Every variant of one species that has ever been kept, rarest last.
+    function discoveredColorsOf(speciesKey) {
+      return sortVariants(Object.keys(state.inventory).filter(function (vk) {
+        return parseVariant(vk).species === speciesKey;
+      }));
+    }
+    function heldOfSpecies(speciesKey) {
+      return discoveredColorsOf(speciesKey).reduce(function (n, vk) {
+        return n + heldTotalOf(vk);
+      }, 0);
+    }
+    var TOTAL_VARIANTS = SPECIES.length * COLORS.length;
 
     // Sell held flowers straight from the collection at the same rate as
     // harvesting them in the field would have paid.
-    function sellHeld(speciesKey, isCluster, qty) {
-      var e = state.inventory[speciesKey];
+    function sellHeld(vk, isCluster, qty) {
+      var e = state.inventory[vk];
       if (!e) return;
-      qty = Math.min(qty, heldOf(speciesKey, isCluster));
+      qty = Math.min(qty, heldOf(vk, isCluster));
       if (qty <= 0) return;
 
       var total = (isCluster ? SELL_CLUSTER : SELL_SINGLE) * qty;
@@ -1948,19 +2072,19 @@
 
       saveState();
       updateCurrencyPill();
-      toast('Sold ' + qty + ' ' + speciesFor(speciesKey).name +
+      toast('Sold ' + qty + ' ' + variantName(vk) +
         (isCluster ? ' cluster' : ' bloom') + (qty === 1 ? '' : 's') + ' for ' + total + ' \u{1F338}');
       vibrate(20);
-      renderInventoryDetail(speciesKey);
+      renderInventoryDetail(parseVariant(vk).species);
     }
 
     // Pull held flowers apart for seeds of that same species. Rolled per
     // flower rather than once for the batch, so extracting five at once has
     // the same spread as extracting one five times.
-    function extractHeld(speciesKey, isCluster, qty) {
-      var e = state.inventory[speciesKey];
+    function extractHeld(vk, isCluster, qty) {
+      var e = state.inventory[vk];
       if (!e) return;
-      qty = Math.min(qty, heldOf(speciesKey, isCluster));
+      qty = Math.min(qty, heldOf(vk, isCluster));
       if (qty <= 0) return;
 
       var gained = 0;
@@ -1968,15 +2092,18 @@
         gained += rollSeedYield(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
       }
       if (isCluster) e.cluster -= qty; else e.single -= qty;
-      state.seeds[speciesKey] = (state.seeds[speciesKey] || 0) + gained;
+      // Extraction returns the exact variant it consumed, color included. That
+      // is what makes a bred color self-sustaining once you have one, and why
+      // the shop (standards only) still matters for anything you lack.
+      state.seeds[vk] = (state.seeds[vk] || 0) + gained;
       state.stats.extracted += gained;
 
       saveState();
-      toast('\u{1F331} Got ' + gained + ' ' + speciesFor(speciesKey).name + ' seed' +
+      toast('\u{1F331} Got ' + gained + ' ' + variantName(vk) + ' seed' +
         (gained === 1 ? '' : 's') + ' from ' + qty + ' ' + (isCluster ? 'cluster' : 'bloom') +
         (qty === 1 ? '' : 's'));
       vibrate(25);
-      renderInventoryDetail(speciesKey);
+      renderInventoryDetail(parseVariant(vk).species);
     }
 
     // Every flower you've chosen to Keep, by species. Two levels sharing one
@@ -1994,27 +2121,36 @@
       document.getElementById('modal-title').textContent = 'Your Collection \u{1F33C}';
 
       var held = totalHeld();
-      var discovered = SPECIES.filter(function (s) { return !!state.inventory[s.key]; }).length;
+      var foundVariants = Object.keys(state.inventory).length;
       var html = '<p>Holding <b>' + held + '</b> flower' + (held === 1 ? '' : 's') +
-        ' &bull; <b>' + discovered + ' of ' + SPECIES.length + '</b> kinds discovered.</p>';
+        ' &bull; <b>' + foundVariants + ' of ' + TOTAL_VARIANTS + '</b> flowers discovered.</p>';
 
+      // One row per species, not per variant: 98 rows would bury the seven
+      // shapes the game actually has. The colors of a species live one level
+      // down, where the sell/extract actions are anyway.
       html += '<div class="inv-list">' + SPECIES.map(function (s) {
-        var e = state.inventory[s.key];
-        if (!e) {
+        var found = discoveredColorsOf(s.key);
+        if (!found.length) {
           return '<div class="inv-row missing">' +
             '<div><div class="inv-name">' + speciesChip(s) + ' ' + s.name + '</div>' +
             '<div class="inv-meta">Not found yet</div></div>' +
             '<div class="inv-count">-</div></div>';
         }
-        var bits = [];
-        if (e.single > 0) bits.push(e.single + ' bloom' + (e.single === 1 ? '' : 's'));
-        if (e.cluster > 0) bits.push(e.cluster + ' cluster' + (e.cluster === 1 ? '' : 's'));
-        var total = e.single + e.cluster;
-        return '<div class="inv-row" style="border-color:' + s.color + ';cursor:pointer" ' +
+        var total = heldOfSpecies(s.key);
+        var firstAt = found.reduce(function (t, vk) {
+          return Math.min(t, state.inventory[vk].firstAt);
+        }, Infinity);
+        // The row is coloured by the rarest color of this species you own, so
+        // the list itself shows off what you've bred.
+        var best = colorFor(parseVariant(found[found.length - 1]).color);
+        return '<div class="inv-row" style="border-color:' + best.petal + ';cursor:pointer" ' +
           'onclick="renderInventoryDetail(\'' + s.key + '\')">' +
-          '<div><div class="inv-name" style="color:' + s.color + '">' + speciesChip(s) + ' ' + s.name + '</div>' +
-          '<div class="inv-meta">' + (bits.length ? bits.join(', ') : 'None held right now') +
-          ' &bull; first kept ' + formatAgo(e.firstAt) + '</div></div>' +
+          '<div><div class="inv-name" style="color:' + best.petal + '">' +
+          found.slice(-4).map(function (vk) { return variantChip(vk); }).join('') +
+          ' ' + s.name + '</div>' +
+          '<div class="inv-meta">' + found.length + ' of ' + COLORS.length + ' colors &bull; ' +
+          (total > 0 ? total + ' held' : 'none held right now') +
+          ' &bull; first kept ' + formatAgo(firstAt) + '</div></div>' +
           '<div class="inv-count">' + (total > 0 ? 'x' + total : '0') + '</div></div>';
       }).join('') + '</div>';
 
@@ -2033,13 +2169,13 @@
     // One stack (blooms or clusters) and its actions. Offers "1" and "all N"
     // rather than a quantity stepper - it covers "one or more" without adding
     // a fiddly control to a bottom-sheet-sized modal.
-    function inventoryStackHtml(s, isCluster) {
-      var n = heldOf(s.key, isCluster);
+    function inventoryStackHtml(vk, isCluster) {
+      var n = heldOf(vk, isCluster);
       if (n <= 0) return '';
       var label = isCluster ? 'Cluster' : 'Bloom';
       var each = isCluster ? SELL_CLUSTER : SELL_SINGLE;
       var yieldText = isCluster ? '2-4 seeds' : '1-2 seeds';
-      var args = '\'' + s.key + '\',' + (isCluster ? 'true' : 'false') + ',';
+      var args = '\'' + vk + '\',' + (isCluster ? 'true' : 'false') + ',';
 
       var html = '<div class="inv-stack-title">' + label + 's &times; ' + n +
         ' <span style="font-weight:600;color:var(--text-dim)">(' + each + ' \u{1F338} or ' +
@@ -2062,16 +2198,42 @@
       // innerHTML, not textContent - the chip is inline SVG markup.
       document.getElementById('modal-title').innerHTML = speciesChip(s, null, 22) + ' ' + s.name;
 
-      var html = '';
-      var stacks = inventoryStackHtml(s, false) + inventoryStackHtml(s, true);
-      if (stacks) {
-        html += '<p style="color:var(--text-dim)">Selling pays Petals you can spend on any flower. ' +
-          'Extracting gives back ' + s.name + ' seeds only.</p>' + stacks;
+      var found = discoveredColorsOf(speciesKey);
+
+      // The full palette up front, undiscovered colors dimmed - this is the
+      // collection's actual goal, and a gap is meant to read as "still to
+      // breed" rather than as a short list.
+      var html = '<div class="color-grid">' + COLORS.map(function (c) {
+        var vk = variantKey(speciesKey, c.id);
+        var have = !!state.inventory[vk];
+        return '<div class="color-cell' + (have ? '' : ' missing') + '" title="' + c.name + '">' +
+          speciesChip(s, c.id, 30) + '<span>' + c.name + '</span></div>';
+      }).join('') + '</div>' +
+        '<p style="color:var(--text-dim)"><b>' + found.length + ' of ' + COLORS.length +
+        '</b> colors of ' + s.name + ' found.</p>';
+
+      // One sell/extract block per color held, rather than a third modal
+      // level. Selling and extracting are per-variant now, so a Red and a
+      // Purple of the same species can't be spent interchangeably.
+      var anyHeld = false;
+      found.forEach(function (vk) {
+        var stacks = inventoryStackHtml(vk, false) + inventoryStackHtml(vk, true);
+        if (!stacks) return;
+        anyHeld = true;
+        var c = colorFor(parseVariant(vk).color);
+        html += '<div class="inv-variant" style="border-color:' + c.petal + '">' +
+          '<div class="inv-variant-name" style="color:' + c.petal + '">' + variantChip(vk, 20) +
+          ' ' + variantName(vk) + '</div>' + stacks +
+          '<div class="inv-meta">' + (state.seeds[vk] || 0) + ' seed' +
+          ((state.seeds[vk] || 0) === 1 ? '' : 's') + ' in your pouch</div></div>';
+      });
+
+      if (anyHeld) {
+        html += '<p style="color:var(--text-dim)">Selling pays Petals you can spend on any seed. ' +
+          'Extracting gives back seeds of that exact color.</p>';
       } else {
         html += '<p>You aren\'t holding any ' + s.name + ' right now. Keep one to add it back.</p>';
       }
-      html += '<p style="color:var(--text-dim)">' + (state.seeds[s.key] || 0) + ' ' + s.name +
-        ' seed' + ((state.seeds[s.key] || 0) === 1 ? '' : 's') + ' in your pouch.</p>';
 
       document.getElementById('modal-body').innerHTML = html;
       document.getElementById('modal-ok-btn').textContent = 'Back to collection';
@@ -2094,7 +2256,9 @@
 
       if (near) {
         var nd = wildDerived(near.w, Date.now());
-        html += '<p>The nearest is a <b>' + speciesFor(near.w.species).name + '</b>, about <b>' +
+        html += '<p>The nearest is a <b>' +
+          variantName(variantKey(near.w.species, near.w.color || baseColorOf(near.w.species))) +
+          '</b>, about <b>' +
           Math.round(near.dist) + 'm</b> to the <b>' + near.dir + '</b>' +
           (nd.wilted ? ', already wilting' : '') + ' - fades in <b>' + formatDuration(nd.goneIn) + '</b>.</p>';
       } else if (n > 0) {
@@ -2126,9 +2290,11 @@
       document.getElementById('modal-title').textContent = 'Choose a Seed';
       document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
         owned.map(function (o) {
-          return '<button class="seed-pick-btn" style="border-color:' + o.s.color + '" onclick="plantSeedAt(' +
-            q + ',' + r + ',\'' + o.s.key + '\');closeModal();"><span style="color:' + o.s.color + '">' +
-            speciesChip(o.s) + ' ' + o.s.name + '</span><span>x' + o.count + '</span></button>';
+          var c = colorFor(parseVariant(o.vk).color);
+          return '<button class="seed-pick-btn" style="border-color:' + c.petal +
+            '" onclick="plantSeedAt(' + q + ',' + r + ',\'' + o.vk + '\');closeModal();">' +
+            '<span style="color:' + c.petal + '">' + variantChip(o.vk) + ' ' + variantName(o.vk) +
+            '</span><span>x' + o.count + '</span></button>';
         }).join('') + '</div>';
       document.getElementById('modal-ok-btn').style.display = 'none';
       document.getElementById('modal-overlay').classList.add('open');
@@ -2156,31 +2322,51 @@
 
     // Every row is the same price and the same payout, so the shop is a
     // catalogue to pick a favourite from rather than a power ladder to climb.
+    //
+    // The shop stocks the STANDARD colors only. Everything past tier 0 has to
+    // be bred, so the shop is where you get raw material and breeding is the
+    // only route to the rest - buying a Purple outright would make the whole
+    // crossing loop optional.
     function renderShopRows() {
       document.getElementById('shop-balance').innerHTML = 'You have <b>' + state.currency +
         '</b> \u{1F338} Petals &bull; every seed is ' + SEED_COST + ' \u{1F338}, sells ' +
-        SELL_SINGLE + '-' + SELL_CLUSTER + ' \u{1F338}';
+        SELL_SINGLE + '-' + SELL_CLUSTER + ' \u{1F338} &bull; standard colors only, ' +
+        'the rest are bred';
       var afford = state.currency >= SEED_COST;
       document.getElementById('shop-rows').innerHTML = SPECIES.map(function (s) {
-        var owned = state.seeds[s.key] || 0;
+        var owned = Object.keys(state.seeds).reduce(function (n, vk) {
+          return n + (parseVariant(vk).species === s.key ? state.seeds[vk] : 0);
+        }, 0);
+        // A swatch per standard color, drawn as the actual flower it buys -
+        // shorter than four labelled rows per species, and it shows what you
+        // are getting rather than naming it.
+        var swatches = STANDARD_COLORS.map(function (cid) {
+          var c = colorFor(cid);
+          return '<button class="shop-swatch"' + (afford ? '' : ' disabled') +
+            ' title="' + c.name + ' ' + s.name + ' - ' + SEED_COST + ' Petals"' +
+            ' style="background:' + c.soft + ';border-color:' + c.petal + '"' +
+            ' onclick="buySeed(\'' + variantKey(s.key, cid) + '\')">' +
+            speciesChip(s, cid, 26) + '</button>';
+        }).join('');
         return '<div class="shop-row" style="border-color:' + s.color + '">' +
           '<div class="shop-row-info">' +
-          '<div class="shop-row-name" style="color:' + s.color + '">' + speciesChip(s) + ' ' + s.name + '</div>' +
+          '<div class="shop-row-name" style="color:' + s.color + '">' + s.name + '</div>' +
           '<div class="shop-row-meta">You have ' + owned + '</div></div>' +
-          '<button class="shop-buy-btn"' + (afford ? '' : ' disabled') +
-          ' onclick="buySeed(\'' + s.key + '\')">' + SEED_COST + ' \u{1F338}</button></div>';
+          '<div class="shop-swatches">' + swatches + '</div></div>';
       }).join('');
     }
 
-    function buySeed(speciesKey) {
+    function buySeed(vk) {
       if (state.currency < SEED_COST) return;
-      var s = speciesFor(speciesKey);
+      // Guard the shop's own rule at the point of purchase, not just in the
+      // markup that renders it.
+      if (STANDARD_COLORS.indexOf(parseVariant(vk).color) < 0) return;
       state.currency -= SEED_COST;
-      state.seeds[s.key] = (state.seeds[s.key] || 0) + 1;
+      state.seeds[vk] = (state.seeds[vk] || 0) + 1;
       saveState();
       renderShopRows();
       updateCurrencyPill();
-      toast('Bought a ' + s.name + ' seed \u{1F331}');
+      toast('Bought a ' + variantName(vk) + ' seed \u{1F331}');
       vibrate(15);
       tutorialOnBuy();
     }

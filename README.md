@@ -34,6 +34,8 @@ Every flower has a **species** (its shape - Sunflower, Tulip, Daisy, Hibiscus, B
 
 Four colors are **standard** - White, Red, Yellow and Blue. Those are the only ones the shop stocks and the only ones wild flowers grow in. Everything else has to be bred.
 
+Seeds carry their color, so a "Red Tulip seed" is a specific thing: planting one grows a red tulip, and extracting a red tulip gives red tulip seeds back. Your collection tracks all **98** flowers - 14 colors across 7 species - and the shop is the only way to get something you've never held.
+
 ### Wilting
 
 Flowers left dry for 48 hours look wilted, and that is the entire consequence - it's cosmetic. Watering clears it. **Flowers never die and are never removed except by harvesting them.** A browser page can't send you a reminder, so a real neglect penalty would land as an unannounced loss on someone who had no way to see it coming. Wilting is a nudge, not a punishment.
@@ -48,7 +50,7 @@ Once per day, the first time you open the game, up to 10 wild flowers scatter at
 
 - **Single file** - the entire game is `index.html` with no build step, same backbone approach as [PorterGame](https://github.com/MetroidRhyme/PorterGame).
 - **Dependencies** - [Leaflet 1.9.4](https://leafletjs.com/) loaded from CDN; CartoDB Voyager tiles for a colorful basemap.
-- **Storage** - all state lives in a single `localStorage` key (`bloom_state_v1`). Corrupted saves fall back to defaults rather than breaking load. Saves from before the seed economy existed are migrated with starter seeds bootstrapped in automatically.
+- **Storage** - all state lives in a single `localStorage` key (`bloom_state_v1`). Corrupted saves fall back to defaults rather than breaking load. Every historical save format is migrated forward on load: pre-economy saves get starter seeds bootstrapped in, tier-keyed seeds are dealt out per species, and species-keyed seeds and collections are re-keyed to `species:color` with the species' standard base color - never a bred rarity the player didn't earn.
 - **Hex grid** - flat-top axial coordinates (q, r), same ~20 m cell size as Porter; longitude is corrected for the player's latitude on first GPS lock. A soft translucent mesh is drawn once zoomed in close (17+).
 - **Player position** - the player isn't shown as a marker, only as a translucent green range circle, so it never sits on top of (and hides) a nearby flower. The circle snaps to the current hex's center rather than following raw GPS, and eases smoothly between hexes.
 - **Flower artwork is generated SVG** - every flower is drawn at runtime from a species *shape* (rows of petals, described as data) painted with a *color* palette, so any color can be worn by any species without a single new asset. Flowers used to be system emoji glyphs, which meant their colors came from a font the game doesn't control - unrecolorable, and different on every device.

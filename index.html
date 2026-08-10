@@ -333,6 +333,113 @@
       font-size: 15.5px; font-weight: 800; text-align: center;
     }
 
+    /* ================= JOURNAL PANEL ================= */
+    /* Full-screen like the shop, but dressed as a kept journal instead of a
+       market stand: a page (#journal-sheet) resting on a table-colored
+       backdrop. "Thicker paper" is a two-step drop shadow standing in for
+       pages stacked underneath, plus a darker spine strip down the left
+       edge as if the pages were bound there - CSS gradients and
+       box-shadows only, the same trick the shop's crates use, no image
+       assets. */
+    #journal-panel {
+      position: fixed; inset: 0; z-index: 1100;
+      background: #cdb98c;
+      padding: calc(54px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-direction: column;
+      transform: translateY(105%);
+      transition: transform 0.28s ease;
+    }
+    #journal-panel.open { transform: translateY(0); }
+    #journal-close-btn {
+      position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px;
+      width: 32px; height: 32px; border-radius: 50%; z-index: 3;
+      border: none; background: rgba(0,0,0,0.16); color: #fff; font-size: 18px; cursor: pointer;
+    }
+    /* The page itself: faint ruled lines, a couple of soft aged-paper
+       blotches, and the stacked-edge shadow. Content is padded clear of
+       the spine strip (::before) rather than sitting on top of it. */
+    #journal-sheet {
+      position: relative; flex: 1 1 auto; min-height: 0;
+      margin: 0 8px 8px 0;
+      border: 1px solid rgba(90,61,34,0.32); border-radius: 4px 16px 16px 4px;
+      background:
+        repeating-linear-gradient(180deg, transparent 0 27px, rgba(120,90,50,0.11) 27px 28px),
+        radial-gradient(ellipse 340px 200px at 18% 12%, rgba(150,110,60,0.08), transparent 60%),
+        radial-gradient(ellipse 300px 240px at 88% 85%, rgba(150,110,60,0.07), transparent 60%),
+        linear-gradient(#faf1da, #f0dfb8);
+      box-shadow: 5px 5px 0 -1px #e6d5a8, 9px 9px 0 -2px #dbc794, 0 12px 24px rgba(50,32,15,0.3);
+      display: flex; flex-direction: column; overflow: hidden;
+      padding: 16px 16px 14px 28px;
+    }
+    #journal-sheet::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 14px;
+      background: linear-gradient(90deg, rgba(90,61,34,0.45), rgba(90,61,34,0.05));
+      border-radius: 4px 0 0 4px;
+    }
+    #journal-heading {
+      flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-size: 19px; font-weight: 800; color: #4a3218; margin: 0 0 6px; text-align: center;
+    }
+    #journal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    /* The scrapbook page: found colors get a looser grid than the crossing
+       notes' plain swatch grid (.color-grid) does, since every found cell
+       here is a little taped-down photo rather than a dot - it needs the
+       extra room for the tape to overhang without crowding its neighbors. */
+    .scrapbook-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+      gap: 22px 12px; margin: 10px 0 16px; padding-top: 4px;
+    }
+    /* Every found color is a photo taped to the page: an off-white card, a
+       drop shadow to lift it off the paper, a slight per-cell tilt (cycled
+       by grid position, not random, so it never jitters on re-render), and
+       two rotated strips of tape over the top corners. An unfound color
+       stays a plain dashed pocket instead - nothing is taped down yet. */
+    .color-cell.slot {
+      position: relative; border: none; padding: 10px 4px 7px; border-radius: 3px;
+      background: #fffdf7; box-shadow: 0 3px 7px rgba(60,40,20,0.3);
+      transform: rotate(var(--tilt, -2deg));
+    }
+    .color-cell.slot:nth-child(4n+2) { --tilt: 2.5deg; }
+    .color-cell.slot:nth-child(4n+3) { --tilt: -1.5deg; }
+    .color-cell.slot:nth-child(4n) { --tilt: 1.5deg; }
+    .color-cell.slot.held { cursor: pointer; }
+    .color-cell.slot.picked {
+      box-shadow: 0 0 0 2px var(--green), 0 6px 12px rgba(60,40,20,0.32);
+      transform: rotate(0deg) scale(1.05); z-index: 1;
+    }
+    .color-cell.slot:not(.blank)::before,
+    .color-cell.slot:not(.blank)::after {
+      content: ''; position: absolute; top: -7px; width: 26px; height: 14px;
+      background: rgba(255,244,214,0.85); border: 1px solid rgba(160,120,60,0.4);
+      box-shadow: 0 1px 2px rgba(60,40,20,0.28);
+    }
+    .color-cell.slot:not(.blank)::before { left: -6px; transform: rotate(-40deg); }
+    .color-cell.slot:not(.blank)::after { right: -6px; transform: rotate(40deg); }
+    .color-cell.slot span:last-child { font-style: italic; }
+    /* An unfound color is a plain grey question mark in a dashed pocket -
+       not a photo, since nothing has been taped down yet. */
+    .color-cell.slot.blank {
+      background: transparent; border: 2px dashed rgba(90,61,34,0.3);
+      box-shadow: none; color: #a49d90; transform: none;
+    }
+    .slot-unknown {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: 50%; font-size: 15px; font-weight: 800;
+      background: rgba(60,40,20,0.07); color: #a49d90;
+    }
+    /* Moved off the top-right corner, which the tape now occupies - reads
+       as a small sticker on the photo's corner instead. Kept inside the
+       card's own bounds (not overhanging, unlike the tape) since a cell in
+       the grid's last column sits close enough to the page's edge that an
+       overhanging badge got clipped by journal-sheet's overflow:hidden. */
+    .slot-count {
+      position: absolute; bottom: 3px; right: 3px; min-width: 17px; padding: 0 4px;
+      border-radius: 9px; font-size: 10px; font-weight: 800; line-height: 17px;
+      background: rgba(60,40,20,0.78); color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.32);
+    }
+    .slot-count.some { background: var(--green); color: #fff; }
+
     /* ================= MODAL ================= */
     #modal-overlay {
       position: fixed; inset: 0; z-index: 1500; background: rgba(30,25,15,0.4);
@@ -376,28 +483,9 @@
       font-size: 9.5px; font-weight: 700; color: var(--text-dim); text-align: center;
     }
     .color-cell.missing { opacity: 0.26; filter: grayscale(70%); }
-
-    /* Journal page: the same color grid, but every spot is a slot in a stamp
-       album - it carries the count you're holding and, once tapped, the
-       sell/extract actions for that one color. */
-    .color-cell.slot { position: relative; border: 2px solid transparent; padding-top: 9px; }
-    .color-cell.slot.held { cursor: pointer; }
-    .color-cell.slot.picked { border-color: var(--green); background: #fff; }
-    /* An unfound color is a plain grey question mark, not a ghosted flower.
-       Showing the silhouette gave away the shape-plus-colour combination and
-       read as something half-owned; a blank spot is meant to read as blank. */
-    .color-cell.slot.blank { background: rgba(255,255,255,0.3); color: #a49d90; }
-    .slot-unknown {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 30px; height: 30px; border-radius: 50%; font-size: 15px; font-weight: 800;
-      background: rgba(60,40,20,0.07); color: #a49d90;
-    }
-    .slot-count {
-      position: absolute; top: 2px; right: 2px; min-width: 17px; padding: 0 4px;
-      border-radius: 9px; font-size: 10px; font-weight: 800; line-height: 17px;
-      background: rgba(60,40,20,0.12); color: var(--text-dim);
-    }
-    .slot-count.some { background: var(--green); color: #fff; }
+    /* .color-cell.slot (the journal page's own spots) is styled in the
+       JOURNAL PANEL section below, as a taped-down scrapbook photo rather
+       than a plain swatch. */
 
     /* Bookmarks along the top of the journal - one tab per species, so
        switching flower is one tap from anywhere instead of a trip back out to
@@ -504,7 +592,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.23.2</span>
+      <span id="game-version">v1.24.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -567,6 +655,14 @@
         <div id="stand-row-2" class="stand-row stand-row-crates"></div>
         <div id="stand-row-3" class="stand-row stand-row-last"></div>
       </div>
+    </div>
+  </div>
+
+  <div id="journal-panel">
+    <button id="journal-close-btn" onclick="closeJournal()">&times;</button>
+    <div id="journal-sheet">
+      <div id="journal-heading"></div>
+      <div id="journal-body"></div>
     </div>
   </div>
 
@@ -2286,7 +2382,7 @@
     }
 
     function openPlantPanel(key, isWild) {
-      closeShop(); // the shop and plant panel are both bottom sheets - only one at a time
+      closeShop(); closeJournal(); // only one full-screen/bottom-sheet panel open at a time
       viewingKey = key;
       viewingWild = !!isWild;
       renderPlantPanel(key);
@@ -2981,11 +3077,13 @@
 
     function openInventory() {
       toggleMenu();
+      closeShop(); closePlantPanel(); // only one full-screen/bottom-sheet panel open at a time
       // journalSpecies persists for the session, so re-opening the journal
       // returns to the page you were last reading.
       openJournalPage(journalSpecies || defaultJournalSpecies());
-      document.getElementById('modal-overlay').classList.add('open');
+      document.getElementById('journal-panel').classList.add('open');
     }
+    function closeJournal() { document.getElementById('journal-panel').classList.remove('open'); }
 
     // The bookmark strip: the species' flower, in the rarest color of it you
     // own, with a superscript count of how many you're holding.
@@ -3046,14 +3144,13 @@
     function renderJournalPage(speciesKey) {
       var s = speciesFor(speciesKey);
       journalSpecies = speciesKey;
-      resetModalChrome();
 
       var found = discoveredColorsOf(speciesKey);
       // Title and bookmark show the same flower in the same color - the
       // rarest of this species you own - so they don't read as two things.
       var headColor = found.length ? parseVariant(found[found.length - 1]).color : s.base;
       // innerHTML, not textContent - the chip is inline SVG markup.
-      document.getElementById('modal-title').innerHTML =
+      document.getElementById('journal-heading').innerHTML =
         speciesChip(s, headColor, 22) + ' ' + s.name;
 
       var known = discoveredColorSet();
@@ -3078,7 +3175,7 @@
       // page: it is what you have left to breed. The badge is the count you
       // are holding right now, which is a different thing from having found
       // it - a color you found and then sold keeps its spot filled in.
-      html += '<div class="color-grid">' + palette.map(function (c) {
+      html += '<div class="color-grid scrapbook-grid">' + palette.map(function (c) {
         var vk = variantKey(speciesKey, c.id);
         var kept = !!state.inventory[vk];
         var n = heldTotalOf(vk);
@@ -3125,9 +3222,7 @@
         st.kept + ' all time &bull; sold ' + st.sold + ' for ' + st.earned +
         ' Petals &bull; ' + st.extracted + ' seeds extracted</p>';
 
-      document.getElementById('modal-body').innerHTML = html;
-      document.getElementById('modal-ok-btn').textContent = 'Close';
-      document.getElementById('modal-ok-btn').onclick = closeModal;
+      document.getElementById('journal-body').innerHTML = html;
     }
 
     // The player's own notebook of crossings. It deliberately shows only what
@@ -3414,7 +3509,7 @@
     // pill directly - callers handle closing the menu dropdown themselves
     // (see the menu button's onclick) so this doesn't force it open/closed.
     function openShop() {
-      closePlantPanel(); // the shop and plant panel are both bottom sheets - only one at a time
+      closePlantPanel(); closeJournal(); // only one full-screen/bottom-sheet panel open at a time
       renderShopRows();
       document.getElementById('shop-panel').classList.add('open');
     }

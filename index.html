@@ -397,6 +397,19 @@
     @keyframes wild-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.12); } }
     .wild-glow { animation: wild-pulse 2.8s ease-in-out infinite; }
 
+    /* Signature colors only (see COLORS `species`). These are drawn inside the
+       flower's own SVG, so the same markup glows in a 26px bookmark and a
+       110px map marker with no extra elements around it.
+
+       Both base states are deliberately visible, not transparent: the global
+       reduced-motion rule collapses every animation to 0.01ms and does not
+       hold the final frame, so anything that starts at opacity 0 would simply
+       vanish for those players. */
+    @keyframes bloom-halo { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+    @keyframes bloom-spark { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+    .bloom-halo { opacity: 0.6; animation: bloom-halo 3.4s ease-in-out infinite; }
+    .bloom-spark { opacity: 0.8; animation: bloom-spark 2.2s ease-in-out infinite; }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
@@ -412,7 +425,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.19.0</span>
+      <span id="game-version">v1.20.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -621,9 +634,80 @@
       { id: 'magenta', name: 'Magenta', tier: 2, petal: '#d4359b', center: '#ffd45e' },
       { id: 'peach',   name: 'Peach',   tier: 2, petal: '#ffb184', center: '#b06a3a' },
       { id: 'black',   name: 'Midnight',tier: 2, petal: '#3b3648', center: '#b98ee8' },
-      { id: 'gold',    name: 'Gold',    tier: 3, petal: '#e8a91c', center: '#fff3c2' }
+      { id: 'gold',    name: 'Gold',    tier: 3, petal: '#e8a91c', center: '#fff3c2' },
+
+      // ---- Signature colors ----------------------------------------------
+      // Two per species, and the ONE place the species/color split is broken
+      // on purpose. `species` locks a color to one shape: there is no such
+      // thing as an Ember Daisy, and doBreed() enforces that rather than
+      // trusting the breeding table to never produce one.
+      //
+      // They are the only colors with `grad` (a per-petal gradient, tip to
+      // base), `glow` and `spark`, so the effect itself is the tell that you
+      // are looking at something at the top of the tree. Tier 3, alongside
+      // Gold, and reached only by crossing two of the same species - which is
+      // what makes them feel like that flower's own color rather than another
+      // entry in a shared palette.
+      //
+      // `petal` stays authored even though `grad` paints the petals: every
+      // derived value (deep/edge/soft/ink/line) still comes from it, so the
+      // legibility machinery needs no special case.
+      { id: 'solaris',   name: 'Solaris',   tier: 3, species: 'sunflower',
+        petal: '#ffb52e', center: '#6b3b0a', grad: ['#fff3b0', '#ffb52e', '#e06a12'],
+        glow: '#ffcc4d', spark: '#fff2c0' },
+      { id: 'eclipse',   name: 'Eclipse',   tier: 3, species: 'sunflower',
+        petal: '#4a3f7a', center: '#ffd45e', grad: ['#8f7ad6', '#4a3f7a', '#1e1838'],
+        glow: '#7a63c9', spark: '#ffe9a8' },
+      { id: 'ember',     name: 'Ember',     tier: 3, species: 'tulip',
+        petal: '#ff5a2e', center: '#ffb84d', grad: ['#ffd166', '#ff5a2e', '#a81c0c'],
+        glow: '#ff7a3c', spark: '#ffd9a0' },
+      { id: 'frost',     name: 'Frost',     tier: 3, species: 'tulip',
+        petal: '#a8dcf0', center: '#dff4ff', grad: ['#ffffff', '#a8dcf0', '#4f8fb8'],
+        glow: '#bfe9ff', spark: '#ffffff' },
+      { id: 'moonlit',   name: 'Moonlit',   tier: 3, species: 'daisy',
+        petal: '#c9d4f0', center: '#f2f4ff', grad: ['#ffffff', '#c9d4f0', '#7f8ec4'],
+        glow: '#b9c8f5', spark: '#ffffff' },
+      { id: 'prism',     name: 'Prism',     tier: 3, species: 'daisy',
+        petal: '#7ec8e3', center: '#fff6cf', grad: ['#ffd1e8', '#9ad9e8', '#8ee08a'],
+        glow: '#b9e6ff', spark: '#ffd1e8' },
+      { id: 'sunset',    name: 'Sunset',    tier: 3, species: 'hibiscus',
+        petal: '#ff6f61', center: '#ffe6a0', grad: ['#ffd08a', '#ff6f61', '#b0328f'],
+        glow: '#ff8f6b', spark: '#ffd9a0' },
+      { id: 'lagoon',    name: 'Lagoon',    tier: 3, species: 'hibiscus',
+        petal: '#2fb9a8', center: '#ffe6a0', grad: ['#a8f0e2', '#2fb9a8', '#0d5f70'],
+        glow: '#56d6c0', spark: '#c9fff2' },
+      { id: 'blush',     name: 'Blush',     tier: 3, species: 'blossom',
+        petal: '#ffb3c9', center: '#fff0d0', grad: ['#fff2f6', '#ffb3c9', '#e0688f'],
+        glow: '#ffc9db', spark: '#fff4f8' },
+      { id: 'twilight',  name: 'Twilight',  tier: 3, species: 'blossom',
+        petal: '#6f6bb5', center: '#ffe6a0', grad: ['#ffb8d9', '#6f6bb5', '#2c2a5c'],
+        glow: '#9a92e0', spark: '#ffd6ea' },
+      { id: 'velvet',    name: 'Velvet',    tier: 3, species: 'rose',
+        petal: '#8e1b4a', center: '#ffb8d0', grad: ['#d64f86', '#8e1b4a', '#3d0a20'],
+        glow: '#c23a72', spark: '#ffb8d0' },
+      { id: 'champagne', name: 'Champagne', tier: 3, species: 'rose',
+        petal: '#e8cfa0', center: '#fff3d6', grad: ['#fff6e2', '#e8cfa0', '#b8935a'],
+        glow: '#f0dcb8', spark: '#fffaf0' },
+      { id: 'aurora',    name: 'Aurora',    tier: 3, species: 'lotus',
+        petal: '#6fe3c0', center: '#fff3c2', grad: ['#c9a8ff', '#6fe3c0', '#4fa8e8'],
+        glow: '#8ff0d4', spark: '#d9c2ff' },
+      { id: 'obsidian',  name: 'Obsidian',  tier: 3, species: 'lotus',
+        petal: '#2b2733', center: '#7ce8d0', grad: ['#6d5f8a', '#2b2733', '#0d0b12'],
+        glow: '#5b4c85', spark: '#9ff0dc' }
     ];
     var STANDARD_COLORS = ['white', 'red', 'yellow', 'blue'];
+
+    // A color's species lock, or null if any species can wear it.
+    function exclusiveSpeciesOf(colorId) { return colorFor(colorId).species || null; }
+    // The colors one species can actually be: the shared palette, plus its own
+    // two signatures (last, since they are the rarest). Nothing else can ever
+    // exist as a variant of it, which is what TOTAL_VARIANTS counts.
+    function colorsForSpecies(speciesKey) {
+      return COLORS.filter(function (c) { return !c.species || c.species === speciesKey; });
+    }
+    function signatureColorsOf(speciesKey) {
+      return COLORS.filter(function (c) { return c.species === speciesKey; });
+    }
 
     // Small hex helpers. Kept as plain integer maths rather than CSS
     // color-mix() so the derived values are available as strings to JS (they
@@ -676,6 +760,7 @@
     // this per render (icons are rebuilt on every zoom and every tick).
     var DISC_BG = '#f4efe1';   // parchment backing the flower is drawn on
     var DISC_CONTRAST = 0.14;  // min petal-vs-disc luminance gap
+    var EDGE_CONTRAST = 0.09;  // min petal-vs-outline luminance gap
     // Panels are near-white, so a petal hex used raw as text was unreadable
     // for the pale colors (White, Cream, Sky, Yellow) and marginal for several
     // more. `ink` is the petal darkened until it is genuinely readable as
@@ -688,7 +773,16 @@
     (function resolveColors() {
       COLORS.forEach(function (c) {
         c.deep = shadeHex(c.petal, 0.86);  // inner petal rows
-        c.edge = shadeHex(c.petal, 0.66);  // petal outline
+        // Petal outline. Darkening works for almost everything, but there is
+        // no room left under a near-black petal - Obsidian's outline came out
+        // 0.055 from its own fill, which is no outline at all. So it is the
+        // same push-away loop as the disc tint: lighten instead when darkening
+        // has nothing left to give, and a dark flower gets a rim light.
+        c.edge = shadeHex(c.petal, 0.66);
+        var eg = 0;
+        while (Math.abs(lumHex(c.petal) - lumHex(c.edge)) < EDGE_CONTRAST && eg++ < 16) {
+          c.edge = mixHex(c.edge, '#ffffff', 0.14);
+        }
         c.ink = darkenToContrast(c.petal, INK_CONTRAST, PANEL_BG);
         c.line = darkenToContrast(c.petal, LINE_CONTRAST, PANEL_BG);
         // The disc is tinted by the flower it holds, but a white or cream
@@ -845,7 +939,39 @@
       // between them need all four standards.
       'magenta+peach':[['gold', 0.15], ['magenta', 0.425], ['peach', 0.425]]
     };
-    function crossColor(a, b) {
+
+    // The signature colors sit past Gold and are the ONLY species-aware
+    // recipes: both parents must be the same species, and what comes out is
+    // that species' own color. `sig0`/`sig1` are placeholders resolved against
+    // whichever species is being crossed, so this stays one table rather than
+    // seven near-identical ones.
+    //
+    // Both routes run through Gold, so a signature is strictly past the
+    // deepest thing in the shared table - and requiring same-species parents
+    // is what makes it that flower's color rather than another palette entry.
+    // Two routes rather than one so the pair aren't interchangeable: the
+    // second needs a Midnight line as well.
+    var SIGNATURE_TABLE = {
+      'gold+gold':  [['sig0', 0.30], ['gold', 0.70]],
+      'black+gold': [['sig1', 0.30], ['black', 0.35], ['gold', 0.35]]
+    };
+    // `speciesKey` is passed only when both parents share a species; null
+    // otherwise, which is what keeps signature colors out of mixed crosses.
+    function crossColor(a, b, speciesKey) {
+      if (speciesKey) {
+        var sig = SIGNATURE_TABLE[crossKey(a, b)];
+        if (sig) {
+          var own = signatureColorsOf(speciesKey);
+          var rolled = rollWeighted(sig);
+          if (rolled === 'sig0' || rolled === 'sig1') {
+            var pick = own[rolled === 'sig0' ? 0 : 1];
+            // A species with no signatures defined falls back to Gold rather
+            // than returning a placeholder id that is not a color.
+            return pick ? pick.id : 'gold';
+          }
+          return rolled;
+        }
+      }
       if (a === b) return a;                  // duplicating a color you have
       var t = BREED_TABLE[crossKey(a, b)];
       if (t) return rollWeighted(t);
@@ -1496,14 +1622,68 @@
     // Icons are rebuilt on every zoomend and every 60s tick, and a rose is 20
     // petals of path maths, so the finished markup is memoised. Species and
     // colors are both static, so the key is complete.
+    // Gradient/halo/spark markup for a signature color, or '' for the rest.
+    //
+    // The gradient ids are deterministic (`pg-<colorid>`), so the same id
+    // appears in every copy of that flower on screen at once. That is safe
+    // *because* it is deterministic: every element carrying a given id has
+    // byte-identical contents, so whichever one the browser resolves
+    // url(#pg-ember) against paints the same thing, and each <svg> carries
+    // its own copy so a reference can never be left dangling. Unique ids per
+    // instance would defeat the memo cache below for no gain.
+    function fancyDefs(color) {
+      if (!color.grad) return '';
+      var g = color.grad;
+      // objectBoundingBox units (the default), so the axis is each petal's own
+      // box - and since petals are drawn pointing up and then rotated, the
+      // gradient rotates with them: light at every tip, deep at every base.
+      return '<defs>' +
+        '<linearGradient id="pg-' + color.id + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="' + g[0] + '"/>' +
+        '<stop offset="0.55" stop-color="' + g[1] + '"/>' +
+        '<stop offset="1" stop-color="' + g[2] + '"/></linearGradient>' +
+        '<linearGradient id="pgd-' + color.id + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="' + shadeHex(g[0], 0.88) + '"/>' +
+        '<stop offset="0.55" stop-color="' + shadeHex(g[1], 0.86) + '"/>' +
+        '<stop offset="1" stop-color="' + shadeHex(g[2], 0.86) + '"/></linearGradient>' +
+        '<radialGradient id="hg-' + color.id + '">' +
+        '<stop offset="0.35" stop-color="' + color.glow + '" stop-opacity="0.75"/>' +
+        '<stop offset="0.7" stop-color="' + color.glow + '" stop-opacity="0.28"/>' +
+        '<stop offset="1" stop-color="' + color.glow + '" stop-opacity="0"/>' +
+        '</radialGradient></defs>';
+    }
+    // Six motes on a ring outside the petals, twinkling out of phase. Fixed
+    // positions rather than a particle simulation: this markup is memoised and
+    // re-injected on every zoom, so it has to stay a pure function of the
+    // color, and CSS does the moving.
+    var SPARK_COUNT = 6;
+    function sparkMarkup(color) {
+      if (!color.spark) return '';
+      var out = '';
+      for (var i = 0; i < SPARK_COUNT; i++) {
+        var a = (Math.PI * 2 / SPARK_COUNT) * i - Math.PI / 2;
+        var rr = i % 2 ? 47 : 41;
+        out += '<circle class="bloom-spark" cx="' + (50 + Math.cos(a) * rr).toFixed(2) +
+          '" cy="' + (50 + Math.sin(a) * rr).toFixed(2) + '" r="' + (i % 2 ? 1.9 : 2.7) +
+          '" fill="' + color.spark + '" style="animation-delay:' + (i * 0.37).toFixed(2) + 's"/>';
+      }
+      return out;
+    }
+
     var flowerSvgCache = {};
     function flowerSVG(species, color, px) {
       var ck = species.key + '|' + color.id + '|' + px;
       if (flowerSvgCache[ck]) return flowerSvgCache[ck];
 
-      var sh = species.shape, out = '';
+      var sh = species.shape, out = fancyDefs(color);
+      if (color.glow) {
+        out += '<circle class="bloom-halo" cx="50" cy="50" r="49" fill="url(#hg-' +
+          color.id + ')"/>';
+      }
       sh.rows.forEach(function (row) {
-        var fill = row.deep ? color.deep : color.petal;
+        var fill = color.grad
+          ? 'url(#' + (row.deep ? 'pgd-' : 'pg-') + color.id + ')'
+          : (row.deep ? color.deep : color.petal);
         var cy = 50 - row.r;
         for (var i = 0; i < row.n; i++) {
           out += petalShape(row, cy, fill, color.edge, (360 / row.n) * i + (row.rot || 0));
@@ -1529,6 +1709,9 @@
           '<circle cx="50" cy="' + (50 - c.r * 3.2).toFixed(2) + '" r="' + (c.r * 0.7).toFixed(2) +
           '" fill="' + color.center + '"/>';
       }
+
+      // Sparks go last so they sit above the petals rather than behind them.
+      out += sparkMarkup(color);
 
       var svg = '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px +
         '" style="display:block">' + out + '</svg>';
@@ -2226,10 +2409,19 @@
       b.breedReadyAt = now + BREED_COOLDOWN_MS;
 
       var ca = colorOfPlant(a), cb = colorOfPlant(b);
-      var color = crossColor(ca, cb);
+      // Signature recipes need both parents on the same shape; everything else
+      // ignores species entirely.
+      var color = crossColor(ca, cb, a.species === b.species ? a.species : null);
       // Either parent's shape, so a color you have bred can be walked onto a
       // different species instead of being stuck on the one it appeared in.
       var species = Math.random() < 0.5 ? a.species : b.species;
+      // ...except a signature color, which has exactly one shape it can wear.
+      // Crossing an Ember Tulip with a Red Daisy can fall through to Ember on
+      // the coin flip, and the species roll could then pick Daisy - so the
+      // lock is enforced where the plant is created rather than trusted to
+      // every table entry. There is no such thing as an Ember Daisy.
+      var lock = exclusiveSpeciesOf(color);
+      if (lock) species = lock;
       recordCross(ca, cb, color);
 
       var c = hexCenter(spot.q, spot.r);
@@ -2447,11 +2639,13 @@
         '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and Keep it or Sell ' +
         'it for Petals \u{1F338} - clusters sell for much more than a single bloom. Kept flowers go into ' +
         'your Flower Journal in the menu, which has a page per species and tracks all ' + TOTAL_VARIANTS +
-        ' flowers - every color of every species.</p>' +
-        '<p><b>Color</b> - every flower has a species (its shape) and a color, and any color can turn ' +
-        'up on any species. Four colors are standard - White, Red, Yellow and Blue - and those are the ' +
-        'only ones the shop sells or wild flowers grow in. The other ' + (COLORS.length - 4) +
-        ' have to be bred.</p>' +
+        ' flowers.</p>' +
+        '<p><b>Color</b> - every flower has a species (its shape) and a color, and almost any color can ' +
+        'turn up on any species. Four are standard - White, Red, Yellow and Blue - and those are the ' +
+        'only ones the shop sells or wild flowers grow in. The rest have to be bred.</p>' +
+        '<p><b>Signature colors</b> - past all of those, each species has <b>two colors of its own</b> ' +
+        'that no other flower can wear. They shimmer and glow, and the only way to reach one is to ' +
+        'cross two flowers <b>of the same species</b> deep in the Gold line.</p>' +
         '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on hexes next to each other, buy a ' +
         'bag of fertilizer, and tap <b>Cross with a neighbour</b>. A seedling comes up in the gap between ' +
         'them, and its color stays a mystery until you water it into bloom. Crossing two of the four ' +
@@ -2494,7 +2688,11 @@
         return n + heldTotalOf(vk);
       }, 0);
     }
-    var TOTAL_VARIANTS = SPECIES.length * COLORS.length;
+    // Not SPECIES * COLORS any more: a signature color counts once, on the one
+    // species that can wear it.
+    var TOTAL_VARIANTS = SPECIES.reduce(function (n, s) {
+      return n + colorsForSpecies(s.key).length;
+    }, 0);
 
     // Sell held flowers straight from the collection at the same rate as
     // harvesting them in the field would have paid.
@@ -2675,8 +2873,11 @@
         journalPick = null;
       }
 
+      // The shared palette plus this species' two signatures - a page never
+      // shows a spot that species could not possibly fill.
+      var palette = colorsForSpecies(speciesKey);
       var html = journalTabsHtml(speciesKey) +
-        '<p class="journal-caption"><b>' + found.length + ' of ' + COLORS.length + '</b> ' +
+        '<p class="journal-caption"><b>' + found.length + ' of ' + palette.length + '</b> ' +
         s.name + ' colors &bull; <b>' + Object.keys(state.inventory).length + ' of ' +
         TOTAL_VARIANTS + '</b> flowers found</p>';
 
@@ -2684,7 +2885,7 @@
       // page: it is what you have left to breed. The badge is the count you
       // are holding right now, which is a different thing from having found
       // it - a color you found and then sold keeps its spot filled in.
-      html += '<div class="color-grid">' + COLORS.map(function (c) {
+      html += '<div class="color-grid">' + palette.map(function (c) {
         var vk = variantKey(speciesKey, c.id);
         var kept = !!state.inventory[vk];
         var n = heldTotalOf(vk);
@@ -2757,10 +2958,13 @@
 
       html += '<div class="color-grid">' + COLORS.map(function (c) {
         var have = !!foundColors[c.id];
-        // Shown on the species you have most of, purely so the swatch is a
-        // flower rather than an abstract dot.
-        return '<div class="color-cell' + (have ? '' : ' missing') + '">' +
-          speciesChip(SPECIES[0], c.id, 30) + '<span>' + (have ? c.name : '???') + '</span></div>';
+        // Drawn on a real flower rather than an abstract dot. A signature
+        // color must use the one species that can wear it - drawing an Ember
+        // Daisy here would advertise a flower that cannot exist.
+        var on = speciesFor(c.species || SPECIES[0].key);
+        return '<div class="color-cell' + (have ? '' : ' missing') + '" title="' +
+          (have ? c.name + (c.species ? ' - ' + on.name + ' only' : '') : 'Not found yet') + '">' +
+          speciesChip(on, c.id, 30) + '<span>' + (have ? c.name : '???') + '</span></div>';
       }).join('') + '</div>';
 
       var pairs = Object.keys(state.crosses).sort();
@@ -2791,6 +2995,15 @@
         }).join('') + '</div>' +
         '<p style="color:var(--text-dim)">Crossing two standards always gives the same result. ' +
         'Deeper pairings can go more than one way.</p>';
+      }
+
+      // Explains what they have already seen rather than spoiling it: a
+      // signature only shows up once you own one, and by then the same pairing
+      // has visibly produced different colors on different flowers.
+      if (COLORS.some(function (c) { return c.species && foundColors[c.id]; })) {
+        html += '<p style="color:var(--text-dim)">Some colors belong to a single flower and glow. ' +
+          'Those only ever appear when <b>both parents are the same species</b> - the same pairing ' +
+          'on a different flower gives that flower\'s own color instead.</p>';
       }
 
       document.getElementById('modal-body').innerHTML = html;

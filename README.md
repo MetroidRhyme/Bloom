@@ -30,15 +30,23 @@ You can also **extract** a flower you're holding back into seeds (1-2 from a blo
 
 ### Flowers, species and color
 
-Every flower has a **species** (its shape - Sunflower, Tulip, Daisy, Hibiscus, Blossom, Rose, Lotus) and a **color**, and the two are completely independent: any color can be worn by any species.
+Every flower has a **species** (its shape - Sunflower, Tulip, Daisy, Hibiscus, Blossom, Rose, Lotus) and a **color**, and the two are almost completely independent: nearly any color can be worn by any species.
 
 Four colors are **standard** - White, Red, Yellow and Blue. Those are the only ones the shop stocks and the only ones wild flowers grow in. Everything else has to be bred.
+
+### Signature colors
+
+Past everything else, each species has **two colors of its own** that no other flower can wear - Ember and Frost tulips, Velvet and Champagne roses, Aurora and Obsidian lotuses, and so on. Fourteen in all, one pair per species.
+
+They don't look like the rest. Each is painted with a gradient running from a bright petal tip down to a deep base, wrapped in a soft pulsing halo, and ringed with slowly twinkling motes. That effect *is* the tell - nothing else in the game glows.
+
+Reaching one means crossing **two flowers of the same species**, deep in the Gold line. Gold + Gold gives a chance at the first; Midnight + Gold gives a chance at the second. The same pairing on a different species gives that species' own color instead, which is what makes them signatures rather than fourteen more entries in the shared palette.
 
 Seeds carry their color, so a "Red Tulip seed" is a specific thing: planting one grows a red tulip, and extracting a red tulip gives red tulip seeds back. The shop is the only way to get something you've never held.
 
 ### The Flower Journal
 
-The **Flower Journal** in the menu is where kept flowers go, laid out like a stamp album: one page per species, and on each page a spot for every one of the 14 colors. All **98** spots are always drawn, so an empty one - a plain grey `?` - reads as something still to breed rather than as a list that happens to be short.
+The **Flower Journal** in the menu is where kept flowers go, laid out like a stamp album: one page per species, and on each page a spot for every color that species can be - the 14 shared ones plus its own 2 signatures. All **112** spots are always drawn, so an empty one - a plain grey `?` - reads as something still to breed rather than as a list that happens to be short.
 
 **Bookmarks** across the top switch between species from any page, each showing that flower with a superscript of how many you're holding.
 
@@ -61,7 +69,7 @@ Crossing two of the four standards is **deterministic** - four colors, six pairs
 | White + Yellow | Cream |
 | White + Blue | Sky |
 
-Those in turn cross into the rarer colors, where the odds stop being certain - Magenta, Peach, Midnight, and finally Gold, which needs both deep lines and so needs all four standards behind it. Crossing two of the same color just gives that color back, which is how you multiply one you already have, and **no pairing is ever a dead end** - an untabled cross returns one of the two parents rather than wasting the fertilizer.
+Those in turn cross into the rarer colors, where the odds stop being certain - Magenta, Peach, Midnight, and finally Gold, which needs both deep lines and so needs all four standards behind it. Past Gold are the **signature colors** described above, the only recipes in the game that care which species you are crossing. Crossing two of the same color just gives that color back, which is how you multiply one you already have, and **no pairing is ever a dead end** - an untabled cross returns one of the two parents rather than wasting the fertilizer.
 
 Parents stay in the ground and simply rest for 12 hours before they can be crossed again. **Crossing Notes** in the menu records every pairing you've tried and what came of it - it only ever shows results you've seen yourself, never the underlying table.
 

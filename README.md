@@ -15,7 +15,7 @@ There's no score, no timer, and no way to "lose" quickly - it's just a colorful,
 2. **Tap the ground** near you to plant a seed from your inventory (you start with one Sunflower, one Tulip, and one Daisy) - a picker always confirms which seed before it's spent, so a stray tap never plants one by accident.
 3. **Walk back** every so often and tap a growing flower, then tap **Water** once you're close enough.
 4. Watering is what advances a stage - not elapsed time. A flower becomes *ready* 12 hours after it was planted or last grew, and your next visit is what moves it up. Seed to sprout to bloom to flourishing cluster is three separate walks back.
-5. Once a flower is in bloom or flourishing, **Keep** it for your collection or **Sell** it to the shop for Petals - clusters sell for far more than a single bloom.
+5. Once a flower is in bloom or flourishing, **Keep** it for your journal or **Sell** it to the shop for Petals - clusters sell for far more than a single bloom.
 6. Spend Petals in the **Seed Shop** (tap your Petals total, top right) on more seeds. Every purchase confirms first - showing the exact flower, the price, and the balance you'd be left with - so a stray tap on a small swatch never quietly costs you 20 Petals.
 
 You can tap any flower on the map to check on it from a distance - only *watering*, *harvesting*, and *planting* require being physically close (within 2 hex cells, about a short walk).
@@ -34,7 +34,15 @@ Every flower has a **species** (its shape - Sunflower, Tulip, Daisy, Hibiscus, B
 
 Four colors are **standard** - White, Red, Yellow and Blue. Those are the only ones the shop stocks and the only ones wild flowers grow in. Everything else has to be bred.
 
-Seeds carry their color, so a "Red Tulip seed" is a specific thing: planting one grows a red tulip, and extracting a red tulip gives red tulip seeds back. Your collection tracks all **98** flowers - 14 colors across 7 species - and the shop is the only way to get something you've never held.
+Seeds carry their color, so a "Red Tulip seed" is a specific thing: planting one grows a red tulip, and extracting a red tulip gives red tulip seeds back. The shop is the only way to get something you've never held.
+
+### The Flower Journal
+
+The **Flower Journal** in the menu is where kept flowers go, laid out like a stamp album: a contents page, then one page per species, and on each page a spot for every one of the 14 colors. All **98** spots are always drawn, so an empty one reads as something still to breed rather than as a list that happens to be short.
+
+A spot you've filled shows how many of that flower you're holding right now. Tap one and its actions open underneath - sell them for Petals, or pull them apart for seeds of that exact color - along with how many of its seeds are already in your pouch. Arrows at the top of the page flip between species.
+
+A color you've found on one species is named on every page, so once you've bred your first Purple you can see which Purples you're still missing. A spot stays filled in once earned, even after you sell the last one - the journal records what you've found, not just what's in hand.
 
 ### Cross-breeding
 

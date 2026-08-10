@@ -298,8 +298,13 @@
     .stand-row-crates { width: 100%; }
     .stand-row-crates .stand-item { flex: 1 1 0; min-width: 0; }
     .stand-row-last { justify-content: center; }
+    /* Base width matches the fertilizer sack (86px) - without it, the
+       seventh crate has no row-mates to stretch against on its own row and
+       shrinks to fit its wrapped two-line name instead, reading noticeably
+       narrower than the six crates above it. Rows 1/2 override this with
+       flex-grow to stretch edge to edge. */
     .stand-item {
-      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 86px;
       background: linear-gradient(180deg, #fff6e0, #ecdcb2); border: 2px solid #6b4423;
       border-radius: 12px; padding: 8px 3px 6px; cursor: pointer; box-shadow: var(--shadow-sm);
     }
@@ -499,7 +504,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.23.1</span>
+      <span id="game-version">v1.23.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>

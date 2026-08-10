@@ -236,6 +236,16 @@
     .inv-name { font-size: 14px; font-weight: 800; }
     .inv-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
     .inv-count { font-size: 15px; font-weight: 800; flex-shrink: 0; }
+    .inv-stack-title { font-size: 13.5px; font-weight: 800; margin-top: 12px; }
+    /* Two per row on a phone; Sell and Extract sit side by side so the choice
+       between them is visible rather than sequential. */
+    .inv-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+    .inv-btn {
+      flex: 1 1 44%; padding: 11px 8px; border-radius: 12px; font-size: 12.5px;
+      font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); border: none;
+    }
+    .inv-btn.sell { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; }
+    .inv-btn.extract { background: #fff; color: var(--green-dark); border: 2px solid var(--green); }
     .seed-pick-btn {
       display: flex; align-items: center; justify-content: space-between; width: 100%;
       padding: 13px 16px; border: 2px solid; border-radius: 14px; background: #fff;
@@ -286,7 +296,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.12.0</span>
+      <span id="game-version">v1.13.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -441,6 +451,29 @@
     var SELL_CLUSTER = 40;
     function harvestValue(p, stage) { return stage >= MAX_STAGE ? SELL_CLUSTER : SELL_SINGLE; }
 
+    // Seeds recovered by pulling a held flower apart, as [count, probability].
+    // A cluster is several blooms' worth, so it gives back more.
+    //
+    // Balance note: Petals buy nothing but seeds, so selling and extracting are
+    // the same currency one step apart. At these odds extraction is worth ~1.5x
+    // selling for a bloom (1.2 seeds = 24 Petals of seed, vs 16) and ~1.35x for
+    // a cluster (2.7 seeds = 54, vs 40). What keeps Sell alive is that
+    // extraction only ever returns the species you pulled apart - you cannot
+    // extract a flower you have never held - so Petals remain the only route to
+    // a species you are missing. Extraction multiplies what you have; the shop
+    // is how you diversify. Raise SELL_SINGLE/SELL_CLUSTER toward 24/54 if the
+    // two should instead be near-equal in raw value.
+    var SEED_YIELD_SINGLE  = [[1, 0.80], [2, 0.20]];             // EV 1.2
+    var SEED_YIELD_CLUSTER = [[2, 0.50], [3, 0.30], [4, 0.20]];  // EV 2.7
+    function rollSeedYield(table) {
+      var r = Math.random(), acc = 0;
+      for (var i = 0; i < table.length; i++) {
+        acc += table[i][1];
+        if (r < acc) return table[i][0];
+      }
+      return table[table.length - 1][0]; // guards against float drift in the sum
+    }
+
     // ---- Wild flowers ----------------------------------------------------
     // Once per local calendar day, the first time the page is opened, a crop of
     // wild blooms is scattered at random around the player. They cost nothing,
@@ -524,18 +557,40 @@
       return p;
     }
 
+    // v1.12 recorded a kept flower as a bare { count, firstAt } with no record
+    // of whether it was a single bloom or a cluster. Extraction pays out by
+    // stage, so those totals are credited to `single` - wild picks are always
+    // single blooms and so were most early keeps, and crediting clusters the
+    // player may not have earned would hand out seeds they never worked for.
+    function migrateInventory(inv) {
+      if (!inv) return {};
+      Object.keys(inv).forEach(function (k) {
+        var e = inv[k];
+        if (typeof e.count === 'number' && typeof e.single !== 'number') {
+          e.single = e.count;
+          delete e.count;
+        }
+        if (typeof e.single !== 'number') e.single = 0;
+        if (typeof e.cluster !== 'number') e.cluster = 0;
+        if (!e.firstAt) e.firstAt = Date.now();
+      });
+      return inv;
+    }
+
     function loadState() {
       var def = {
         plants: {},
         wild: {},            // hex key -> wild flower, scattered daily
         lastWildDay: null,   // local YYYY-MM-DD of the last spawn
-        // species key -> { count, firstAt }: the flowers you chose to Keep.
-        // stats.kept is only a running total, so a kept flower used to leave no
-        // record of *what* it was and appeared to simply vanish. This is what
-        // the collection screen reads.
+        // species key -> { single, cluster, firstAt }: the flowers you chose to
+        // Keep, split by what they were when picked, since a cluster extracts
+        // into more seeds than a single bloom. An entry is never deleted once
+        // created - a species you've emptied still reads as discovered, so the
+        // collection stays a record of what you've found, not just what's in
+        // hand right now.
         inventory: {},
         // No `lost` counter - plants cannot die, so nothing is ever lost.
-        stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0 },
+        stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0, extracted: 0 },
         seeds: starterSeeds(),
         currency: 0,
         following: true,
@@ -553,11 +608,7 @@
           plants: plants,
           wild: parsed.wild || {},
           lastWildDay: parsed.lastWildDay || null,
-          // Saves from before the collection existed only have the aggregate
-          // stats.kept, and there is no way to recover which species those
-          // were - they stay counted in the lifetime total and the collection
-          // screen says so rather than pretending the history is itemised.
-          inventory: parsed.inventory || {},
+          inventory: migrateInventory(parsed.inventory),
           stats: Object.assign({}, def.stats, parsed.stats || {}),
           // A save that predates seeds/currency (v1.1.x) gets starter seeds
           // bootstrapped in rather than being left unable to plant anything -
@@ -745,10 +796,10 @@
     // running total, so the flower vanished off the map leaving no trace of
     // what it had been - this is what makes Keep a real choice rather than a
     // discard, and what the collection screen lists.
-    function addToInventory(speciesKey) {
+    function addToInventory(speciesKey, isCluster) {
       var e = state.inventory[speciesKey];
-      if (e) e.count++;
-      else state.inventory[speciesKey] = { count: 1, firstAt: Date.now() };
+      if (!e) e = state.inventory[speciesKey] = { single: 0, cluster: 0, firstAt: Date.now() };
+      if (isCluster) e.cluster++; else e.single++;
     }
 
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
@@ -771,7 +822,7 @@
         toast('Sold your ' + label + ' for ' + val + ' \u{1F338}');
       } else {
         state.stats.kept++;
-        addToInventory(p.species);
+        addToInventory(p.species, d.stage >= MAX_STAGE);
         toast('Kept your ' + label + ' \u{1F33C} - it\'s in your collection');
       }
 
@@ -1375,7 +1426,7 @@
         toast('Sold a wild ' + species.name + ' for ' + SELL_SINGLE + ' \u{1F338}');
       } else {
         state.stats.kept++;
-        addToInventory(w.species);
+        addToInventory(w.species, false); // wild blooms are always single-stage
         toast('Picked a wild ' + species.name + ' \u{1F33C} - it\'s in your collection');
       }
 
@@ -1613,55 +1664,159 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    function heldOf(speciesKey) {
+    function heldOf(speciesKey, isCluster) {
       var e = state.inventory[speciesKey];
-      return (e && e.count) || 0;
+      if (!e) return 0;
+      return (isCluster ? e.cluster : e.single) || 0;
     }
+    function heldTotalOf(speciesKey) { return heldOf(speciesKey, false) + heldOf(speciesKey, true); }
     function totalHeld() {
-      return SPECIES.reduce(function (n, s) { return n + heldOf(s.key); }, 0);
+      return SPECIES.reduce(function (n, s) { return n + heldTotalOf(s.key); }, 0);
     }
 
-    // Every flower you've chosen to Keep, by species. Lists all seven whether
-    // found or not, so the collection reads as something with gaps to fill
-    // rather than just a tally of what you happen to have.
+    // Sell held flowers straight from the collection at the same rate as
+    // harvesting them in the field would have paid.
+    function sellHeld(speciesKey, isCluster, qty) {
+      var e = state.inventory[speciesKey];
+      if (!e) return;
+      qty = Math.min(qty, heldOf(speciesKey, isCluster));
+      if (qty <= 0) return;
+
+      var total = (isCluster ? SELL_CLUSTER : SELL_SINGLE) * qty;
+      if (isCluster) e.cluster -= qty; else e.single -= qty;
+      state.currency += total;
+      state.stats.sold += qty;
+      state.stats.earned += total;
+
+      saveState();
+      updateCurrencyPill();
+      toast('Sold ' + qty + ' ' + speciesFor(speciesKey).name +
+        (isCluster ? ' cluster' : ' bloom') + (qty === 1 ? '' : 's') + ' for ' + total + ' \u{1F338}');
+      vibrate(20);
+      renderInventoryDetail(speciesKey);
+    }
+
+    // Pull held flowers apart for seeds of that same species. Rolled per
+    // flower rather than once for the batch, so extracting five at once has
+    // the same spread as extracting one five times.
+    function extractHeld(speciesKey, isCluster, qty) {
+      var e = state.inventory[speciesKey];
+      if (!e) return;
+      qty = Math.min(qty, heldOf(speciesKey, isCluster));
+      if (qty <= 0) return;
+
+      var gained = 0;
+      for (var i = 0; i < qty; i++) {
+        gained += rollSeedYield(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
+      }
+      if (isCluster) e.cluster -= qty; else e.single -= qty;
+      state.seeds[speciesKey] = (state.seeds[speciesKey] || 0) + gained;
+      state.stats.extracted += gained;
+
+      saveState();
+      toast('\u{1F331} Got ' + gained + ' ' + speciesFor(speciesKey).name + ' seed' +
+        (gained === 1 ? '' : 's') + ' from ' + qty + ' ' + (isCluster ? 'cluster' : 'bloom') +
+        (qty === 1 ? '' : 's'));
+      vibrate(25);
+      renderInventoryDetail(speciesKey);
+    }
+
+    // Every flower you've chosen to Keep, by species. Two levels sharing one
+    // modal: the list, and a per-species detail with the sell/extract actions.
+    // All seven are always listed, so gaps read as "still to find" rather than
+    // the list simply being short.
     function openInventory() {
       toggleMenu();
+      renderInventoryList();
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function renderInventoryList() {
       resetModalChrome();
       document.getElementById('modal-title').textContent = 'Your Collection \u{1F33C}';
 
       var held = totalHeld();
-      var kinds = SPECIES.filter(function (s) { return heldOf(s.key) > 0; }).length;
-      var html = '<p>You\'re holding <b>' + held + '</b> flower' + (held === 1 ? '' : 's') +
-        ', across <b>' + kinds + ' of ' + SPECIES.length + '</b> kinds.</p>';
+      var discovered = SPECIES.filter(function (s) { return !!state.inventory[s.key]; }).length;
+      var html = '<p>Holding <b>' + held + '</b> flower' + (held === 1 ? '' : 's') +
+        ' &bull; <b>' + discovered + ' of ' + SPECIES.length + '</b> kinds discovered.</p>';
 
       html += '<div class="inv-list">' + SPECIES.map(function (s) {
         var e = state.inventory[s.key];
-        if (e && e.count > 0) {
-          return '<div class="inv-row" style="border-color:' + s.color + '">' +
-            '<div><div class="inv-name" style="color:' + s.color + '">' + s.emoji + ' ' + s.name + '</div>' +
-            '<div class="inv-meta">First kept ' + formatAgo(e.firstAt) + '</div></div>' +
-            '<div class="inv-count">x' + e.count + '</div></div>';
+        if (!e) {
+          return '<div class="inv-row missing">' +
+            '<div><div class="inv-name">' + s.emoji + ' ' + s.name + '</div>' +
+            '<div class="inv-meta">Not found yet</div></div>' +
+            '<div class="inv-count">-</div></div>';
         }
-        return '<div class="inv-row missing">' +
-          '<div><div class="inv-name">' + s.emoji + ' ' + s.name + '</div>' +
-          '<div class="inv-meta">Not found yet</div></div>' +
-          '<div class="inv-count">-</div></div>';
+        var bits = [];
+        if (e.single > 0) bits.push(e.single + ' bloom' + (e.single === 1 ? '' : 's'));
+        if (e.cluster > 0) bits.push(e.cluster + ' cluster' + (e.cluster === 1 ? '' : 's'));
+        var total = e.single + e.cluster;
+        return '<div class="inv-row" style="border-color:' + s.color + ';cursor:pointer" ' +
+          'onclick="renderInventoryDetail(\'' + s.key + '\')">' +
+          '<div><div class="inv-name" style="color:' + s.color + '">' + s.emoji + ' ' + s.name + '</div>' +
+          '<div class="inv-meta">' + (bits.length ? bits.join(', ') : 'None held right now') +
+          ' &bull; first kept ' + formatAgo(e.firstAt) + '</div></div>' +
+          '<div class="inv-count">' + (total > 0 ? 'x' + total : '0') + '</div></div>';
       }).join('') + '</div>';
 
       var st = state.stats;
       html += '<p style="color:var(--text-dim)">Kept ' + st.kept + ' all time &bull; sold ' + st.sold +
-        ' for ' + st.earned + ' Petals</p>';
-      // Keeps made before the collection existed can't be attributed to a
-      // species, so say that outright rather than quietly under-reporting.
-      if (st.kept > held) {
-        html += '<p style="color:var(--text-dim)">' + (st.kept - held) + ' of those were kept before your ' +
-          'collection started keeping track, so they aren\'t listed above.</p>';
+        ' for ' + st.earned + ' Petals &bull; ' + st.extracted + ' seeds extracted</p>';
+      if (held > 0) {
+        html += '<p style="color:var(--text-dim)">Tap a flower to sell it or pull it apart for seeds.</p>';
       }
 
       document.getElementById('modal-body').innerHTML = html;
       document.getElementById('modal-ok-btn').textContent = 'Got it';
       document.getElementById('modal-ok-btn').onclick = closeModal;
-      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // One stack (blooms or clusters) and its actions. Offers "1" and "all N"
+    // rather than a quantity stepper - it covers "one or more" without adding
+    // a fiddly control to a bottom-sheet-sized modal.
+    function inventoryStackHtml(s, isCluster) {
+      var n = heldOf(s.key, isCluster);
+      if (n <= 0) return '';
+      var label = isCluster ? 'Cluster' : 'Bloom';
+      var each = isCluster ? SELL_CLUSTER : SELL_SINGLE;
+      var yieldText = isCluster ? '2-4 seeds' : '1-2 seeds';
+      var args = '\'' + s.key + '\',' + (isCluster ? 'true' : 'false') + ',';
+
+      var html = '<div class="inv-stack-title">' + label + 's &times; ' + n +
+        ' <span style="font-weight:600;color:var(--text-dim)">(' + each + ' \u{1F338} or ' +
+        yieldText + ' each)</span></div><div class="inv-actions">';
+      html += '<button class="inv-btn sell" onclick="sellHeld(' + args + '1)">Sell 1 &bull; ' +
+        each + ' \u{1F338}</button>';
+      html += '<button class="inv-btn extract" onclick="extractHeld(' + args + '1)">Extract 1</button>';
+      if (n > 1) {
+        html += '<button class="inv-btn sell" onclick="sellHeld(' + args + n + ')">Sell all ' + n +
+          ' &bull; ' + (each * n) + ' \u{1F338}</button>';
+        html += '<button class="inv-btn extract" onclick="extractHeld(' + args + n + ')">Extract all ' +
+          n + '</button>';
+      }
+      return html + '</div>';
+    }
+
+    function renderInventoryDetail(speciesKey) {
+      var s = speciesFor(speciesKey);
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = s.emoji + ' ' + s.name;
+
+      var html = '';
+      var stacks = inventoryStackHtml(s, false) + inventoryStackHtml(s, true);
+      if (stacks) {
+        html += '<p style="color:var(--text-dim)">Selling pays Petals you can spend on any flower. ' +
+          'Extracting gives back ' + s.name + ' seeds only.</p>' + stacks;
+      } else {
+        html += '<p>You aren\'t holding any ' + s.name + ' right now. Keep one to add it back.</p>';
+      }
+      html += '<p style="color:var(--text-dim)">' + (state.seeds[s.key] || 0) + ' ' + s.name +
+        ' seed' + ((state.seeds[s.key] || 0) === 1 ? '' : 's') + ' in your pouch.</p>';
+
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal-ok-btn').textContent = 'Back to collection';
+      document.getElementById('modal-ok-btn').onclick = renderInventoryList;
     }
 
     // Answers "where are they, then?". Most of a day's wild flowers land

@@ -296,7 +296,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.13.0</span>
+      <span id="game-version">v1.14.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -427,19 +427,145 @@
     // strictly dominant: growth time did not vary by tier, so once you could
     // afford the top one there was no reason to ever plant anything else,
     // and two thirds of the shop became dead content.)
+    // Species is SHAPE, color is PAINT, and the two are deliberately
+    // orthogonal: `shape` describes the flower's silhouette as rows of petals
+    // and COLORS supplies every hex that gets painted into it. That split is
+    // what makes cross-breeding possible at all - any color can be worn by any
+    // species without a single new asset. Flowers used to be system emoji
+    // glyphs on a tinted disc, which meant the "color" of a flower was baked
+    // into a font we don't control: unrecolorable, and different on every
+    // device. See flowerSVG() for how these rows are drawn.
+    //
+    // Rows are drawn outermost first. Each row: n petals of half-width rx and
+    // half-height ry, centred r units out from the middle of a 100x100 box,
+    // optionally rotated by `rot` degrees so a row interleaves with the one
+    // outside it. `deep` paints the row a shade darker for depth; `tip` picks
+    // the petal outline (round ellipse / pointed almond / notched heart).
     var SPECIES = [
-      { key: 'sunflower',  emoji: '\u{1F33B}', name: 'Sunflower', color: '#ffd23f' },
-      { key: 'tulip',      emoji: '\u{1F337}', name: 'Tulip',     color: '#ff7fae' },
-      { key: 'daisy',      emoji: '\u{1F33C}', name: 'Daisy',     color: '#fff2a8' },
-      { key: 'hibiscus',   emoji: '\u{1F33A}', name: 'Hibiscus',  color: '#ff8aa8' },
-      { key: 'blossom',    emoji: '\u{1F338}', name: 'Blossom',   color: '#ffc7e0' },
-      { key: 'rose',       emoji: '\u{1F339}', name: 'Rose',      color: '#f0637f' },
-      { key: 'lotus',      emoji: '\u{1FAB7}', name: 'Lotus',     color: '#caa8f5' }
+      { key: 'sunflower', name: 'Sunflower', base: 'yellow',
+        shape: { rows: [{ n: 16, rx: 6.5, ry: 20, r: 25, tip: 'point' },
+                        { n: 16, rx: 5.5, ry: 14, r: 19, rot: 11.25, tip: 'point', deep: true }],
+                 center: { r: 15, dots: 8 } } },
+      { key: 'tulip', name: 'Tulip', base: 'red',
+        shape: { rows: [{ n: 6, rx: 13, ry: 21, r: 19, tip: 'round' }],
+                 center: { r: 7 } } },
+      { key: 'daisy', name: 'Daisy', base: 'white',
+        shape: { rows: [{ n: 16, rx: 4.5, ry: 21, r: 24, tip: 'round' }],
+                 center: { r: 12 } } },
+      { key: 'hibiscus', name: 'Hibiscus', base: 'red',
+        shape: { rows: [{ n: 5, rx: 19, ry: 23, r: 19, tip: 'round' }],
+                 center: { r: 6, stamen: true } } },
+      { key: 'blossom', name: 'Blossom', base: 'white',
+        shape: { rows: [{ n: 5, rx: 15, ry: 19, r: 20, tip: 'notch' }],
+                 center: { r: 6, dots: 5 } } },
+      { key: 'rose', name: 'Rose', base: 'red',
+        shape: { rows: [{ n: 8, rx: 13, ry: 18, r: 22, tip: 'round' },
+                        { n: 7, rx: 10, ry: 14, r: 15, rot: 26, tip: 'round', deep: true },
+                        { n: 5, rx: 7.5, ry: 10, r: 8, rot: 14, tip: 'round', deep: true }],
+                 center: { r: 4 } } },
+      { key: 'lotus', name: 'Lotus', base: 'white',
+        shape: { rows: [{ n: 8, rx: 8.5, ry: 24, r: 21, tip: 'point' },
+                        { n: 8, rx: 7, ry: 17, r: 16, rot: 22.5, tip: 'point', deep: true }],
+                 center: { r: 7 } } }
     ];
     function speciesFor(key) {
       for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return SPECIES[i];
       return SPECIES[0];
     }
+
+    // ---- Colors ----------------------------------------------------------
+    // One palette shared by every species, so "red" means the same red on a
+    // rose and on a lotus and the breeding table stays a single small table
+    // rather than one per species.
+    //
+    // `tier` is breeding depth, not power: every color sells and grows exactly
+    // the same, matching the flat economy above. Tier 0 are the STANDARDS -
+    // the only colors the shop stocks and the only ones wild flowers come in -
+    // and every other color has to be bred. Their six pairings produce the
+    // six tier-1 colors, which is the whole entry-level table: four colors,
+    // six pairs, six results, nothing to memorise from a wiki.
+    //
+    // Only `petal` and `center` are authored. Everything else (the darker
+    // inner-row shade, the outline, the disc tint behind the flower) is
+    // derived in resolveColors() so a new color is two hex values and cannot
+    // drift out of step with itself.
+    var COLORS = [
+      { id: 'white',   name: 'White',   tier: 0, petal: '#fbfbf6', center: '#ffd45e' },
+      { id: 'red',     name: 'Red',     tier: 0, petal: '#e03e52', center: '#ffd45e' },
+      { id: 'yellow',  name: 'Yellow',  tier: 0, petal: '#ffcb3a', center: '#a06a22' },
+      { id: 'blue',    name: 'Blue',    tier: 0, petal: '#4f86e8', center: '#ffe6a0' },
+      { id: 'pink',    name: 'Pink',    tier: 1, petal: '#ff8ab4', center: '#ffe08a' },
+      { id: 'orange',  name: 'Orange',  tier: 1, petal: '#ff8c3a', center: '#8a4715' },
+      { id: 'purple',  name: 'Purple',  tier: 1, petal: '#9a63d8', center: '#ffe08a' },
+      { id: 'green',   name: 'Green',   tier: 1, petal: '#5cb45f', center: '#f2f0c0' },
+      { id: 'cream',   name: 'Cream',   tier: 1, petal: '#fff2c4', center: '#e0a83c' },
+      { id: 'sky',     name: 'Sky',     tier: 1, petal: '#8ecff0', center: '#ffe6a0' },
+      { id: 'magenta', name: 'Magenta', tier: 2, petal: '#d4359b', center: '#ffd45e' },
+      { id: 'peach',   name: 'Peach',   tier: 2, petal: '#ffb184', center: '#b06a3a' },
+      { id: 'black',   name: 'Midnight',tier: 2, petal: '#3b3648', center: '#b98ee8' },
+      { id: 'gold',    name: 'Gold',    tier: 3, petal: '#e8a91c', center: '#fff3c2' }
+    ];
+    var STANDARD_COLORS = ['white', 'red', 'yellow', 'blue'];
+
+    // Small hex helpers. Kept as plain integer maths rather than CSS
+    // color-mix() so the derived values are available as strings to JS (they
+    // go into SVG fill attributes and inline styles, not just stylesheets).
+    function hexRgb(h) {
+      h = h.replace('#', '');
+      return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)];
+    }
+    function rgbHex(c) {
+      return '#' + c.map(function (v) {
+        var s = Math.max(0, Math.min(255, Math.round(v))).toString(16);
+        return s.length < 2 ? '0' + s : s;
+      }).join('');
+    }
+    function shadeHex(h, f) { return rgbHex(hexRgb(h).map(function (v) { return v * f; })); }
+    function mixHex(a, b, t) {
+      var x = hexRgb(a), y = hexRgb(b);
+      return rgbHex([0, 1, 2].map(function (i) { return x[i] + (y[i] - x[i]) * t; }));
+    }
+    function lumHex(h) {
+      var c = hexRgb(h);
+      return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
+    }
+
+    // Run once at startup - COLORS is static, so there is no reason to redo
+    // this per render (icons are rebuilt on every zoom and every tick).
+    var DISC_BG = '#f4efe1';   // parchment backing the flower is drawn on
+    var DISC_CONTRAST = 0.14;  // min petal-vs-disc luminance gap
+    (function resolveColors() {
+      COLORS.forEach(function (c) {
+        c.deep = shadeHex(c.petal, 0.86);  // inner petal rows
+        c.edge = shadeHex(c.petal, 0.66);  // petal outline
+        // The disc is tinted by the flower it holds, but a white or cream
+        // flower on a parchment disc is very nearly invisible - the naive tint
+        // left a 0.03 luminance gap. So the tint is pushed AWAY from the petal
+        // (darker under a pale flower, lighter under a dark one) until it
+        // clears DISC_CONTRAST. Doing it as a loop rather than per-color
+        // overrides means any color added later is legible by construction.
+        c.soft = mixHex(DISC_BG, c.petal, 0.35);
+        var darken = lumHex(c.petal) > 0.55, guard = 0;
+        while (Math.abs(lumHex(c.petal) - lumHex(c.soft)) < DISC_CONTRAST && guard++ < 16) {
+          c.soft = darken ? shadeHex(c.soft, 0.93) : mixHex(c.soft, '#ffffff', 0.12);
+        }
+      });
+    })();
+
+    function colorFor(id) {
+      for (var i = 0; i < COLORS.length; i++) if (COLORS[i].id === id) return COLORS[i];
+      return COLORS[0];
+    }
+    // The color a flower should be treated as when a save (or a caller)
+    // predates colors entirely.
+    function baseColorOf(speciesKey) { return speciesFor(speciesKey).base; }
+    // Resolves the palette for anything carrying { species, color } - a plant,
+    // a wild flower. The fallback covers a record written before colors
+    // existed that somehow escaped the load-time migration.
+    function paletteOf(obj) { return colorFor(obj.color || baseColorOf(obj.species)); }
+    // UI accent for text/borders that used to read species.color. Derived so
+    // it always matches whatever the species' base color actually is.
+    SPECIES.forEach(function (s) { s.color = colorFor(s.base).petal; });
 
     // One flat price for every seed, and one flat payout for every flower.
     // SELL_SINGLE sits just under SEED_COST on purpose so cashing out at the
@@ -545,6 +671,11 @@
     // silently swallowing all the visits they never had to make.
     var OLD_GROWTH_THRESHOLDS = [0, 8 * HOUR, 20 * HOUR, 40 * HOUR];
     function migratePlant(p, now) {
+      // Pre-v1.14 flowers had no color at all (they were emoji, whose colors
+      // came from the device's font). They become their species' base color -
+      // the same standard the shop sells - so nothing in an existing garden
+      // turns into a bred rarity it was never grown for.
+      if (!p.color) p.color = baseColorOf(p.species);
       if (typeof p.stage === 'number') return p;
       var g = p.growthMs || 0;
       p.stage = 0;
@@ -604,9 +735,16 @@
         var plants = parsed.plants || {};
         var migrateNow = Date.now();
         Object.keys(plants).forEach(function (k) { migratePlant(plants[k], migrateNow); });
+        // Wild flowers predating colors get a standard color too - picked from
+        // the species base rather than at random so the same flower doesn't
+        // change color between two page loads.
+        var wild = parsed.wild || {};
+        Object.keys(wild).forEach(function (k) {
+          if (!wild[k].color) wild[k].color = baseColorOf(wild[k].species);
+        });
         return {
           plants: plants,
-          wild: parsed.wild || {},
+          wild: wild,
           lastWildDay: parsed.lastWildDay || null,
           inventory: migrateInventory(parsed.inventory),
           stats: Object.assign({}, def.stats, parsed.stats || {}),
@@ -729,7 +867,7 @@
       var c = hexCenter(q, r);
       var key = hexKey(q, r);
       state.plants[key] = {
-        q: q, r: r, lat: c.lat, lng: c.lng, species: species,
+        q: q, r: r, lat: c.lat, lng: c.lng, species: species, color: baseColorOf(species),
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + STAGE_READY_MS,
         reachedBloom: false, reachedFlourish: false
       };
@@ -973,8 +1111,12 @@
       spots.forEach(function (h) {
         var c = hexCenter(h.q, h.r);
         var sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
+        // Wild flowers only ever come in the standard colors. Everything past
+        // tier 0 has to be bred, so a walk can never hand you what breeding is
+        // supposed to be for.
+        var col = STANDARD_COLORS[Math.floor(Math.random() * STANDARD_COLORS.length)];
         state.wild[hexKey(h.q, h.r)] = {
-          q: h.q, r: h.r, lat: c.lat, lng: c.lng, species: sp.key,
+          q: h.q, r: h.r, lat: c.lat, lng: c.lng, species: sp.key, color: col,
           stage: 2, spawnedAt: Date.now()
         };
       });
@@ -1002,31 +1144,136 @@
     // ---------------------------------------------------------------------
     //  VISUALS
     // ---------------------------------------------------------------------
-    // Builds the emoji "look" for a plant at a given stage/size and returns
-    // its rendered box dimensions so callers (map marker vs. big panel
-    // preview) can size their container to match exactly.
-    function buildPlantVisual(species, stage, wilted, base) {
+    // ---- Flower artwork --------------------------------------------------
+    // Flowers are drawn as inline SVG built here at runtime, not as emoji or
+    // image files. That is what makes an arbitrary color wearable by an
+    // arbitrary species: shape comes from species.shape, every fill comes from
+    // the color, and the two never have to know about each other. It also
+    // keeps the game a single dependency-free file and makes a flower look the
+    // same on every device, which emoji never did.
+    //
+    // Everything is authored in a 100x100 viewBox and scaled by the caller, so
+    // one definition serves an 18px inline chip and a 110px zoomed-in marker.
+    var PETAL_STROKE = 2.2;  // viewBox units, so it scales with the flower
+
+    // A petal centred `r` units above the middle, then rotated into place.
+    function petalShape(row, cy, fill, edge, angle) {
+      var rx = row.rx, ry = row.ry;
+      var common = ' fill="' + fill + '" stroke="' + edge + '" stroke-width="' + PETAL_STROKE +
+        '" stroke-linejoin="round" transform="rotate(' + angle.toFixed(2) + ' 50 50)"/>';
+      if (row.tip === 'round') {
+        return '<ellipse cx="50" cy="' + cy.toFixed(2) + '" rx="' + rx + '" ry="' + ry + '"' + common;
+      }
+      var top = cy - ry, bot = cy + ry;
+      if (row.tip === 'notch') {
+        // Heart-shaped petal: two lobes at the tip with a dip between them.
+        return '<path d="M50 ' + (top + ry * 0.42).toFixed(2) +
+          ' L' + (50 - rx * 0.55).toFixed(2) + ' ' + top.toFixed(2) +
+          ' C' + (50 - rx).toFixed(2) + ' ' + (top + ry * 0.75).toFixed(2) +
+          ' ' + (50 - rx).toFixed(2) + ' ' + (bot - ry * 0.35).toFixed(2) +
+          ' 50 ' + bot.toFixed(2) +
+          ' C' + (50 + rx).toFixed(2) + ' ' + (bot - ry * 0.35).toFixed(2) +
+          ' ' + (50 + rx).toFixed(2) + ' ' + (top + ry * 0.75).toFixed(2) +
+          ' ' + (50 + rx * 0.55).toFixed(2) + ' ' + top.toFixed(2) + ' Z"' + common;
+      }
+      // 'point' - an almond, tapered at both ends.
+      return '<path d="M50 ' + top.toFixed(2) +
+        ' C' + (50 + rx).toFixed(2) + ' ' + (top + ry * 0.55).toFixed(2) +
+        ' ' + (50 + rx).toFixed(2) + ' ' + (bot - ry * 0.45).toFixed(2) +
+        ' 50 ' + bot.toFixed(2) +
+        ' C' + (50 - rx).toFixed(2) + ' ' + (bot - ry * 0.45).toFixed(2) +
+        ' ' + (50 - rx).toFixed(2) + ' ' + (top + ry * 0.55).toFixed(2) +
+        ' 50 ' + top.toFixed(2) + ' Z"' + common;
+    }
+
+    // Icons are rebuilt on every zoomend and every 60s tick, and a rose is 20
+    // petals of path maths, so the finished markup is memoised. Species and
+    // colors are both static, so the key is complete.
+    var flowerSvgCache = {};
+    function flowerSVG(species, color, px) {
+      var ck = species.key + '|' + color.id + '|' + px;
+      if (flowerSvgCache[ck]) return flowerSvgCache[ck];
+
+      var sh = species.shape, out = '';
+      sh.rows.forEach(function (row) {
+        var fill = row.deep ? color.deep : color.petal;
+        var cy = 50 - row.r;
+        for (var i = 0; i < row.n; i++) {
+          out += petalShape(row, cy, fill, color.edge, (360 / row.n) * i + (row.rot || 0));
+        }
+      });
+
+      var c = sh.center;
+      out += '<circle cx="50" cy="50" r="' + c.r + '" fill="' + color.center +
+        '" stroke="' + color.edge + '" stroke-width="' + PETAL_STROKE + '"/>';
+      if (c.dots) {
+        // Speckled disc florets - what separates a sunflower/blossom eye from
+        // a plain dot at map scale.
+        for (var d = 0; d < c.dots; d++) {
+          var a = (Math.PI * 2 / c.dots) * d, rr = c.r * 0.5;
+          out += '<circle cx="' + (50 + Math.cos(a) * rr).toFixed(2) + '" cy="' +
+            (50 + Math.sin(a) * rr).toFixed(2) + '" r="' + (c.r * 0.22).toFixed(2) +
+            '" fill="' + shadeHex(color.center, 0.7) + '"/>';
+        }
+      }
+      if (c.stamen) {
+        out += '<path d="M50 50 L50 ' + (50 - c.r * 3.2).toFixed(2) + '" stroke="' + color.center +
+          '" stroke-width="2.4" stroke-linecap="round"/>' +
+          '<circle cx="50" cy="' + (50 - c.r * 3.2).toFixed(2) + '" r="' + (c.r * 0.7).toFixed(2) +
+          '" fill="' + color.center + '"/>';
+      }
+
+      var svg = '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px +
+        '" style="display:block">' + out + '</svg>';
+      flowerSvgCache[ck] = svg;
+      return svg;
+    }
+
+    function seedSVG(px) {
+      return '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px + '" style="display:block">' +
+        '<ellipse cx="50" cy="54" rx="26" ry="32" fill="#a9773f" stroke="#7d5628" stroke-width="3"/>' +
+        '<path d="M50 24 C45 40 45 52 50 68" stroke="#7d5628" stroke-width="3" fill="none"/>' +
+        '<ellipse cx="41" cy="42" rx="7" ry="10" fill="#d8b184" opacity="0.75" ' +
+        'transform="rotate(-22 41 42)"/></svg>';
+    }
+
+    function sproutSVG(px) {
+      return '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px + '" style="display:block">' +
+        '<path d="M50 86 C50 64 50 50 50 32" stroke="#4e8b3f" stroke-width="6" fill="none" ' +
+        'stroke-linecap="round"/>' +
+        '<ellipse cx="31" cy="52" rx="18" ry="11" fill="#7cc45f" stroke="#4e8b3f" stroke-width="2.6" ' +
+        'transform="rotate(-26 31 52)"/>' +
+        '<ellipse cx="69" cy="62" rx="16" ry="10" fill="#66b04d" stroke="#4e8b3f" stroke-width="2.6" ' +
+        'transform="rotate(24 69 62)"/></svg>';
+    }
+
+    // The round backing every stage sits on. It is what makes a marker legible
+    // against an arbitrary patch of basemap; the flower itself only has to be
+    // a flower.
+    function discStyle(bg, size) {
+      return 'background:' + bg + ';border:2px solid rgba(255,255,255,0.85);border-radius:50%;width:' +
+        size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;' +
+        'box-shadow:0 2px 8px rgba(60,40,20,0.3);flex-shrink:0;overflow:hidden';
+    }
+
+    // Builds the "look" for a plant at a given stage/size and returns its
+    // rendered box dimensions so callers (map marker vs. big panel preview)
+    // can size their container to match exactly.
+    function buildPlantVisual(species, color, stage, wilted, base) {
       var wiltFilter = wilted ? 'filter:grayscale(55%) opacity(0.7);' : '';
       function dot(size) {
-        var fs = Math.round(size * 0.6);
-        return '<div style="background:' + species.color + ';border:2px solid rgba(255,255,255,0.85);' +
-          'border-radius:50%;width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;' +
-          'justify-content:center;font-size:' + fs + 'px;box-shadow:0 2px 8px rgba(60,40,20,0.3);flex-shrink:0">' +
-          species.emoji + '</div>';
+        return '<div style="' + discStyle(color.soft, size) + '">' +
+          flowerSVG(species, color, Math.round(size * 0.94)) + '</div>';
       }
       var html, w, h;
       if (stage === 0) {
         w = h = Math.round(base * 0.5);
-        html = '<div style="' + wiltFilter + 'background:#c9a06a;border:2px solid rgba(255,255,255,0.85);' +
-          'border-radius:50%;width:' + w + 'px;height:' + h + 'px;display:flex;align-items:center;' +
-          'justify-content:center;font-size:' + Math.round(w * 0.55) + 'px;box-shadow:0 2px 8px rgba(60,40,20,0.3)">' +
-          '\u{1F330}</div>';
+        html = '<div style="' + wiltFilter + discStyle('#e6cfa8', w) + '">' +
+          seedSVG(Math.round(w * 0.72)) + '</div>';
       } else if (stage === 1) {
         w = h = Math.round(base * 0.55);
-        html = '<div style="' + wiltFilter + 'background:#bfe6a0;border:2px solid rgba(255,255,255,0.85);' +
-          'border-radius:50%;width:' + w + 'px;height:' + h + 'px;display:flex;align-items:center;' +
-          'justify-content:center;font-size:' + Math.round(w * 0.58) + 'px;box-shadow:0 2px 8px rgba(60,40,20,0.3)">' +
-          '\u{1F331}</div>';
+        html = '<div style="' + wiltFilter + discStyle('#d8ecc4', w) + '">' +
+          sproutSVG(Math.round(w * 0.82)) + '</div>';
       } else if (stage === 2) {
         w = h = Math.round(base * 0.85);
         html = '<div style="' + wiltFilter + '">' + dot(w) + '</div>';
@@ -1038,6 +1285,17 @@
           dot(ds) + dot(ds) + '</div>' + dot(ds) + '</div>';
       }
       return { html: html, w: w, h: h };
+    }
+
+    // Inline flower for text rows (collection list, shop, seed picker, modal
+    // titles) - the same artwork the map uses, so a row and its marker are
+    // recognisably the same flower. Replaces the emoji those labels used to
+    // carry. Callers must use innerHTML, not textContent.
+    function speciesChip(species, colorId, px) {
+      px = px || 18;
+      return '<span style="display:inline-block;vertical-align:-' + Math.round(px * 0.18) +
+        'px;width:' + px + 'px;height:' + px + 'px">' +
+        flowerSVG(species, colorFor(colorId || species.base), px) + '</span>';
     }
 
     // Flower icons are sized relative to the current zoom (a fixed real-world
@@ -1057,7 +1315,7 @@
 
     function makePlantIcon(plant) {
       var d = recomputePlant(plant, Date.now());
-      var v = buildPlantVisual(speciesFor(plant.species), d.stage, d.wilted, plantIconBase());
+      var v = buildPlantVisual(speciesFor(plant.species), paletteOf(plant), d.stage, d.wilted, plantIconBase());
       var html = v.html;
       // A corner droplet marks any plant that wants a visit, so the map alone
       // answers "is there anything to do right now?". Green means it is ready
@@ -1079,7 +1337,7 @@
     // wild flowers don't grow and can't be neglected.
     function makeWildIcon(w) {
       var d = wildDerived(w, Date.now());
-      var v = buildPlantVisual(speciesFor(w.species), 2, d.wilted, plantIconBase());
+      var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, plantIconBase());
       var pad = Math.max(6, Math.round(v.w * 0.18));
       var box = v.w + pad * 2, boxH = v.h + pad * 2;
       var html = '<div style="position:relative;width:' + box + 'px;height:' + boxH + 'px;' +
@@ -1366,7 +1624,7 @@
       var species = speciesFor(w.species);
       var d = wildDerived(w, Date.now());
 
-      var v = buildPlantVisual(species, 2, d.wilted, 88);
+      var v = buildPlantVisual(species, paletteOf(w), 2, d.wilted, 88);
       var iconEl = document.getElementById('plant-icon-big');
       iconEl.innerHTML = v.html;
       iconEl.style.width = v.w + 'px';
@@ -1449,7 +1707,7 @@
       var d = recomputePlant(p, Date.now());
       var species = speciesFor(p.species);
 
-      var v = buildPlantVisual(species, d.stage, d.wilted, 88);
+      var v = buildPlantVisual(species, paletteOf(p), d.stage, d.wilted, 88);
       var iconEl = document.getElementById('plant-icon-big');
       iconEl.innerHTML = v.html;
       iconEl.style.width = v.w + 'px';
@@ -1744,7 +2002,7 @@
         var e = state.inventory[s.key];
         if (!e) {
           return '<div class="inv-row missing">' +
-            '<div><div class="inv-name">' + s.emoji + ' ' + s.name + '</div>' +
+            '<div><div class="inv-name">' + speciesChip(s) + ' ' + s.name + '</div>' +
             '<div class="inv-meta">Not found yet</div></div>' +
             '<div class="inv-count">-</div></div>';
         }
@@ -1754,7 +2012,7 @@
         var total = e.single + e.cluster;
         return '<div class="inv-row" style="border-color:' + s.color + ';cursor:pointer" ' +
           'onclick="renderInventoryDetail(\'' + s.key + '\')">' +
-          '<div><div class="inv-name" style="color:' + s.color + '">' + s.emoji + ' ' + s.name + '</div>' +
+          '<div><div class="inv-name" style="color:' + s.color + '">' + speciesChip(s) + ' ' + s.name + '</div>' +
           '<div class="inv-meta">' + (bits.length ? bits.join(', ') : 'None held right now') +
           ' &bull; first kept ' + formatAgo(e.firstAt) + '</div></div>' +
           '<div class="inv-count">' + (total > 0 ? 'x' + total : '0') + '</div></div>';
@@ -1801,7 +2059,8 @@
     function renderInventoryDetail(speciesKey) {
       var s = speciesFor(speciesKey);
       resetModalChrome();
-      document.getElementById('modal-title').textContent = s.emoji + ' ' + s.name;
+      // innerHTML, not textContent - the chip is inline SVG markup.
+      document.getElementById('modal-title').innerHTML = speciesChip(s, null, 22) + ' ' + s.name;
 
       var html = '';
       var stacks = inventoryStackHtml(s, false) + inventoryStackHtml(s, true);
@@ -1869,7 +2128,7 @@
         owned.map(function (o) {
           return '<button class="seed-pick-btn" style="border-color:' + o.s.color + '" onclick="plantSeedAt(' +
             q + ',' + r + ',\'' + o.s.key + '\');closeModal();"><span style="color:' + o.s.color + '">' +
-            o.s.emoji + ' ' + o.s.name + '</span><span>x' + o.count + '</span></button>';
+            speciesChip(o.s) + ' ' + o.s.name + '</span><span>x' + o.count + '</span></button>';
         }).join('') + '</div>';
       document.getElementById('modal-ok-btn').style.display = 'none';
       document.getElementById('modal-overlay').classList.add('open');
@@ -1906,7 +2165,7 @@
         var owned = state.seeds[s.key] || 0;
         return '<div class="shop-row" style="border-color:' + s.color + '">' +
           '<div class="shop-row-info">' +
-          '<div class="shop-row-name" style="color:' + s.color + '">' + s.emoji + ' ' + s.name + '</div>' +
+          '<div class="shop-row-name" style="color:' + s.color + '">' + speciesChip(s) + ' ' + s.name + '</div>' +
           '<div class="shop-row-meta">You have ' + owned + '</div></div>' +
           '<button class="shop-buy-btn"' + (afford ? '' : ' disabled') +
           ' onclick="buySeed(\'' + s.key + '\')">' + SEED_COST + ' \u{1F338}</button></div>';

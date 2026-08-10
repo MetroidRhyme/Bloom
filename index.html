@@ -144,15 +144,17 @@
     #plant-title { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
     #plant-meta { text-align: center; font-size: 12.5px; color: var(--text-dim); margin-bottom: 12px; }
 
-    .water-bar-track { width: 100%; height: 10px; background: rgba(0,0,0,0.07); border-radius: 999px; overflow: hidden; }
-    #water-bar-fill { height: 100%; background: linear-gradient(90deg, #4aa3ff, #7ec8ff); border-radius: 999px; transition: width 0.4s ease; }
-    #water-bar-label { text-align: center; font-size: 11.5px; color: var(--text-dim); margin-top: 5px; margin-bottom: 10px; }
+    /* Progress toward the next stage, i.e. how long until this plant is ready
+       for its next watering visit. There is no water-level bar any more -
+       water is not a resource that meters down, it is just the action that
+       advances a stage (or clears a cosmetic wilt). */
+    .growth-bar-track { width: 100%; height: 10px; background: rgba(0,0,0,0.07); border-radius: 999px; overflow: hidden; }
+    #growth-bar-fill { height: 100%; background: linear-gradient(90deg, var(--green), #8fd9a8); border-radius: 999px; transition: width 0.4s ease; }
+    #growth-bar-label { text-align: center; font-size: 11.5px; color: var(--text-dim); margin-top: 5px; margin-bottom: 10px; }
 
     #plant-status-line { text-align: center; font-size: 13.5px; font-weight: 700; margin-bottom: 14px; }
     .status-good { color: var(--green-dark); }
-    .status-thirsty { color: var(--amber); }
     .status-wilt { color: var(--blue); }
-    .status-dim { color: var(--text-dim); }
 
     #plant-action-btn {
       display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
@@ -258,7 +260,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.6.0</span>
+      <span id="game-version">v1.7.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -290,8 +292,8 @@
     <div id="plant-icon-big"></div>
     <div id="plant-title">&nbsp;</div>
     <div id="plant-meta">&nbsp;</div>
-    <div class="water-bar-track"><div id="water-bar-fill" style="width:0%"></div></div>
-    <div id="water-bar-label">&nbsp;</div>
+    <div class="growth-bar-track"><div id="growth-bar-fill" style="width:0%"></div></div>
+    <div id="growth-bar-label">&nbsp;</div>
     <div id="plant-status-line">&nbsp;</div>
     <button id="plant-action-btn">Water</button>
     <div id="harvest-row">
@@ -559,10 +561,8 @@
     // purely a look - a wilted plant grows exactly as well as a lush one, so
     // neglect never costs progress, only appearances.
     function recomputePlant(p, now) {
-      var dryMs = now - p.lastWateredAt;
       var d = {
-        waterFrac: Math.max(0, Math.min(1, 1 - dryMs / WATER_DURATION_MS)),
-        wilted: dryMs >= WATER_DURATION_MS,
+        wilted: (now - p.lastWateredAt) >= WATER_DURATION_MS,
         stage: p.stage,
         ready: p.stage < MAX_STAGE && now >= p.readyAt,
         readyIn: Math.max(0, p.readyAt - now)
@@ -1027,34 +1027,47 @@
       document.getElementById('plant-title').textContent = species.name + ' - ' + STAGE_LABELS[d.stage];
       document.getElementById('plant-meta').textContent = 'Planted ' + formatAgo(p.plantedAt);
 
-      var pct = Math.round(d.waterFrac * 100);
-      document.getElementById('water-bar-fill').style.width = pct + '%';
-      document.getElementById('water-bar-label').textContent = pct + '% watered';
+      // The bar fills across the readiness wait, so it reads as "this plant is
+      // getting there" rather than "this plant is running out of something".
+      var growthPct = d.stage >= MAX_STAGE
+        ? 100
+        : Math.max(0, Math.min(100, Math.round((1 - d.readyIn / STAGE_READY_MS) * 100)));
+      document.getElementById('growth-bar-fill').style.width = growthPct + '%';
+      document.getElementById('growth-bar-label').textContent =
+        d.stage >= MAX_STAGE ? 'Fully grown' :
+        d.ready ? 'Ready to grow now!' :
+        'Ready to grow in ' + formatDuration(d.readyIn);
 
-      // Readiness leads, because it is the only state a visit converts into
-      // progress. Wilting is cosmetic now, so it ranks below that - it's a
-      // "your garden looks thirsty" note, never a warning.
+      // Status line says how the plant is doing; the bar above says when it
+      // next needs you. Readiness leads because it is the only state a visit
+      // converts into progress - wilt is cosmetic, so it ranks below it.
       var statusEl = document.getElementById('plant-status-line');
       if (d.ready) { statusEl.textContent = 'Ready to grow - give it a drink!'; statusEl.className = 'status-good'; }
-      else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
       else if (d.wilted) { statusEl.textContent = 'Looking wilted - a drink will perk it back up'; statusEl.className = 'status-wilt'; }
-      else if (d.waterFrac < 0.34) { statusEl.textContent = 'Getting thirsty - water it soon'; statusEl.className = 'status-thirsty'; }
-      else { statusEl.textContent = 'Ready to grow in ' + formatDuration(d.readyIn); statusEl.className = 'status-dim'; }
+      else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
+      else { statusEl.textContent = 'Thriving'; statusEl.className = 'status-good'; }
 
       var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
       var inRange = uh && hexDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE_HEX;
+      // Watering is only offered when it would actually do something: advance
+      // a stage, or clear a cosmetic wilt. A plant that is mid-wait has no
+      // action to take, so the button is hidden rather than shown as a tap
+      // that quietly achieves nothing.
       var btn = document.getElementById('plant-action-btn');
-      if (inRange) {
-        btn.disabled = false;
-        // Watering is never blocked, but the label distinguishes the visit
-        // that advances a stage from the one that just tops the tank up, so
-        // an early tap is an informed choice rather than a surprise.
-        btn.textContent = d.ready ? 'Water + Grow \u{1F4A7}' : 'Water \u{1F4A7}';
-        btn.onclick = function () { waterPlant(key); };
-      } else {
-        btn.disabled = true;
-        btn.textContent = 'Walk closer to water';
+      if (!d.ready && !d.wilted) {
+        btn.style.display = 'none';
         btn.onclick = null;
+      } else {
+        btn.style.display = '';
+        if (inRange) {
+          btn.disabled = false;
+          btn.textContent = d.ready ? 'Water + Grow \u{1F4A7}' : 'Water \u{1F4A7}';
+          btn.onclick = function () { waterPlant(key); };
+        } else {
+          btn.disabled = true;
+          btn.textContent = 'Walk closer to water';
+          btn.onclick = null;
+        }
       }
 
       // Harvesting (Keep or Sell) only shows up once a plant has something to
@@ -1084,9 +1097,9 @@
     function updateHUD() {
       var keys = Object.keys(state.plants);
       var total = keys.length;
-      var thirsty = keys.filter(function (k) {
+      var wilted = keys.filter(function (k) {
         var d = state.plants[k]._d;
-        return d && (d.wilted || d.waterFrac < 0.34);
+        return d && d.wilted;
       }).length;
       // state.stats.bloomed is a lifetime "ever reached bloom" counter (it
       // never decrements, even after that plant is harvested) - that's right
@@ -1098,7 +1111,7 @@
         return d && d.stage >= 2;
       }).length;
 
-      // Ready-to-grow outranks merely thirsty: it is the one line that sends
+      // Ready-to-grow outranks merely wilted: it is the one line that sends
       // the player out the door, and it is the only status that a watering
       // visit converts into actual progress.
       var ready = keys.filter(function (k) {
@@ -1111,8 +1124,8 @@
       else if (ready > 0) {
         line = '\u{1F4A7} ' + ready + (ready === 1 ? ' flower is' : ' flowers are') +
           ' ready to grow &bull; go water ' + (ready === 1 ? 'it' : 'them') + '!';
-      } else if (thirsty > 0) {
-        line = thirsty + (thirsty === 1 ? ' flower is' : ' flowers are') + ' thirsty \u{1F4A7} &bull; ' +
+      } else if (wilted > 0) {
+        line = wilted + (wilted === 1 ? ' flower is' : ' flowers are') + ' looking wilted \u{1F4A7} &bull; ' +
           blooming + ' in bloom';
       } else {
         line = '\u{1F338} ' + total + ' growing &bull; ' + blooming + ' in bloom &bull; all watered';

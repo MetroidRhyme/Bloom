@@ -152,6 +152,7 @@
     .status-good { color: var(--green-dark); }
     .status-thirsty { color: var(--amber); }
     .status-wilt { color: var(--blue); }
+    .status-dim { color: var(--text-dim); }
 
     #plant-action-btn {
       display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
@@ -257,7 +258,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.4.0</span>
+      <span id="game-version">v1.5.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -353,9 +354,25 @@
     var WATER_DURATION_MS = 48 * HOUR;  // full water drains to empty over 2 days
     var GRACE_MS          = 24 * HOUR;  // then it can sit dry a day before wilting
     var DEATH_MS           = 96 * HOUR; // ...and up to 4 more wilted days before it dies
-    // growthMs thresholds for [seed, sprout, single bloom, flourishing cluster]
-    var GROWTH_THRESHOLDS = [0, 8 * HOUR, 20 * HOUR, 40 * HOUR];
+
+    // Stages are advanced by WATERING, not by elapsed time. A plant becomes
+    // "ready" STAGE_READY_MS after it was planted or last advanced, and the
+    // next watering visit is what actually moves it up a stage - so a full
+    // cluster costs three separate walks back, which is the entire point of
+    // the game. (The old model accumulated growth purely from elapsed time,
+    // which meant a plant reached a full cluster with zero watering visits
+    // and the watering mechanic had no mechanical weight at all.)
+    var STAGE_READY_MS = 12 * HOUR;
+    var MAX_STAGE = 3;
     var STAGE_LABELS = ['Seed', 'Sprout', 'In Bloom', 'Flourishing'];
+    // Indexed by the stage just reached; index 0 is unused (you never water
+    // your way *into* being a seed).
+    var GROWTH_MESSAGES = [
+      '',
+      'It sprouted! \u{1F331}',
+      'It burst into bloom! \u{1F338}',
+      'It flourished into a full cluster! \u{1F337}'
+    ];
 
     // `tier` (0/1/2) maps each species onto TIERS below - it's what a seed's
     // price/sell value and the shop actually key off, species itself is just
@@ -402,6 +419,26 @@
     // values themselves, corrupting what a fresh/reset save starts with).
     function starterSeeds() { return { common: 3, rare: 0, prized: 0 }; }
 
+    // Saves from before the water-gated growth model (v1.4.x and earlier)
+    // stored a `growthMs` accumulator instead of an explicit `stage`. Convert
+    // once on load: award whatever stage the old thresholds had already earned
+    // them, then start the readiness clock from now rather than backdating it,
+    // so a returning player's next watering advances one stage instead of
+    // silently swallowing all the visits they never had to make.
+    var OLD_GROWTH_THRESHOLDS = [0, 8 * HOUR, 20 * HOUR, 40 * HOUR];
+    function migratePlant(p, now) {
+      if (typeof p.stage === 'number') return p;
+      var g = p.growthMs || 0;
+      p.stage = 0;
+      for (var i = OLD_GROWTH_THRESHOLDS.length - 1; i >= 0; i--) {
+        if (g >= OLD_GROWTH_THRESHOLDS[i]) { p.stage = i; break; }
+      }
+      p.readyAt = now;
+      delete p.growthMs;
+      delete p.lastGrowthCheckAt;
+      return p;
+    }
+
     function loadState() {
       var def = {
         plants: {},
@@ -416,8 +453,11 @@
       if (!raw) return def;
       try {
         var parsed = JSON.parse(raw);
+        var plants = parsed.plants || {};
+        var migrateNow = Date.now();
+        Object.keys(plants).forEach(function (k) { migratePlant(plants[k], migrateNow); });
         return {
-          plants: parsed.plants || {},
+          plants: plants,
           stats: Object.assign({}, def.stats, parsed.stats || {}),
           // A save that predates seeds/currency (v1.1.x) gets starter seeds
           // bootstrapped in rather than being left unable to plant anything -
@@ -500,34 +540,25 @@
     //  Fully timestamp-derived so it stays correct across long offline gaps
     //  (the whole point of the game is that you walk away for hours/days).
     // ---------------------------------------------------------------------
-    function stageForGrowth(growthMs) {
-      for (var i = GROWTH_THRESHOLDS.length - 1; i >= 0; i--) {
-        if (growthMs >= GROWTH_THRESHOLDS[i]) return i;
-      }
-      return 0;
-    }
-
-    // Recomputes a plant's derived state as of `now` and mutates its stored
-    // growth accumulator. Safe to call any number of times (idempotent aside
-    // from accruing whatever real time has actually passed since the last call).
+    // Derives a plant's display state as of `now`. Purely a read - every stored
+    // field it looks at (lastWateredAt, stage, readyAt) is only ever written by
+    // an actual player action, so this is safe to call from render paths as
+    // often as you like and can never advance the game on its own.
     //
-    // Growth only accrues while the plant isn't wilted: `wiltStartAt` is the
-    // exact timestamp watering would need to happen by to avoid wilting, so
-    // clamping the growth window to min(now, wiltStartAt) accounts for offline
-    // gaps that span a wilt transition without needing stored history.
+    // `ready` is the whole loop: a plant that has finished its STAGE_READY_MS
+    // wait is waiting on a real watering visit to move up a stage. Readiness
+    // keeps ticking even while a plant is wilting, so someone coming back from
+    // a week away waters once and gets both the rescue and the stage - the
+    // neglect timers below are the only thing that ever costs you a plant.
     function recomputePlant(p, now) {
-      var wiltStartAt = p.lastWateredAt + WATER_DURATION_MS + GRACE_MS;
-      var growEnd = Math.min(now, wiltStartAt);
-      var added = Math.max(0, growEnd - p.lastGrowthCheckAt);
-      p.growthMs += added;
-      p.lastGrowthCheckAt = now;
-
       var dryMs = Math.max(0, now - p.lastWateredAt - WATER_DURATION_MS);
       var d = {
         waterFrac: Math.max(0, Math.min(1, 1 - (now - p.lastWateredAt) / WATER_DURATION_MS)),
         wilted: dryMs > GRACE_MS,
         dead: dryMs > GRACE_MS + DEATH_MS,
-        stage: stageForGrowth(p.growthMs)
+        stage: p.stage,
+        ready: p.stage < MAX_STAGE && now >= p.readyAt,
+        readyIn: Math.max(0, p.readyAt - now)
       };
       p._d = d;
       return d;
@@ -550,14 +581,15 @@
       var key = hexKey(q, r);
       state.plants[key] = {
         q: q, r: r, lat: c.lat, lng: c.lng, species: species,
-        plantedAt: now, lastWateredAt: now, growthMs: 0, lastGrowthCheckAt: now,
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + STAGE_READY_MS,
         reachedBloom: false, reachedFlourish: false
       };
       state.stats.planted++;
       saveState();
       renderPlants();
       updateHUD();
-      toast('\u{1F331} ' + tier.name + ' seed planted! Come back and water it soon.');
+      toast('\u{1F331} ' + tier.name + ' seed planted! It will be ready for water in ' +
+        formatDuration(STAGE_READY_MS) + '.');
       vibrate(20);
       tutorialOnPlant(key);
       return key;
@@ -574,19 +606,40 @@
       openSeedPicker(q, r, owned);
     }
 
+    // Watering is always allowed in range and always refills the tank (which
+    // resets the wilt/death clock), but it only advances a stage if the plant
+    // has finished its readiness wait - that separation is what makes each
+    // stage cost its own walk back without ever making a tap feel wasted.
+    // Bloom/flourish milestones are credited here, at the moment they actually
+    // happen, rather than being swept up later by tickPlants.
     function waterPlant(key) {
       var p = state.plants[key];
       if (!p) return;
       var now = Date.now();
-      recomputePlant(p, now);   // accrue any growth earned before the dry spell
+      var grew = p.stage < MAX_STAGE && now >= p.readyAt;
+
       p.lastWateredAt = now;
+      if (grew) {
+        p.stage++;
+        p.readyAt = now + STAGE_READY_MS;
+        if (p.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
+        if (p.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+      }
+
       recomputePlant(p, now);   // refresh derived state for immediate UI feedback
       saveState();
       renderPlants();
       if (viewingKey === key) renderPlantPanel(key);
       updateHUD();
-      toast('\u{1F4A7} Watered!');
-      vibrate(15);
+
+      if (grew) {
+        toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
+      } else if (p.stage >= MAX_STAGE) {
+        toast('\u{1F4A7} Watered! It is fully grown - Keep it or Sell it whenever you like.');
+      } else {
+        toast('\u{1F4A7} Watered! Ready to grow again in ' + formatDuration(p.readyAt - now) + '.');
+      }
+      vibrate(grew ? 30 : 15);
       tutorialOnWater(key);
     }
 
@@ -622,17 +675,17 @@
       return sell ? harvestValue(p, d.stage) : 0; // used by the tutorial's bonus top-up
     }
 
-    // Runs on load and every minute: advances growth, tracks first-time
-    // milestones, and gently retires anything left dry for too long.
+    // Runs on load and every minute: refreshes each plant's derived state (so
+    // the HUD and markers notice a plant crossing into ready/thirsty/wilted)
+    // and gently retires anything left dry for too long. Stage advancement and
+    // milestone credit both live in waterPlant now - nothing here changes a
+    // plant's progress, only whether it is still with us.
     function tickPlants() {
       var now = Date.now();
       var removed = 0;
       Object.keys(state.plants).forEach(function (key) {
-        var p = state.plants[key];
-        var d = recomputePlant(p, now);
-        if (d.dead) { delete state.plants[key]; state.stats.lost++; removed++; return; }
-        if (d.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
-        if (d.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+        var d = recomputePlant(state.plants[key], now);
+        if (d.dead) { delete state.plants[key]; state.stats.lost++; removed++; }
       });
       saveState();
       renderPlants();
@@ -705,9 +758,14 @@
       var d = recomputePlant(plant, Date.now());
       var v = buildPlantVisual(speciesFor(plant.species), d.stage, d.wilted, plantIconBase());
       var html = v.html;
-      if (d.wilted) {
+      // A corner droplet marks any plant that wants a visit, so the map alone
+      // answers "is there anything to do right now?". Blue means it is wilting
+      // and needs rescuing; green means it is simply ready to grow a stage.
+      // Both are fixed by the same action, so they share one badge shape.
+      if (d.wilted || d.ready) {
+        var badgeBg = d.wilted ? '#4aa3ff' : '#4caf6d';
         html = '<div style="position:relative;width:' + v.w + 'px;height:' + v.h + 'px">' + html +
-          '<div style="position:absolute;top:-4px;right:-6px;background:#4aa3ff;color:#fff;' +
+          '<div style="position:absolute;top:-4px;right:-6px;background:' + badgeBg + ';color:#fff;' +
           'border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;' +
           'font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,0.35)">\u{1F4A7}</div></div>';
       }
@@ -935,6 +993,15 @@
       return day + (day === 1 ? ' day ago' : ' days ago');
     }
 
+    // Forward-looking counterpart to formatAgo, for the ready-to-water wait.
+    // Rounds up so a plant never reads "0m" while still counting down.
+    function formatDuration(ms) {
+      var min = Math.ceil(ms / 60000);
+      if (min < 60) return min + 'm';
+      var hr = Math.floor(min / 60), rem = min % 60;
+      return rem > 0 ? hr + 'h ' + rem + 'm' : hr + 'h';
+    }
+
     function openPlantPanel(key) {
       closeShop(); // the shop and plant panel are both bottom sheets - only one at a time
       viewingKey = key;
@@ -965,17 +1032,25 @@
       document.getElementById('water-bar-fill').style.width = pct + '%';
       document.getElementById('water-bar-label').textContent = pct + '% watered';
 
+      // Priority order matters: wilting is the only state that can actually
+      // cost you the plant, so it outranks readiness even though a single
+      // watering resolves both at once.
       var statusEl = document.getElementById('plant-status-line');
       if (d.wilted) { statusEl.textContent = 'Wilting - water it to help it bounce back'; statusEl.className = 'status-wilt'; }
+      else if (d.ready) { statusEl.textContent = 'Ready to grow - give it a drink!'; statusEl.className = 'status-good'; }
+      else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
       else if (d.waterFrac < 0.34) { statusEl.textContent = 'Getting thirsty - water it soon'; statusEl.className = 'status-thirsty'; }
-      else { statusEl.textContent = 'Thriving'; statusEl.className = 'status-good'; }
+      else { statusEl.textContent = 'Ready to grow in ' + formatDuration(d.readyIn); statusEl.className = 'status-dim'; }
 
       var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
       var inRange = uh && hexDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE_HEX;
       var btn = document.getElementById('plant-action-btn');
       if (inRange) {
         btn.disabled = false;
-        btn.textContent = 'Water \u{1F4A7}';
+        // Watering is never blocked, but the label distinguishes the visit
+        // that advances a stage from the one that just tops the tank up, so
+        // an early tap is an informed choice rather than a surprise.
+        btn.textContent = d.ready ? 'Water + Grow \u{1F4A7}' : 'Water \u{1F4A7}';
         btn.onclick = function () { waterPlant(key); };
       } else {
         btn.disabled = true;
@@ -1024,9 +1099,20 @@
         return d && d.stage >= 2;
       }).length;
 
+      // Ready-to-grow outranks merely thirsty: it is the one line that sends
+      // the player out the door, and it is the only status that a watering
+      // visit converts into actual progress.
+      var ready = keys.filter(function (k) {
+        var d = state.plants[k]._d;
+        return d && d.ready;
+      }).length;
+
       var line;
       if (total === 0) line = 'Tap the map near you to plant your first seed \u{1F331}';
-      else if (thirsty > 0) {
+      else if (ready > 0) {
+        line = '\u{1F4A7} ' + ready + (ready === 1 ? ' flower is' : ' flowers are') +
+          ' ready to grow &bull; go water ' + (ready === 1 ? 'it' : 'them') + '!';
+      } else if (thirsty > 0) {
         line = thirsty + (thirsty === 1 ? ' flower is' : ' flowers are') + ' thirsty \u{1F4A7} &bull; ' +
           blooming + ' in bloom';
       } else {
@@ -1071,10 +1157,12 @@
       document.getElementById('modal-title').textContent = 'Welcome to Bloom';
       document.getElementById('modal-body').innerHTML =
         '<p>Bloom gives you a gentle reason to get out and walk. Plant one of your starter seeds in the ' +
-        'ground near you, then swing back by every so often to water it.</p>' +
-        '<p>It grows into a single flower, then a whole flourishing cluster, over a few real days. Harvest ' +
-        'it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on seeds for rarer, ' +
-        'more valuable flowers.</p>' +
+        'ground near you, then swing back by to water it.</p>' +
+        '<p>Watering is what makes it grow. About every 12 hours a plant is ready for a drink, and each ' +
+        'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
+        'back, three stages.</p>' +
+        '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on seeds ' +
+        'for rarer, more valuable flowers.</p>' +
         '<p>Leave a flower too thirsty for too long and it\'ll wilt - water always brings it back, unless ' +
         'it\'s left dry for a very long while. No score, no clock, no rush.</p>';
       document.getElementById('modal-ok-btn').textContent = "Let's grow! \u{1F331}";
@@ -1094,8 +1182,10 @@
         '<p><b>Plant</b> - tap the ground within a couple hexes of you, then confirm which seed to plant ' +
         '- a quick safety check so a stray tap never spends one by accident.</p>' +
         '<p><b>Water</b> - tap a growing flower, then walk close enough for the Water button to light up.</p>' +
-        '<p><b>Grow</b> - watered plants move from seed to sprout to a single bloom to a full flourishing ' +
-        'cluster over a few days.</p>' +
+        '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +
+        'ready, and your next watering visit moves it up a stage: seed, sprout, single bloom, full ' +
+        'flourishing cluster. A green \u{1F4A7} on the map means one is ready right now. Watering early is ' +
+        'never wasted - it still tops up the tank and holds off wilting.</p>' +
         '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and Keep it for ' +
         'yourself or Sell it for Petals \u{1F338} - clusters sell for much more than a single bloom.</p>' +
         '<p><b>Shop</b> - tap your Petals total (top right) to buy Common, Rare, or Prized seeds. Rarer ' +
@@ -1205,15 +1295,16 @@
     // ---------------------------------------------------------------------
     //  TUTORIAL (first run only)
     //  A brand-new save (see loadState's tutorialDone default) walks through
-    //  one real plant -> water -> water -> harvest -> shop cycle. The growth
-    //  waits are simulated (tutorialFastForward jumps the ONE tutorial plant's
-    //  own growthMs, not a global time multiplier - see the growth engine's
-    //  recomputePlant, which treats a jumped growthMs no differently from real
-    //  elapsed time on every later call), so a new player sees the whole loop
-    //  in under a minute instead of waiting real days. Every other step -
-    //  actually planting, actually tapping Water, actually harvesting, actually
-    //  buying - is a real action the player performs; nothing is auto-clicked
-    //  for them. Always skippable via the banner's persistent link.
+    //  one real plant -> water -> water -> water -> harvest -> shop cycle, i.e.
+    //  the exact three-visit shape of the real game. The 12-hour readiness
+    //  waits are simulated (tutorialMakeReady clears the ONE tutorial plant's
+    //  readyAt, not a global time multiplier - recomputePlant treats that
+    //  plant no differently from any other on every later call), so a new
+    //  player sees the whole loop in under a minute instead of a day and a
+    //  half. Every other step - actually planting, actually tapping Water,
+    //  actually harvesting, actually buying - is a real action the player
+    //  performs; nothing is auto-clicked for them. Always skippable via the
+    //  banner's persistent link.
     // ---------------------------------------------------------------------
     var tutorial = { active: false, step: null, plantKey: null };
 
@@ -1246,64 +1337,67 @@
       setTimeout(hideTutorialBanner, 6000);
     }
 
-    // Jumps the one tutorial plant straight past the next stage's growth
-    // threshold. recomputePlant can't tell this apart from real elapsed
-    // time on any later call, so nothing needs to be "reverted" once the
+    // Clears the one tutorial plant's readiness wait so the next watering
+    // advances it immediately. recomputePlant can't tell this apart from a
+    // real 12 hours having passed, so nothing needs to be "reverted" once the
     // tutorial ends - it's just a normal plant with a running start.
-    function tutorialFastForward(p, targetStage) {
-      var now = Date.now();
-      p.growthMs = GROWTH_THRESHOLDS[targetStage] + 1000;
-      p.lastGrowthCheckAt = now;
-      var d = recomputePlant(p, now);
-      if (d.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
-      if (d.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+    function tutorialMakeReady(p) {
+      p.readyAt = Date.now();
       saveState();
       renderPlants();
       if (viewingKey === hexKey(p.q, p.r)) renderPlantPanel(viewingKey);
       updateHUD();
     }
 
-    function tutorialOnPlant(key) {
-      if (!tutorial.active || tutorial.step !== 'plant') return;
-      tutorial.plantKey = key;
-      tutorial.step = 'grow-sprout';
-      showTutorialBanner('Nice! Watch it grow&hellip; \u{1F331}');
+    // Shared by every "wait, then it's ready again" beat. The callback
+    // re-checks tutorial.active and the plant's existence because the player
+    // can skip the tutorial - or harvest the plant - during the wait.
+    function tutorialReadyAfterPause(bannerHtml) {
+      tutorial.step = 'settling';
       setTimeout(function () {
         var p = state.plants[tutorial.plantKey];
-        if (!p || !tutorial.active) return; // lost, or skipped while waiting - leave it be
-        tutorialFastForward(p, 1);
-        tutorial.step = 'water1';
-        showTutorialBanner('It sprouted! Tap it, then tap Water to help it keep growing \u{1F4A7}');
+        if (!p || !tutorial.active || tutorial.step !== 'settling') return;
+        tutorialMakeReady(p);
+        tutorial.step = 'water';
+        showTutorialBanner(bannerHtml);
       }, 2500);
     }
 
-    function tutorialOnWater(key) {
-      if (!tutorial.active || key !== tutorial.plantKey) return;
-      if (tutorial.step === 'water1') {
-        tutorial.step = 'grow-bloom';
-        showTutorialBanner('Great, it\'s drinking that in&hellip; \u{1F4A7}');
-        setTimeout(function () {
-          var p = state.plants[tutorial.plantKey];
-          if (!p || !tutorial.active) return;
-          tutorialFastForward(p, 2);
-          tutorial.step = 'water2';
-          showTutorialBanner('It\'s in bloom! \u{1F338} One more visit and it\'ll flourish - tap it, then Water again \u{1F4A7}');
-        }, 2500);
-      } else if (tutorial.step === 'water2') {
-        tutorial.step = 'grow-flourish';
-        showTutorialBanner('Almost there&hellip; \u{1F4A7}');
-        setTimeout(function () {
-          var p = state.plants[tutorial.plantKey];
-          if (!p || !tutorial.active) return;
-          tutorialFastForward(p, 3);
-          tutorial.step = 'harvest';
-          showTutorialBanner('Flourishing! Tap it, then Keep it for yourself or Sell it to the shop \u{1F337}');
-        }, 2500);
-      }
+    function tutorialOnPlant(key) {
+      if (!tutorial.active || tutorial.step !== 'plant') return;
+      tutorial.plantKey = key;
+      showTutorialBanner('Nice! Give it a moment to settle in&hellip; \u{1F331}');
+      tutorialReadyAfterPause('It\'s ready! Tap it, then tap Water to grow it \u{1F4A7}');
     }
 
+    // Out in the real game each of these beats is a 12-hour wait and a walk
+    // back; here they're a 2.5s pause so the shape of the loop lands without
+    // the player having to leave and return three times before anything
+    // happens. Driven off the plant's real stage, not a step counter, so it
+    // stays correct no matter which watering tap actually advanced it.
+    function tutorialOnWater(key) {
+      if (!tutorial.active || tutorial.step !== 'water' || key !== tutorial.plantKey) return;
+      var p = state.plants[key];
+      if (!p) return;
+      if (p.stage >= MAX_STAGE) {
+        tutorial.step = 'harvest';
+        showTutorialBanner('Flourishing! Tap it, then Keep it for yourself or Sell it to the shop \u{1F337}');
+        return;
+      }
+      showTutorialBanner(GROWTH_MESSAGES[p.stage] + ' Give it another moment&hellip;');
+      tutorialReadyAfterPause(p.stage === 1
+        ? 'Ready again - water it once more to bring it into bloom \u{1F4A7}'
+        : 'Ready again! One more watering makes it a full cluster \u{1F4A7}');
+    }
+
+    // Deliberately accepts a harvest at ANY step, not just the scripted one.
+    // The Keep/Sell row is genuinely available from "In Bloom" onward, so a
+    // player who harvests a stage early would otherwise leave the tutorial
+    // pointing at a plant that no longer exists, with no way to advance it
+    // short of Skip. Any pending settle timer sees the plant is gone and bows
+    // out on its own, so the step move to 'shop' below can't be clobbered.
     function tutorialOnHarvest(key, sell, value) {
-      if (!tutorial.active || tutorial.step !== 'harvest' || key !== tutorial.plantKey) return;
+      if (!tutorial.active || key !== tutorial.plantKey) return;
       // A flat bonus (on top of any sale) guarantees a first seed is
       // affordable either way - Keep is never presented as the "wrong"
       // choice, this just makes sure the shop step isn't a wall for it.

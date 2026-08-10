@@ -166,6 +166,32 @@
     }
     #plant-action-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
 
+    /* Hidden by default - renderBreedButton shows it only when this plant is
+       flourishing and has a flourishing neighbour, so it never advertises a
+       cross that isn't there. Green rather than blue: watering is the routine
+       action, crossing is the deliberate one. */
+    #breed-btn {
+      display: none; width: 100%; padding: 13px; border: 2px solid var(--green);
+      border-radius: 16px; margin-top: 10px; font-size: 14.5px; font-weight: 800;
+      cursor: pointer; background: #fff; color: var(--green-dark); box-shadow: var(--shadow-sm);
+    }
+    #breed-btn:disabled {
+      border-color: #d8d4c8; background: #f0ede4; color: #948e80;
+      box-shadow: none; cursor: default;
+    }
+
+    /* The two parents of a proposed cross, side by side with a plus between,
+       so the pairing reads as an equation rather than a list. */
+    .breed-pair {
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      margin-bottom: 12px;
+    }
+    .breed-parent {
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      font-size: 12px; font-weight: 700; text-align: center; flex: 1;
+    }
+    .breed-plus { font-size: 20px; font-weight: 800; color: var(--text-dim); flex-shrink: 0; }
+
     /* Hidden by default - renderPlantPanel shows this only once a plant has
        reached single-bloom or flourishing stage and the player is in range. */
     #harvest-row { display: none; gap: 10px; margin-top: 10px; }
@@ -198,18 +224,28 @@
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
       padding: 12px 14px; border: 2px solid; border-radius: 16px; margin-bottom: 10px;
     }
+    /* min-width:0 so the name column yields to the buy controls instead of
+       overflowing the row on a narrow phone - four swatches plus a species
+       name is the tightest thing in the shop. */
+    .shop-row-info { min-width: 0; }
     .shop-row-name { font-size: 14.5px; font-weight: 800; }
     .shop-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
     /* One buy button per standard color, showing the flower it actually buys
        rather than naming it - four labelled rows per species would make the
        shop seven times longer for no extra information. */
-    .shop-swatches { display: flex; gap: 6px; flex-shrink: 0; }
+    .shop-swatches { display: flex; gap: 5px; flex-shrink: 0; }
     .shop-swatch {
-      width: 42px; height: 42px; border: 2px solid; border-radius: 50%; padding: 0;
+      width: 38px; height: 38px; border: 2px solid; border-radius: 50%; padding: 0;
       display: flex; align-items: center; justify-content: center; cursor: pointer;
       box-shadow: var(--shadow-sm);
     }
     .shop-swatch:disabled { filter: grayscale(65%); opacity: 0.45; cursor: default; box-shadow: none; }
+    .shop-fert-btn {
+      flex-shrink: 0; padding: 10px 16px; border: none; border-radius: 12px;
+      font-size: 13.5px; font-weight: 800; cursor: pointer; color: #fff;
+      background: linear-gradient(90deg, var(--green), var(--green-dark)); box-shadow: var(--shadow-sm);
+    }
+    .shop-fert-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
 
     /* ================= MODAL ================= */
     #modal-overlay {
@@ -271,6 +307,22 @@
     }
     .inv-variant-name { font-size: 14px; font-weight: 800; }
     .inv-variant .inv-stack-title:first-of-type { margin-top: 8px; }
+
+    /* Crossing notes: one row per pairing tried, parents on the left and the
+       results you've seen on the right. */
+    .cross-list { display: flex; flex-direction: column; gap: 7px; max-height: 34vh; overflow-y: auto; }
+    .cross-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      flex-wrap: wrap; padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.55);
+      font-size: 12.5px; font-weight: 700;
+    }
+    .cross-parents { color: var(--text-dim); }
+    .cross-results { display: flex; flex-wrap: wrap; gap: 8px; }
+    .cross-result { white-space: nowrap; }
+    .cross-dot {
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+      margin-right: 3px; vertical-align: -1px; border: 1px solid rgba(60,40,20,0.25);
+    }
     .seed-pick-btn {
       display: flex; align-items: center; justify-content: space-between; width: 100%;
       padding: 13px 16px; border: 2px solid; border-radius: 14px; background: #fff;
@@ -321,7 +373,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.15.0</span>
+      <span id="game-version">v1.16.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -333,6 +385,7 @@
   <div id="menu-dropdown">
     <button onclick="toggleMenu();openShop()">Seed Shop</button>
     <button onclick="openInventory()">Your Collection</button>
+    <button onclick="openCrossNotes()">Crossing Notes</button>
     <button onclick="openWildInfo()">Wild Flowers</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
@@ -359,6 +412,7 @@
     <div id="growth-bar-label">&nbsp;</div>
     <div id="plant-status-line">&nbsp;</div>
     <button id="plant-action-btn">Water</button>
+    <button id="breed-btn">Cross with a neighbour</button>
     <div id="harvest-row">
       <button id="keep-btn" class="harvest-btn keep-btn">Keep &#x1F33C;</button>
       <button id="sell-btn" class="harvest-btn sell-btn">Sell</button>
@@ -656,13 +710,67 @@
     // two should instead be near-equal in raw value.
     var SEED_YIELD_SINGLE  = [[1, 0.80], [2, 0.20]];             // EV 1.2
     var SEED_YIELD_CLUSTER = [[2, 0.50], [3, 0.30], [4, 0.20]];  // EV 2.7
-    function rollSeedYield(table) {
+    // Generic weighted pick over [[value, probability], ...]. Used for seed
+    // counts and for breeding outcomes, so the value can be anything.
+    function rollWeighted(table) {
       var r = Math.random(), acc = 0;
       for (var i = 0; i < table.length; i++) {
         acc += table[i][1];
         if (r < acc) return table[i][0];
       }
       return table[table.length - 1][0]; // guards against float drift in the sum
+    }
+
+    // ---- Breeding --------------------------------------------------------
+    // Plant two flourishing flowers next to each other, spend a bag of
+    // fertilizer, and a seedling of a crossed color comes up between them.
+    //
+    // FERTILIZER_COST is deliberately pinned to SEED_COST, and the parity is
+    // the whole design: a bred seedling grown to a cluster and sold returns 40
+    // Petals for 20 spent and three watering visits - exactly what buying a
+    // seed and growing it returns. Breeding therefore adds no economic
+    // pressure in either direction; the only thing it buys that Petals cannot
+    // is ACCESS to the ten colors the shop does not stock. Break that parity
+    // and breeding becomes either a Petal pump or a trap.
+    var FERTILIZER_COST = SEED_COST;
+    // A pair that has just bred has to come back around, using the same
+    // readiness vocabulary the rest of the game already uses. Without it, two
+    // flourishing plants would be an unlimited on-demand seed press.
+    var BREED_COOLDOWN_MS = 12 * HOUR;
+
+    // Pair key is order-independent, so a cross is one entry, not two.
+    function crossKey(a, b) { return a < b ? a + '+' + b : b + '+' + a; }
+
+    // The six pairings of the four standard colors are DETERMINISTIC and
+    // produce the six tier-1 colors - four colors in, six results out, with no
+    // hidden rolls. That is the whole entry-level table, and it is meant to be
+    // learnable by playing rather than by looking it up. Randomness starts
+    // only at the deeper crosses, where the chase belongs.
+    //
+    // Any pair not listed here falls through to crossColor's default: same
+    // color returns that color, otherwise a coin flip between the parents. So
+    // no cross ever fails or wastes a bag of fertilizer.
+    var BREED_TABLE = {
+      'red+white':    [['pink', 1]],
+      'red+yellow':   [['orange', 1]],
+      'blue+red':     [['purple', 1]],
+      'blue+yellow':  [['green', 1]],
+      'white+yellow': [['cream', 1]],
+      'blue+white':   [['sky', 1]],
+      // Tier 2: each needs two tier-1 parents, so reaching any of them means
+      // having already worked out the entry table.
+      'pink+purple':  [['magenta', 0.70], ['pink', 0.15], ['purple', 0.15]],
+      'cream+orange': [['peach', 0.70], ['orange', 0.15], ['cream', 0.15]],
+      'green+purple': [['black', 0.60], ['green', 0.20], ['purple', 0.20]],
+      // Tier 3: the only route to Gold, and it needs both tier-2 lines, which
+      // between them need all four standards.
+      'magenta+peach':[['gold', 0.15], ['magenta', 0.425], ['peach', 0.425]]
+    };
+    function crossColor(a, b) {
+      if (a === b) return a;                  // duplicating a color you have
+      var t = BREED_TABLE[crossKey(a, b)];
+      if (t) return rollWeighted(t);
+      return Math.random() < 0.5 ? a : b;     // no cross is ever a dead end
     }
 
     // ---- Wild flowers ----------------------------------------------------
@@ -818,9 +926,15 @@
         // collection stays a record of what you've found, not just what's in
         // hand right now.
         inventory: {},
+        // Crossings you have actually performed: pair key -> { colorId: count }.
+        // This is the player's own notebook, not the recipe table - the Notes
+        // screen only ever shows results you have seen yourself.
+        crosses: {},
         // No `lost` counter - plants cannot die, so nothing is ever lost.
-        stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0, extracted: 0 },
+        stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0,
+                 extracted: 0, bred: 0 },
         seeds: starterSeeds(),
+        fertilizer: 0,
         currency: 0,
         following: true,
         seenWelcome: false,
@@ -845,12 +959,14 @@
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
           inventory: migrateInventory(parsed.inventory),
+          crosses: parsed.crosses || {},
           stats: Object.assign({}, def.stats, parsed.stats || {}),
           // A save that predates seeds/currency (v1.1.x) gets starter seeds
           // bootstrapped in rather than being left unable to plant anything -
           // the old free-plant mechanic this replaces never cost seeds. A
           // v1.2-v1.7 save gets its tier counts converted to species counts.
           seeds: migrateSeeds(parsed.seeds),
+          fertilizer: typeof parsed.fertilizer === 'number' ? parsed.fertilizer : 0,
           currency: typeof parsed.currency === 'number' ? parsed.currency : 0,
           following: parsed.following !== false,
           seenWelcome: !!parsed.seenWelcome,
@@ -869,7 +985,8 @@
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
-        inventory: state.inventory, stats: state.stats, seeds: state.seeds, currency: state.currency,
+        inventory: state.inventory, crosses: state.crosses, stats: state.stats,
+        seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone
       }));
     }
@@ -1008,11 +1125,18 @@
       var grew = p.stage < MAX_STAGE && now >= p.readyAt;
 
       p.lastWateredAt = now;
+      var revealed = null;
       if (grew) {
         p.stage++;
         p.readyAt = now + STAGE_READY_MS;
         if (p.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
         if (p.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+        // A bred seedling opening is the payoff of the whole crossing loop, so
+        // it gets its own message instead of the generic "burst into bloom".
+        if (p.mystery && p.stage >= 2) {
+          delete p.mystery;
+          revealed = variantKey(p.species, colorOfPlant(p));
+        }
       }
 
       recomputePlant(p, now);   // refresh derived state for immediate UI feedback
@@ -1021,7 +1145,9 @@
       if (viewingKey === key) renderPlantPanel(key);
       updateHUD();
 
-      if (grew) {
+      if (revealed) {
+        toast('\u{1F338} Your cross opened - it\'s a ' + variantName(revealed) + '!');
+      } else if (grew) {
         toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
       } else if (p.stage >= MAX_STAGE) {
         toast('\u{1F4A7} Watered! It is fully grown - Keep it or Sell it whenever you like.');
@@ -1751,6 +1877,10 @@
       var btn = document.getElementById('plant-action-btn');
       btn.style.display = 'none';
       btn.onclick = null;
+      // Wild flowers can't be crossed - they aren't yours and never flourish.
+      var breedBtn = document.getElementById('breed-btn');
+      breedBtn.style.display = 'none';
+      breedBtn.onclick = null;
 
       var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
       var inRange = uh && hexDist(uh.q, uh.r, w.q, w.r) <= PLANT_RANGE_HEX;
@@ -1816,10 +1946,16 @@
       iconEl.style.width = v.w + 'px';
       iconEl.style.height = v.h + 'px';
 
-      document.getElementById('plant-title').textContent =
-        variantName(variantKey(p.species, p.color || baseColorOf(p.species))) +
-        ' - ' + STAGE_LABELS[d.stage];
-      document.getElementById('plant-meta').textContent = 'Planted ' + formatAgo(p.plantedAt);
+      // A bred seedling keeps its color secret until it blooms - the seed and
+      // sprout artwork is colorless anyway, so the title is the only thing
+      // that would give it away.
+      document.getElementById('plant-title').textContent = p.mystery
+        ? 'Mystery Seedling - ' + STAGE_LABELS[d.stage]
+        : variantName(variantKey(p.species, p.color || baseColorOf(p.species))) +
+          ' - ' + STAGE_LABELS[d.stage];
+      document.getElementById('plant-meta').textContent = p.mystery
+        ? 'A cross, sown ' + formatAgo(p.plantedAt) + ' - water it to see what it is'
+        : 'Planted ' + formatAgo(p.plantedAt);
 
       // The bar fills across the readiness wait, so it reads as "this plant is
       // getting there" rather than "this plant is running out of something".
@@ -1876,6 +2012,51 @@
       } else {
         harvestRow.style.display = 'none';
       }
+
+      renderBreedButton(key, p, d, inRange);
+    }
+
+    // The Cross button only appears when a cross is actually possible, and
+    // otherwise says which part is missing rather than sitting there greyed
+    // out with no explanation. A flourishing plant with no flourishing
+    // neighbour shows nothing at all - there is no cross to hint at.
+    function renderBreedButton(key, p, d, inRange) {
+      var btn = document.getElementById('breed-btn');
+      btn.onclick = null;
+
+      var waiting = breedWaitMs(p);
+      var partners = (d.stage >= MAX_STAGE && !waiting) ? breedPartnersFor(key) : [];
+      var neighborWaiting = false;
+      if (d.stage >= MAX_STAGE && !waiting && !partners.length) {
+        neighborWaiting = neighborsOf(p.q, p.r).some(function (h) {
+          var o = state.plants[hexKey(h.q, h.r)];
+          return o && recomputePlant(o, Date.now()).stage >= MAX_STAGE;
+        });
+      }
+
+      if (d.stage < MAX_STAGE || (!partners.length && !waiting && !neighborWaiting)) {
+        btn.style.display = 'none';
+        return;
+      }
+      btn.style.display = '';
+
+      if (waiting) {
+        btn.disabled = true;
+        btn.textContent = 'Can cross again in ' + formatDuration(waiting);
+      } else if (neighborWaiting) {
+        btn.disabled = true;
+        btn.textContent = 'Neighbour is still resting';
+      } else if (!inRange) {
+        btn.disabled = true;
+        btn.textContent = 'Walk closer to cross';
+      } else if (state.fertilizer <= 0) {
+        btn.disabled = true;
+        btn.textContent = 'Needs fertilizer - buy a bag';
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Cross with a neighbour \u{1F331}';
+        btn.onclick = function () { openBreedPicker(key); };
+      }
     }
 
     // Thin wrapper so the tutorial (see TUTORIAL section) can observe a real
@@ -1883,6 +2064,183 @@
     function onHarvestClick(key, sell) {
       var value = harvestPlant(key, sell);
       tutorialOnHarvest(key, sell, value);
+    }
+
+    // ---------------------------------------------------------------------
+    //  BREEDING
+    // ---------------------------------------------------------------------
+    function neighborsOf(q, r) {
+      return HEX_NEIGHBORS.map(function (d) { return { q: q + d[0], r: r + d[1] }; });
+    }
+    // Free means nothing of yours and no wild flower - a bred seedling must
+    // never overwrite something already growing there.
+    function hexFree(q, r) {
+      var k = hexKey(q, r);
+      return !state.plants[k] && !state.wild[k];
+    }
+    function colorOfPlant(p) { return p.color || baseColorOf(p.species); }
+
+    // A parent must be fully grown and off its cooldown. Both halves matter:
+    // flourishing is what makes breeding the end of the watering loop rather
+    // than a way around it.
+    function breedReady(p) {
+      return recomputePlant(p, Date.now()).stage >= MAX_STAGE &&
+             Date.now() >= (p.breedReadyAt || 0);
+    }
+    function breedWaitMs(p) { return Math.max(0, (p.breedReadyAt || 0) - Date.now()); }
+
+    // Adjacent plants of yours that could cross with this one right now.
+    function breedPartnersFor(key) {
+      var p = state.plants[key];
+      if (!p || !breedReady(p)) return [];
+      return neighborsOf(p.q, p.r).map(function (h) { return hexKey(h.q, h.r); })
+        .filter(function (k) {
+          var o = state.plants[k];
+          return o && breedReady(o);
+        });
+    }
+
+    // "Between them" where possible: two adjacent hexes share exactly two
+    // neighbours, so a seedling lands in the gap the parents make. Only if
+    // both of those are taken does it fall back to any free neighbour of
+    // either parent.
+    function breedSpotFor(a, b) {
+      var shared = neighborsOf(a.q, a.r).filter(function (h) {
+        return hexDist(h.q, h.r, b.q, b.r) === 1 && hexFree(h.q, h.r);
+      });
+      var pool = shared;
+      if (!pool.length) {
+        var seen = {};
+        pool = neighborsOf(a.q, a.r).concat(neighborsOf(b.q, b.r)).filter(function (h) {
+          var k = hexKey(h.q, h.r);
+          if (seen[k] || !hexFree(h.q, h.r)) return false;
+          seen[k] = 1;
+          return true;
+        });
+      }
+      if (!pool.length) return null;
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    // Records that this pairing produced this color, so the Crossing Notes
+    // screen can show what you have actually seen rather than the whole table.
+    function recordCross(ca, cb, result) {
+      var k = crossKey(ca, cb);
+      if (!state.crosses[k]) state.crosses[k] = {};
+      state.crosses[k][result] = (state.crosses[k][result] || 0) + 1;
+    }
+
+    function doBreed(keyA, keyB) {
+      var a = state.plants[keyA], b = state.plants[keyB];
+      if (!a || !b) { closePlantPanel(); return; }
+      if (!breedReady(a) || !breedReady(b)) { toast('Those two are not both ready.'); return; }
+      if (state.fertilizer <= 0) {
+        toast('You are out of fertilizer - buy a bag in the Shop \u{1F338}');
+        return;
+      }
+      var spot = breedSpotFor(a, b);
+      if (!spot) { toast('No free ground next to them for a seedling.'); return; }
+
+      state.fertilizer--;
+      var now = Date.now();
+      a.breedReadyAt = now + BREED_COOLDOWN_MS;
+      b.breedReadyAt = now + BREED_COOLDOWN_MS;
+
+      var ca = colorOfPlant(a), cb = colorOfPlant(b);
+      var color = crossColor(ca, cb);
+      // Either parent's shape, so a color you have bred can be walked onto a
+      // different species instead of being stuck on the one it appeared in.
+      var species = Math.random() < 0.5 ? a.species : b.species;
+      recordCross(ca, cb, color);
+
+      var c = hexCenter(spot.q, spot.r);
+      var key = hexKey(spot.q, spot.r);
+      state.plants[key] = {
+        q: spot.q, r: spot.r, lat: c.lat, lng: c.lng, species: species, color: color,
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + STAGE_READY_MS,
+        reachedBloom: false, reachedFlourish: false,
+        // The color is decided now but stays hidden until it blooms. Seed and
+        // sprout artwork is colorless anyway, so nothing leaks - and the
+        // reveal is the payoff the whole feature is built around. Nothing is
+        // at stake while it is hidden: the outcome is already recorded.
+        mystery: true
+      };
+      state.stats.planted++;
+      state.stats.bred++;
+
+      saveState();
+      renderPlants();
+      updateHUD();
+      closePlantPanel();
+      toast('\u{1F331} A seedling came up between them! Water it to see what it is.');
+      vibrate(30);
+    }
+
+    // Confirms the cross, and always names the fertilizer cost and the
+    // cooldown before it is spent - a timed cost the player only discovers
+    // afterwards is exactly the kind of surprise this game avoids.
+    function openBreedConfirm(keyA, keyB) {
+      var a = state.plants[keyA], b = state.plants[keyB];
+      if (!a || !b) return;
+      var ca = colorOfPlant(a), cb = colorOfPlant(b);
+      var vkA = variantKey(a.species, ca), vkB = variantKey(b.species, cb);
+
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Cross these two?';
+
+      var html = '<div class="breed-pair">' +
+        '<div class="breed-parent">' + variantChip(vkA, 34) + '<span>' + variantName(vkA) + '</span></div>' +
+        '<div class="breed-plus">+</div>' +
+        '<div class="breed-parent">' + variantChip(vkB, 34) + '<span>' + variantName(vkB) + '</span></div>' +
+        '</div>';
+
+      // Show what this pairing has produced before, if anything - the notes
+      // you have earned, never the underlying table.
+      var known = state.crosses[crossKey(ca, cb)];
+      if (known) {
+        var seen = Object.keys(known).sort(function (x, y) { return known[y] - known[x]; });
+        html += '<p>You have crossed these before and got ' +
+          seen.map(function (id) {
+            return '<b>' + colorFor(id).name + '</b>' +
+              (known[id] > 1 ? ' (x' + known[id] + ')' : '');
+          }).join(', ') + '.</p>';
+      } else {
+        html += '<p>You have not tried this pairing before.</p>';
+      }
+
+      html += '<p style="color:var(--text-dim)">Costs <b>1 bag of fertilizer</b> (you have ' +
+        state.fertilizer + '). A seedling comes up on free ground next to them, and its color ' +
+        'stays a mystery until it blooms. Both parents then need <b>' +
+        formatDuration(BREED_COOLDOWN_MS) + '</b> before they can be crossed again.</p>';
+
+      document.getElementById('modal-body').innerHTML = html;
+      var ok = document.getElementById('modal-ok-btn');
+      ok.textContent = 'Cross them \u{1F331}';
+      ok.onclick = function () { closeModal(); doBreed(keyA, keyB); };
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // With one partner this goes straight to the confirm; with several it asks
+    // which, because which neighbour you cross with is the entire decision.
+    function openBreedPicker(key) {
+      var partners = breedPartnersFor(key);
+      if (!partners.length) return;
+      if (partners.length === 1) { openBreedConfirm(key, partners[0]); return; }
+
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Cross with which one?';
+      document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
+        partners.map(function (pk) {
+          var o = state.plants[pk];
+          var vk = variantKey(o.species, colorOfPlant(o));
+          var c = colorFor(colorOfPlant(o));
+          return '<button class="seed-pick-btn" style="border-color:' + c.petal +
+            '" onclick="openBreedConfirm(\'' + key + '\',\'' + pk + '\')">' +
+            '<span style="color:' + c.petal + '">' + variantChip(vk) + ' ' + variantName(vk) +
+            '</span></button>';
+        }).join('') + '</div>';
+      document.getElementById('modal-ok-btn').style.display = 'none';
+      document.getElementById('modal-overlay').classList.add('open');
     }
 
     // ---------------------------------------------------------------------
@@ -2015,8 +2373,16 @@
         'up on any species. Four colors are standard - White, Red, Yellow and Blue - and those are the ' +
         'only ones the shop sells or wild flowers grow in. The other ' + (COLORS.length - 4) +
         ' have to be bred.</p>' +
-        '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds, one swatch per standard color. ' +
-        'Every seed costs the same and every flower sells for the same, so pick by looks, not by value.</p>' +
+        '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on hexes next to each other, buy a ' +
+        'bag of fertilizer, and tap <b>Cross with a neighbour</b>. A seedling comes up in the gap between ' +
+        'them, and its color stays a mystery until you water it into bloom. Crossing two of the four ' +
+        'standards always gives the same result - six pairs, six new colors - and those in turn cross ' +
+        'into the rarer ones. Both parents rest for ' + formatDuration(BREED_COOLDOWN_MS) +
+        ' afterwards, and they stay right where they are. Your Crossing Notes in the menu remember every ' +
+        'pairing you\'ve tried.</p>' +
+        '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds, one swatch per standard color, ' +
+        'and fertilizer. Every seed costs the same and every flower sells for the same, so pick by looks, ' +
+        'not by value.</p>' +
         '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, up to ten wild blooms are scattered ' +
         'around you, marked with a soft glow. They cost nothing - just walk over and pick one. Unlike your ' +
         'own flowers they don\'t last: a wild bloom wilts after 12 hours and is gone 6 hours later, so ' +
@@ -2089,7 +2455,7 @@
 
       var gained = 0;
       for (var i = 0; i < qty; i++) {
-        gained += rollSeedYield(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
+        gained += rollWeighted(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
       }
       if (isCluster) e.cluster -= qty; else e.single -= qty;
       // Extraction returns the exact variant it consumed, color included. That
@@ -2240,6 +2606,69 @@
       document.getElementById('modal-ok-btn').onclick = renderInventoryList;
     }
 
+    // The player's own notebook of crossings. It deliberately shows only what
+    // has actually been seen, never BREED_TABLE itself - the entry-level table
+    // is meant to be worked out by playing, and a screen that printed the
+    // answers would make every cross after the first a formality.
+    function openCrossNotes() {
+      toggleMenu();
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Crossing Notes \u{1F331}';
+
+      // Which colors you have ever held, which is what the collection counts.
+      var foundColors = {};
+      Object.keys(state.inventory).forEach(function (vk) {
+        foundColors[parseVariant(vk).color] = true;
+      });
+      var nFound = Object.keys(foundColors).length;
+
+      var html = '<p><b>' + nFound + ' of ' + COLORS.length + '</b> colors found &bull; <b>' +
+        state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made.</p>';
+
+      html += '<div class="color-grid">' + COLORS.map(function (c) {
+        var have = !!foundColors[c.id];
+        // Shown on the species you have most of, purely so the swatch is a
+        // flower rather than an abstract dot.
+        return '<div class="color-cell' + (have ? '' : ' missing') + '">' +
+          speciesChip(SPECIES[0], c.id, 30) + '<span>' + (have ? c.name : '???') + '</span></div>';
+      }).join('') + '</div>';
+
+      var pairs = Object.keys(state.crosses).sort();
+      if (!pairs.length) {
+        html += '<p>You haven\'t crossed anything yet. Grow two flowers to <b>flourishing</b> on ' +
+          'neighbouring hexes, buy a bag of fertilizer in the Shop, then tap ' +
+          '<b>Cross with a neighbour</b>.</p>' +
+          '<p style="color:var(--text-dim)">Start with two different standard colors - White, Red, ' +
+          'Yellow and Blue. Each of those six pairs makes a different new color, every time.</p>';
+      } else {
+        html += '<div class="cross-list">' + pairs.map(function (k) {
+          var parts = k.split('+');
+          var got = state.crosses[k];
+          var results = Object.keys(got).sort(function (x, y) {
+            return (got[y] - got[x]) || (colorRank(x) - colorRank(y));
+          });
+          return '<div class="cross-row">' +
+            '<div class="cross-parents">' +
+            '<span class="cross-dot" style="background:' + colorFor(parts[0]).petal + '"></span>' +
+            colorFor(parts[0]).name + ' + ' +
+            '<span class="cross-dot" style="background:' + colorFor(parts[1]).petal + '"></span>' +
+            colorFor(parts[1]).name + '</div>' +
+            '<div class="cross-results">' + results.map(function (id) {
+              return '<span class="cross-result"><span class="cross-dot" style="background:' +
+                colorFor(id).petal + '"></span>' + colorFor(id).name +
+                (got[id] > 1 ? ' x' + got[id] : '') + '</span>';
+            }).join('') + '</div></div>';
+        }).join('') + '</div>' +
+        '<p style="color:var(--text-dim)">Crossing two standards always gives the same result. ' +
+        'Deeper pairings can go more than one way.</p>';
+      }
+
+      document.getElementById('modal-body').innerHTML = html;
+      document.getElementById('modal-ok-btn').textContent = 'Got it';
+      document.getElementById('modal-ok-btn').onclick = closeModal;
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
     // Answers "where are they, then?". Most of a day's wild flowers land
     // off-screen on purpose - the whole point is to walk to them - so without
     // a screen like this a successful spawn is indistinguishable from a failed
@@ -2333,7 +2762,18 @@
         SELL_SINGLE + '-' + SELL_CLUSTER + ' \u{1F338} &bull; standard colors only, ' +
         'the rest are bred';
       var afford = state.currency >= SEED_COST;
-      document.getElementById('shop-rows').innerHTML = SPECIES.map(function (s) {
+
+      // Fertilizer leads the shop: it is the only non-seed thing for sale and
+      // the only way into the ten colors the rest of the shop cannot stock.
+      var fertRow = '<div class="shop-row" style="border-color:var(--green)">' +
+        '<div class="shop-row-info">' +
+        '<div class="shop-row-name" style="color:var(--green-dark)">Fertilizer</div>' +
+        '<div class="shop-row-meta">Cross two flourishing neighbours &bull; you have ' +
+        state.fertilizer + '</div></div>' +
+        '<button class="shop-fert-btn"' + (state.currency >= FERTILIZER_COST ? '' : ' disabled') +
+        ' onclick="buyFertilizer()">' + FERTILIZER_COST + ' \u{1F338}</button></div>';
+
+      document.getElementById('shop-rows').innerHTML = fertRow + SPECIES.map(function (s) {
         var owned = Object.keys(state.seeds).reduce(function (n, vk) {
           return n + (parseVariant(vk).species === s.key ? state.seeds[vk] : 0);
         }, 0);
@@ -2369,6 +2809,17 @@
       toast('Bought a ' + variantName(vk) + ' seed \u{1F331}');
       vibrate(15);
       tutorialOnBuy();
+    }
+
+    function buyFertilizer() {
+      if (state.currency < FERTILIZER_COST) return;
+      state.currency -= FERTILIZER_COST;
+      state.fertilizer++;
+      saveState();
+      renderShopRows();
+      updateCurrencyPill();
+      toast('Bought a bag of fertilizer \u{1F331}');
+      vibrate(15);
     }
 
     // Opened both from the menu ("Seed Shop") and by tapping the currency

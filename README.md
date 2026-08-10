@@ -36,6 +36,27 @@ Four colors are **standard** - White, Red, Yellow and Blue. Those are the only o
 
 Seeds carry their color, so a "Red Tulip seed" is a specific thing: planting one grows a red tulip, and extracting a red tulip gives red tulip seeds back. Your collection tracks all **98** flowers - 14 colors across 7 species - and the shop is the only way to get something you've never held.
 
+### Cross-breeding
+
+Grow two flowers to **flourishing** on neighbouring hexes, buy a bag of **fertilizer** (20 Petals, same as a seed), and tap **Cross with a neighbour**. A seedling comes up in the gap between them, and its color stays a mystery until you water it into bloom.
+
+Crossing two of the four standards is **deterministic** - four colors, six pairs, six new colors, the same result every time:
+
+| Cross | Gives |
+|-------|-------|
+| Red + White | Pink |
+| Red + Yellow | Orange |
+| Red + Blue | Purple |
+| Blue + Yellow | Green |
+| White + Yellow | Cream |
+| White + Blue | Sky |
+
+Those in turn cross into the rarer colors, where the odds stop being certain - Magenta, Peach, Midnight, and finally Gold, which needs both deep lines and so needs all four standards behind it. Crossing two of the same color just gives that color back, which is how you multiply one you already have, and **no pairing is ever a dead end** - an untabled cross returns one of the two parents rather than wasting the fertilizer.
+
+Parents stay in the ground and simply rest for 12 hours before they can be crossed again. **Crossing Notes** in the menu records every pairing you've tried and what came of it - it only ever shows results you've seen yourself, never the underlying table.
+
+The fertilizer price is pinned to the seed price on purpose: a bred seedling grown to a cluster and sold returns exactly what a bought seed would, so breeding adds no economic pressure in either direction. The only thing it buys that Petals can't is access to the ten colors the shop doesn't stock.
+
 ### Wilting
 
 Flowers left dry for 48 hours look wilted, and that is the entire consequence - it's cosmetic. Watering clears it. **Flowers never die and are never removed except by harvesting them.** A browser page can't send you a reminder, so a real neglect penalty would land as an unannounced loss on someone who had no way to see it coming. Wilting is a nudge, not a punishment.

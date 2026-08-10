@@ -270,7 +270,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.9.0</span>
+      <span id="game-version">v1.10.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -281,6 +281,7 @@
 
   <div id="menu-dropdown">
     <button onclick="toggleMenu();openShop()">Seed Shop</button>
+    <button onclick="openWildInfo()">Wild Flowers</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
   </div>
@@ -437,7 +438,13 @@
     // next open rather than falling back to placing flowers in rivers.
     var WILD_MAX = 10;               // most wild flowers on the map at one time
     var WILD_MIN_HEX_GAP = 5;        // min hex distance from each other AND from your own plants
-    var WILD_SEARCH_RADIUS_M = 1200; // how far out from the player to look for paths
+    // 800m, not 1200m: at zoom 17 a phone shows roughly 370m x 730m, so a
+    // 1200m disc put only ~0.6 of 10 flowers on screen and the daily crop
+    // looked like it had simply failed. Ten spots still fit comfortably at
+    // 800m given the 5-hex spacing rule. Most are still off-screen by design -
+    // they are meant to be walked to - which is what the Wild Flowers screen
+    // in the menu is for.
+    var WILD_SEARCH_RADIUS_M = 800;  // how far out from the player to look for paths
     var WILD_POINT_SPACING_M = 35;   // roughly one hex, see roadPointsFrom
     // Tried in order. The public Overpass instances genuinely do return 429s
     // and 504s under load, and this call only fires once a day - landing on a
@@ -872,26 +879,65 @@
       return chosen;
     }
 
+    // Straight-line metres and a rough compass point, used by the Wild Flowers
+    // screen so "nothing appeared" can always be told apart from "it appeared
+    // 600m north of you". Equirectangular is plenty at sub-kilometre scale.
+    function metersBetween(a, b) {
+      var dLat = (b.lat - a.lat) * 111111;
+      var dLng = (b.lng - a.lng) * 111111 * Math.cos(a.lat * Math.PI / 180);
+      return Math.sqrt(dLat * dLat + dLng * dLng);
+    }
+    function compassLabel(from, to) {
+      var dLat = to.lat - from.lat;
+      var dLng = (to.lng - from.lng) * Math.cos(from.lat * Math.PI / 180);
+      var ang = (Math.atan2(dLng, dLat) * 180 / Math.PI + 360) % 360;
+      return ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(ang / 45) % 8];
+    }
+    function nearestWild() {
+      if (!state.userPos) return null;
+      var best = null;
+      Object.keys(state.wild).forEach(function (k) {
+        var w = state.wild[k];
+        var dist = metersBetween(state.userPos, w);
+        if (!best || dist < best.dist) {
+          best = { key: k, w: w, dist: dist, dir: compassLabel(state.userPos, w) };
+        }
+      });
+      return best;
+    }
+
+    // Human-readable account of what the last daily search actually did.
+    // Runtime-only - it exists so a player (or I) can tell a silent Overpass
+    // failure apart from a successful spawn that simply landed out of view.
+    var wildStatus = 'Not searched yet this session.';
     var _wildFetchInFlight = false;
     // Called once per session after the GPS locks. Does nothing at all if today
     // has already been spawned or the map is already full; on any failure it
     // leaves lastWildDay untouched so the next open simply tries again.
     function maybeSpawnWild() {
       var today = localDayKey();
-      if (state.lastWildDay === today || _wildFetchInFlight || !state.userPos) return;
+      if (!state.userPos) { wildStatus = 'Waiting for GPS before searching.'; return; }
+      if (_wildFetchInFlight) return;
+      if (state.lastWildDay === today) {
+        wildStatus = 'Already searched today. The next crop appears tomorrow.';
+        return;
+      }
 
       var needed = WILD_MAX - Object.keys(state.wild).length;
       if (needed <= 0) {
         // Map is full - count today as done rather than querying Overpass for
         // spots there is no room to use.
         state.lastWildDay = today;
+        wildStatus = 'The map is already full at ' + WILD_MAX + '. Pick some to make room.';
         saveState();
         return;
       }
 
       _wildFetchInFlight = true;
+      wildStatus = 'Searching for paths nearby...';
       overpassFetch(state.userPos.lat, state.userPos.lng).then(function (json) {
-        var spots = pickWildSpots(roadPointsFrom(json), needed);
+        var points = roadPointsFrom(json);
+        var spots = pickWildSpots(points, needed);
         spots.forEach(function (h) {
           var c = hexCenter(h.q, h.r);
           var sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
@@ -907,15 +953,29 @@
         saveState();
         renderWild();
         updateHUD();
+
         if (spots.length > 0) {
-          toast('\u{1F33C} ' + spots.length + ' wild ' + (spots.length === 1 ? 'flower has' : 'flowers have') +
-            ' bloomed along the paths near you!');
+          var near = nearestWild();
+          // Lead with the distance to the closest one. Most of a day's crop
+          // lands off-screen by design, and without this the toast reads as
+          // "flowers appeared" while the map appears completely unchanged.
+          wildStatus = 'Found ' + spots.length + ' spot' + (spots.length === 1 ? '' : 's') +
+            ' along ' + points.length + ' path points.';
+          toast('\u{1F33C} ' + spots.length + ' wild ' + (spots.length === 1 ? 'flower' : 'flowers') +
+            ' bloomed nearby' + (near ? ' - nearest is ' + Math.round(near.dist) + 'm ' + near.dir : '') + '!');
           vibrate(25);
+        } else if (points.length === 0) {
+          wildStatus = 'No roads or footpaths found within ' + WILD_SEARCH_RADIUS_M + 'm.';
+        } else {
+          wildStatus = 'Found paths, but no spot far enough from your own flowers.';
         }
-      }).catch(function () {
-        // Deliberately silent: a missing daily extra isn't worth an error
-        // message in a game with no other failure states. lastWildDay stays
-        // unset, so the next open retries.
+      }).catch(function (err) {
+        // Still no toast - a missing daily extra isn't worth an error message
+        // in a game with no other failure states - but the reason is recorded
+        // so the Wild Flowers screen can explain it. lastWildDay stays unset,
+        // so the next open retries.
+        wildStatus = 'The map service could not be reached (' +
+          ((err && err.message) || 'network error') + '). It will try again next time you open Bloom.';
       }).then(function () { _wildFetchInFlight = false; });
     }
 
@@ -1565,6 +1625,45 @@
         s.earned + ' Petals &bull; ' + s.kept + ' kept</p>';
       document.getElementById('modal-ok-btn').textContent = 'Got it';
       document.getElementById('modal-ok-btn').onclick = closeModal;
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // Answers "where are they, then?". Most of a day's wild flowers land
+    // off-screen on purpose - the whole point is to walk to them - so without
+    // a screen like this a successful spawn is indistinguishable from a failed
+    // one, since both leave the visible map unchanged.
+    function openWildInfo() {
+      toggleMenu();
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Wild Flowers \u{1F33C}';
+
+      var n = Object.keys(state.wild).length;
+      var near = nearestWild();
+      var searchedToday = state.lastWildDay === localDayKey();
+      var html = '<p><b>' + n + '</b> wild ' + (n === 1 ? 'flower is' : 'flowers are') +
+        ' out on the map right now, of up to ' + WILD_MAX + '.</p>';
+
+      if (near) {
+        html += '<p>The nearest is a <b>' + speciesFor(near.w.species).name + '</b>, about <b>' +
+          Math.round(near.dist) + 'm</b> to the <b>' + near.dir + '</b>.</p>';
+      } else if (n > 0) {
+        html += '<p>Waiting on GPS before it can tell you how far off they are.</p>';
+      }
+
+      if (n > 0) {
+        html += '<p style="color:var(--text-dim)">They can be up to ' + WILD_SEARCH_RADIUS_M +
+          'm away, so most start off-screen - zoom out and look for the glowing ones.</p>';
+      }
+      html += '<p style="color:var(--text-dim)">Today\'s search: ' + wildStatus + '</p>';
+
+      // Retry is offered only when today has not already completed, so it can
+      // rescue a failed search without becoming an unlimited flower tap.
+      document.getElementById('modal-ok-btn').textContent = searchedToday ? 'Got it' : 'Search again now';
+      document.getElementById('modal-ok-btn').onclick = searchedToday ? closeModal : function () {
+        closeModal();
+        maybeSpawnWild();
+      };
+      document.getElementById('modal-body').innerHTML = html;
       document.getElementById('modal-overlay').classList.add('open');
     }
 

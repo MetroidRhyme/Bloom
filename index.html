@@ -258,7 +258,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.5.0</span>
+      <span id="game-version">v1.6.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -323,8 +323,9 @@
     // =====================================================================
     //  BLOOM - a chill, walking-based gardening game.
     //  Plant seeds on foot, water them on your next walk, watch them grow.
-    //  No score pressure, no failure state beyond "walk back and water it" -
-    //  the whole point is to give a relaxed excuse to go outside.
+    //  No score pressure and no failure state at all - flowers cannot die and
+    //  are never taken away, so the only thing a long absence changes is how
+    //  the garden looks. The whole point is a relaxed excuse to go outside.
     //
     //  Encoding note: every emoji below is written as a JS \u{...} escape
     //  (in script) or an HTML numeric entity &#x...; (in markup) rather than
@@ -351,9 +352,15 @@
     // interaction range without needing a second magic number.
     var RANGE_METERS = PLANT_RANGE_HEX * CELL_LAT_DEG * 111111 * SQ3;
 
-    var WATER_DURATION_MS = 48 * HOUR;  // full water drains to empty over 2 days
-    var GRACE_MS          = 24 * HOUR;  // then it can sit dry a day before wilting
-    var DEATH_MS           = 96 * HOUR; // ...and up to 4 more wilted days before it dies
+    // Full water drains to empty over 2 days, at which point the flower starts
+    // *looking* wilted. That is the entire consequence: wilting is cosmetic.
+    // Plants cannot die and are never removed from the ground, so going away
+    // for a fortnight costs you nothing but a droopy-looking garden and one
+    // watering visit to perk it back up. A browser page can't send a reminder
+    // notification, so any real penalty here would land as an unannounced loss
+    // on a player who had no way to know it was coming - exactly the kind of
+    // pressure this game is meant not to have.
+    var WATER_DURATION_MS = 48 * HOUR;
 
     // Stages are advanced by WATERING, not by elapsed time. A plant becomes
     // "ready" STAGE_READY_MS after it was planted or last advanced, and the
@@ -442,7 +449,8 @@
     function loadState() {
       var def = {
         plants: {},
-        stats: { planted: 0, bloomed: 0, flourished: 0, lost: 0, kept: 0, sold: 0, earned: 0 },
+        // No `lost` counter - plants cannot die, so nothing is ever lost.
+        stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0 },
         seeds: starterSeeds(),
         currency: 0,
         following: true,
@@ -546,16 +554,15 @@
     // often as you like and can never advance the game on its own.
     //
     // `ready` is the whole loop: a plant that has finished its STAGE_READY_MS
-    // wait is waiting on a real watering visit to move up a stage. Readiness
-    // keeps ticking even while a plant is wilting, so someone coming back from
-    // a week away waters once and gets both the rescue and the stage - the
-    // neglect timers below are the only thing that ever costs you a plant.
+    // wait is waiting on a real watering visit to move up a stage. Both
+    // readiness and stage are entirely independent of `wilted`, which is now
+    // purely a look - a wilted plant grows exactly as well as a lush one, so
+    // neglect never costs progress, only appearances.
     function recomputePlant(p, now) {
-      var dryMs = Math.max(0, now - p.lastWateredAt - WATER_DURATION_MS);
+      var dryMs = now - p.lastWateredAt;
       var d = {
-        waterFrac: Math.max(0, Math.min(1, 1 - (now - p.lastWateredAt) / WATER_DURATION_MS)),
-        wilted: dryMs > GRACE_MS,
-        dead: dryMs > GRACE_MS + DEATH_MS,
+        waterFrac: Math.max(0, Math.min(1, 1 - dryMs / WATER_DURATION_MS)),
+        wilted: dryMs >= WATER_DURATION_MS,
         stage: p.stage,
         ready: p.stage < MAX_STAGE && now >= p.readyAt,
         readyIn: Math.max(0, p.readyAt - now)
@@ -675,27 +682,16 @@
       return sell ? harvestValue(p, d.stage) : 0; // used by the tutorial's bonus top-up
     }
 
-    // Runs on load and every minute: refreshes each plant's derived state (so
-    // the HUD and markers notice a plant crossing into ready/thirsty/wilted)
-    // and gently retires anything left dry for too long. Stage advancement and
-    // milestone credit both live in waterPlant now - nothing here changes a
-    // plant's progress, only whether it is still with us.
+    // Runs on load and every minute purely to refresh derived state, so the
+    // HUD and map markers notice a plant crossing into ready or wilted. It
+    // never changes a plant: stage advancement and milestone credit live in
+    // waterPlant, and nothing removes a plant from the ground but harvesting.
     function tickPlants() {
       var now = Date.now();
-      var removed = 0;
-      Object.keys(state.plants).forEach(function (key) {
-        var d = recomputePlant(state.plants[key], now);
-        if (d.dead) { delete state.plants[key]; state.stats.lost++; removed++; }
-      });
-      saveState();
+      Object.keys(state.plants).forEach(function (key) { recomputePlant(state.plants[key], now); });
       renderPlants();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
-      if (removed > 0) {
-        toast(removed === 1
-          ? 'A flower quietly returned to the earth. \u{1F90D}'
-          : removed + ' flowers quietly returned to the earth. \u{1F90D}');
-      }
     }
 
     // ---------------------------------------------------------------------
@@ -759,11 +755,11 @@
       var v = buildPlantVisual(speciesFor(plant.species), d.stage, d.wilted, plantIconBase());
       var html = v.html;
       // A corner droplet marks any plant that wants a visit, so the map alone
-      // answers "is there anything to do right now?". Blue means it is wilting
-      // and needs rescuing; green means it is simply ready to grow a stage.
+      // answers "is there anything to do right now?". Green means it is ready
+      // to grow a stage and takes priority; blue is the cosmetic wilt nudge.
       // Both are fixed by the same action, so they share one badge shape.
-      if (d.wilted || d.ready) {
-        var badgeBg = d.wilted ? '#4aa3ff' : '#4caf6d';
+      if (d.ready || d.wilted) {
+        var badgeBg = d.ready ? '#4caf6d' : '#4aa3ff';
         html = '<div style="position:relative;width:' + v.w + 'px;height:' + v.h + 'px">' + html +
           '<div style="position:absolute;top:-4px;right:-6px;background:' + badgeBg + ';color:#fff;' +
           'border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;' +
@@ -791,7 +787,10 @@
     gridRenderer.addTo(map);
 
     map.setView([20, 0], 3);
-    map.on('dragstart', function () { state.following = false; });
+    // Persist immediately: tickPlants no longer saves (it has nothing to save),
+    // so without this a player who drags the map and closes the tab comes back
+    // to it snapping to their location again.
+    map.on('dragstart', function () { state.following = false; saveState(); });
 
     // Hex mesh is only drawn once zoomed in this close - below it the hex count
     // in view would grow into the thousands (this is a full-viewport mesh, not
@@ -1032,13 +1031,13 @@
       document.getElementById('water-bar-fill').style.width = pct + '%';
       document.getElementById('water-bar-label').textContent = pct + '% watered';
 
-      // Priority order matters: wilting is the only state that can actually
-      // cost you the plant, so it outranks readiness even though a single
-      // watering resolves both at once.
+      // Readiness leads, because it is the only state a visit converts into
+      // progress. Wilting is cosmetic now, so it ranks below that - it's a
+      // "your garden looks thirsty" note, never a warning.
       var statusEl = document.getElementById('plant-status-line');
-      if (d.wilted) { statusEl.textContent = 'Wilting - water it to help it bounce back'; statusEl.className = 'status-wilt'; }
-      else if (d.ready) { statusEl.textContent = 'Ready to grow - give it a drink!'; statusEl.className = 'status-good'; }
+      if (d.ready) { statusEl.textContent = 'Ready to grow - give it a drink!'; statusEl.className = 'status-good'; }
       else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
+      else if (d.wilted) { statusEl.textContent = 'Looking wilted - a drink will perk it back up'; statusEl.className = 'status-wilt'; }
       else if (d.waterFrac < 0.34) { statusEl.textContent = 'Getting thirsty - water it soon'; statusEl.className = 'status-thirsty'; }
       else { statusEl.textContent = 'Ready to grow in ' + formatDuration(d.readyIn); statusEl.className = 'status-dim'; }
 
@@ -1163,8 +1162,9 @@
         'back, three stages.</p>' +
         '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on seeds ' +
         'for rarer, more valuable flowers.</p>' +
-        '<p>Leave a flower too thirsty for too long and it\'ll wilt - water always brings it back, unless ' +
-        'it\'s left dry for a very long while. No score, no clock, no rush.</p>';
+        '<p>Nothing here can be lost. Go a couple of days without watering and a flower just looks a bit ' +
+        'wilted until your next visit - it never dies, and it never stops being ready to grow. No score, ' +
+        'no clock, no rush.</p>';
       document.getElementById('modal-ok-btn').textContent = "Let's grow! \u{1F331}";
       document.getElementById('modal-ok-btn').onclick = function () {
         state.seenWelcome = true; saveState(); closeModal();
@@ -1190,8 +1190,9 @@
         'yourself or Sell it for Petals \u{1F338} - clusters sell for much more than a single bloom.</p>' +
         '<p><b>Shop</b> - tap your Petals total (top right) to buy Common, Rare, or Prized seeds. Rarer ' +
         'tiers cost more but sell for a lot more too.</p>' +
-        '<p><b>Don\'t forget them</b> - flowers left dry for a long stretch wilt, then eventually return to ' +
-        'the earth. A watering visit any time before that brings them right back.</p>' +
+        '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
+        'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
+        'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +
         '<p style="color:var(--text-dim);margin-top:14px">So far: ' + s.planted + ' planted &bull; ' +
         s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished &bull; ' + s.sold + ' sold for ' +
         s.earned + ' Petals &bull; ' + s.kept + ' kept</p>';

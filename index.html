@@ -203,44 +203,88 @@
     .sell-btn { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; border: none; }
 
     /* ================= SHOP PANEL ================= */
+    /* Full-screen takeover rather than a bottom sheet - stepping up to the
+       stand should feel like leaving the map for a moment, not peeking at a
+       drawer over it. Still slides up like every other panel; it just now
+       covers the whole viewport when open. Laid out as one flex column
+       (basket, then the stand) sized to fit a phone screen with no
+       scrolling of its own - see stand-counter below for the one internal
+       scroll left as a safety net for unusually short screens. */
     #shop-panel {
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100;
-      background: var(--panel-bg); border-radius: 24px 24px 0 0; box-shadow: var(--shadow);
-      padding: 10px 22px calc(22px + env(safe-area-inset-bottom, 0px));
+      position: fixed; inset: 0; z-index: 1100;
+      /* Opaque, not var(--panel-bg) - that's a translucent white meant to
+         float a sheet over the map, and at full-screen size the HUD bar
+         ghosted through the top of it. */
+      background: #fdfbf5;
+      padding: calc(14px + env(safe-area-inset-top, 0px)) 22px calc(16px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-direction: column;
       transform: translateY(105%);
       transition: transform 0.28s ease;
     }
     #shop-panel.open { transform: translateY(0); }
     #shop-close-btn {
-      position: absolute; top: 14px; right: 16px; width: 30px; height: 30px; border-radius: 50%;
-      border: none; background: rgba(0,0,0,0.05); font-size: 17px; color: var(--text-dim); cursor: pointer;
+      position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px;
+      width: 32px; height: 32px; border-radius: 50%; z-index: 2;
+      border: none; background: rgba(0,0,0,0.06); font-size: 18px; color: var(--text-dim); cursor: pointer;
     }
-    #shop-title { text-align: center; font-size: 18px; font-weight: 800; margin: 4px 0 2px; }
-    #shop-balance { text-align: center; font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    /* The petal basket: how much you have to spend, front and center instead
+       of a sentence of stats. A woven basket (repeating gradients, same
+       trick as the stand counter) with a handle arc, flowers spilling over
+       the rim, and a hanging tag carrying the actual number - "a basket
+       with petals in it that has a number on it". */
+    #shop-basket { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; margin: 6px 0 10px; }
+    #basket-handle {
+      width: 60px; height: 30px; margin-bottom: -15px;
+      border: 5px solid #6b4423; border-bottom: none; border-radius: 60px 60px 0 0;
+    }
+    #basket-body {
+      position: relative; width: 132px; height: 58px;
+      background:
+        repeating-linear-gradient(45deg, rgba(107,68,35,0.32) 0 6px, transparent 6px 12px),
+        repeating-linear-gradient(180deg, #caa06a 0 11px, #ad7f48 11px 13px);
+      border: 3px solid #6b4423; border-radius: 12px 12px 34px 34px; box-shadow: var(--shadow-sm);
+    }
+    #basket-petals {
+      position: absolute; top: -22px; left: 0; right: 0; text-align: center;
+      font-size: 22px; letter-spacing: -5px;
+    }
+    /* Anchored to basket-body (not shop-basket) so the offset is relative to
+       the basket itself, not the whole full-screen panel. */
+    #basket-tag {
+      position: absolute; top: -10px; right: -20px; transform: rotate(7deg);
+      background: #fff6e0; border: 2px solid #6b4423; color: #5a3d22; border-radius: 10px;
+      padding: 4px 9px; font-size: 13.5px; font-weight: 800; white-space: nowrap;
+      box-shadow: var(--shadow-sm);
+    }
     /* The stand: a wooden farmer's-market counter under a striped awning,
        with a hand-painted price sign leaning over it. Pure CSS/gradients, no
        image assets, matching the rest of the game's inline-SVG art. One
        crate per seed on sale sits on the counter; fertilizer gets its own
-       sack off to the side rather than blending in with the seed row. */
-    #stand-scene { margin: 0 -22px; padding: 0 22px 4px; }
+       sack off to the side rather than blending in with the seed row.
+       flex:1 (not a fixed height) so it soaks up whatever room is left under
+       the basket on any phone, rather than being sized for one screen and
+       leaving a gap - or a scrollbar - on every other. */
+    #stand-scene { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin: 0 -22px; padding: 0 22px; }
     #stand-canopy {
-      height: 20px; margin: 0 -22px 4px;
+      flex: 0 0 auto; height: 20px; margin: 0 -22px 4px;
       background: repeating-linear-gradient(-45deg, #c0453c 0 16px, #f6ecd8 16px 32px);
       border-bottom: 3px solid #6b4423;
     }
     #stand-sign {
-      position: relative; left: 50%; transform: translateX(-50%) rotate(-2.5deg);
+      flex: 0 0 auto; position: relative; left: 50%; transform: translateX(-50%) rotate(-2.5deg);
       width: fit-content; margin: -22px 0 12px;
       background: #7a5330; color: #fff6e0; border: 3px solid #5a3d22; border-radius: 8px;
       padding: 7px 16px; font-size: 12.5px; font-weight: 800; text-align: center; line-height: 1.35;
       box-shadow: var(--shadow-sm); white-space: nowrap;
     }
     #stand-counter {
-      display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;
+      flex: 1 1 auto; min-height: 0;
+      display: flex; flex-wrap: wrap; gap: 14px;
+      align-items: center; justify-content: center; align-content: center;
       background: repeating-linear-gradient(180deg, #b8824a 0 13px, #a06f3d 13px 15px);
       border: 3px solid #6b4423; border-radius: 14px;
       padding: 16px 14px 14px; box-shadow: inset 0 3px 10px rgba(0,0,0,0.28);
-      max-height: 44vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
     /* Seven crates, one per species on sale that day - auto-fill so the grid
        stays tidy on any phone width without a hardcoded column count. */
@@ -452,7 +496,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.22.0</span>
+      <span id="game-version">v1.23.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -499,10 +543,14 @@
   </div>
 
   <div id="shop-panel">
-    <div class="panel-handle"></div>
     <button id="shop-close-btn" onclick="closeShop()">&times;</button>
-    <div id="shop-title">Seed Shop</div>
-    <div id="shop-balance">&nbsp;</div>
+    <div id="shop-basket">
+      <div id="basket-handle"></div>
+      <div id="basket-body">
+        <div id="basket-petals">&#x1F338;&#x1F338;&#x1F338;&#x1F338;&#x1F338;</div>
+        <div id="basket-tag">&nbsp;</div>
+      </div>
+    </div>
     <div id="stand-scene">
       <div id="stand-canopy"></div>
       <div id="stand-sign">&nbsp;</div>
@@ -3235,9 +3283,11 @@
     // not a power ladder - and since it only ever shows STANDARD colors,
     // breeding stays the only route to everything past tier 0.
     function renderShopRows() {
-      document.getElementById('shop-balance').innerHTML = 'You have <b>' + state.currency +
-        '</b> \u{1F338} Petals &bull; sells ' + SELL_SINGLE + '-' + SELL_CLUSTER +
-        ' \u{1F338} &bull; today\'s stand has one of each flower - the rest are bred';
+      // The basket tag carries the one number that matters here; everything
+      // else that used to be a sentence above the stand (sell price range,
+      // "one of each flower") lives elsewhere (the sell screen, the crates
+      // themselves) rather than crowding this screen with text.
+      document.getElementById('basket-tag').textContent = state.currency + ' \u{1F338}';
       document.getElementById('stand-sign').innerHTML = 'ALL ITEMS<br>' + SEED_COST + ' \u{1F338}';
       var afford = state.currency >= SEED_COST;
 

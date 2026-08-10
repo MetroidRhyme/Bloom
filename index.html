@@ -250,6 +250,11 @@
     @keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
     .flourish-cluster { animation: sway 3.2s ease-in-out infinite; transform-origin: bottom center; }
 
+    /* Wild flowers wear a soft halo so they read as "found" rather than
+       "planted" at a glance, without needing a second marker shape. */
+    @keyframes wild-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.12); } }
+    .wild-glow { animation: wild-pulse 2.8s ease-in-out infinite; }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
@@ -265,7 +270,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.8.0</span>
+      <span id="game-version">v1.9.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -297,7 +302,7 @@
     <div id="plant-icon-big"></div>
     <div id="plant-title">&nbsp;</div>
     <div id="plant-meta">&nbsp;</div>
-    <div class="growth-bar-track"><div id="growth-bar-fill" style="width:0%"></div></div>
+    <div id="growth-bar-track" class="growth-bar-track"><div id="growth-bar-fill" style="width:0%"></div></div>
     <div id="growth-bar-label">&nbsp;</div>
     <div id="plant-status-line">&nbsp;</div>
     <button id="plant-action-btn">Water</button>
@@ -418,6 +423,37 @@
     var SELL_CLUSTER = 40;
     function harvestValue(p, stage) { return stage >= MAX_STAGE ? SELL_CLUSTER : SELL_SINGLE; }
 
+    // ---- Wild flowers ----------------------------------------------------
+    // Once per local calendar day, the first time the page is opened, a fresh
+    // crop of wild blooms is scattered along real roads and footpaths near the
+    // player. They cost nothing, can't be watered or grown, and are simply
+    // there to be found and picked - a daily reason to take a walk.
+    //
+    // "On a path" needs geometry the raster basemap doesn't carry, so it comes
+    // from OpenStreetMap via Overpass. That is the game's only third-party call
+    // beyond the Leaflet CDN and the map tiles: it sends a deliberately coarse
+    // (3dp, ~110m) centre point once a day, never any game state, and if it
+    // fails for any reason the day is simply left unspawned and retried on the
+    // next open rather than falling back to placing flowers in rivers.
+    var WILD_MAX = 10;               // most wild flowers on the map at one time
+    var WILD_MIN_HEX_GAP = 5;        // min hex distance from each other AND from your own plants
+    var WILD_SEARCH_RADIUS_M = 1200; // how far out from the player to look for paths
+    var WILD_POINT_SPACING_M = 35;   // roughly one hex, see roadPointsFrom
+    // Tried in order. The public Overpass instances genuinely do return 429s
+    // and 504s under load, and this call only fires once a day - landing on a
+    // bad minute would otherwise cost a player their whole day's flowers, so
+    // it's worth a second shot at a mirror before giving up until tomorrow.
+    var OVERPASS_URLS = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter'
+    ];
+    var OVERPASS_TIMEOUT_MS = 20000;
+    // Deliberately excludes motorway/trunk and their slip roads: this is a
+    // walking game, so a flower should never appear somewhere you'd have to
+    // walk along a dual carriageway to reach.
+    var WILD_HIGHWAY_TYPES = 'footway|path|pedestrian|living_street|residential|' +
+      'track|cycleway|service|unclassified|steps|tertiary';
+
     // ---------------------------------------------------------------------
     //  STATE & PERSISTENCE
     //  Small, single-blob save (unlike Porter's many-key layout) since
@@ -480,6 +516,8 @@
     function loadState() {
       var def = {
         plants: {},
+        wild: {},            // hex key -> wild flower, spawned daily along real paths
+        lastWildDay: null,   // local YYYY-MM-DD of the last successful wild spawn
         // No `lost` counter - plants cannot die, so nothing is ever lost.
         stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0 },
         seeds: starterSeeds(),
@@ -497,6 +535,8 @@
         Object.keys(plants).forEach(function (k) { migratePlant(plants[k], migrateNow); });
         return {
           plants: plants,
+          wild: parsed.wild || {},
+          lastWildDay: parsed.lastWildDay || null,
           stats: Object.assign({}, def.stats, parsed.stats || {}),
           // A save that predates seeds/currency (v1.1.x) gets starter seeds
           // bootstrapped in rather than being left unable to plant anything -
@@ -520,7 +560,8 @@
 
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        plants: state.plants, stats: state.stats, seeds: state.seeds, currency: state.currency,
+        plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
+        stats: state.stats, seeds: state.seeds, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone
       }));
     }
@@ -724,6 +765,161 @@
     }
 
     // ---------------------------------------------------------------------
+    //  WILD FLOWERS
+    //  Spawned once per local calendar day along real OSM paths. See the
+    //  WILD_* constants above for the placement rules and the privacy note.
+    // ---------------------------------------------------------------------
+    // Local calendar day, not UTC - "the first time you open it each day"
+    // should mean the player's day, so the roll-over happens at their midnight.
+    function localDayKey(d) {
+      d = d || new Date();
+      var m = d.getMonth() + 1, day = d.getDate();
+      return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+    }
+
+    // Note on headers: Overpass rejects requests that arrive without a real
+    // User-Agent and Origin (it answers 406). Both are set by the browser
+    // automatically and cannot be overridden from script, so nothing needs to
+    // be added here - but that is also why this call can only be exercised
+    // from a real page, not from a bare script.
+    // Content-Type stays form-urlencoded so the request remains CORS-simple
+    // and does not incur a preflight round trip.
+    function overpassFetchFrom(url, q) {
+      var ctrl = window.AbortController ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, OVERPASS_TIMEOUT_MS);
+      return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(q),
+        signal: ctrl ? ctrl.signal : undefined
+      }).then(function (res) {
+        clearTimeout(timer);
+        if (!res.ok) throw new Error('overpass ' + res.status);
+        return res.json();   // a busy instance can answer 200 with an HTML error page; this rejects on that too
+      }, function (err) {
+        clearTimeout(timer);
+        throw err;
+      });
+    }
+
+    function overpassFetch(lat, lng) {
+      // Coordinates are rounded to 3dp (~110m) before they leave the device.
+      // The search radius is 1200m, so this costs nothing in placement quality
+      // and means the request never carries a precise home address.
+      var q = '[out:json][timeout:20];way["highway"~"^(' + WILD_HIGHWAY_TYPES + ')$"]' +
+        '(around:' + WILD_SEARCH_RADIUS_M + ',' + lat.toFixed(3) + ',' + lng.toFixed(3) + ');out geom 400;';
+      // Sequential fallback across the mirrors; only the last failure escapes.
+      return OVERPASS_URLS.reduce(function (chain, url) {
+        return chain.catch(function () { return overpassFetchFrom(url, q); });
+      }, Promise.reject());
+    }
+
+    // Way geometry is only the vertices, which on a long straight street can be
+    // hundreds of metres apart - using them raw would make whole stretches of
+    // road ineligible and bunch flowers at junctions. Subdivide each segment to
+    // roughly one hex so any point along a path is a fair candidate.
+    function roadPointsFrom(json) {
+      var pts = [];
+      (json && json.elements || []).forEach(function (el) {
+        var g = el.geometry;
+        if (!g || g.length < 2) return;
+        for (var i = 0; i < g.length - 1; i++) {
+          var a = g[i], b = g[i + 1];
+          var dLat = (b.lat - a.lat) * 111111;
+          var dLng = (b.lon - a.lon) * 111111 * Math.cos(a.lat * Math.PI / 180);
+          var steps = Math.max(1, Math.round(Math.sqrt(dLat * dLat + dLng * dLng) / WILD_POINT_SPACING_M));
+          for (var k = 0; k < steps; k++) {
+            var t = k / steps;
+            pts.push({ lat: a.lat + (b.lat - a.lat) * t, lng: a.lon + (b.lon - a.lon) * t });
+          }
+        }
+        var last = g[g.length - 1];
+        pts.push({ lat: last.lat, lng: last.lon });
+      });
+      return pts;
+    }
+
+    // Fisher-Yates, so the chosen spots aren't just whichever ways Overpass
+    // happened to return first (which would cluster them all on one street).
+    function shuffleInPlace(arr) {
+      for (var i = arr.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+      }
+      return arr;
+    }
+
+    // Greedily takes up to `needed` path points that sit at least
+    // WILD_MIN_HEX_GAP hexes from every existing wild flower, every plant the
+    // player owns, and every spot already chosen in this same pass.
+    function pickWildSpots(points, needed) {
+      var avoid = [];
+      Object.keys(state.wild).forEach(function (k) { avoid.push(state.wild[k]); });
+      Object.keys(state.plants).forEach(function (k) { avoid.push(state.plants[k]); });
+
+      var chosen = [];
+      shuffleInPlace(points);
+      for (var i = 0; i < points.length && chosen.length < needed; i++) {
+        var h = latLngToHex(points[i].lat, points[i].lng);
+        var ok = true;
+        for (var j = 0; j < avoid.length; j++) {
+          if (hexDist(h.q, h.r, avoid[j].q, avoid[j].r) < WILD_MIN_HEX_GAP) { ok = false; break; }
+        }
+        if (!ok) continue;
+        chosen.push(h);
+        avoid.push(h);
+      }
+      return chosen;
+    }
+
+    var _wildFetchInFlight = false;
+    // Called once per session after the GPS locks. Does nothing at all if today
+    // has already been spawned or the map is already full; on any failure it
+    // leaves lastWildDay untouched so the next open simply tries again.
+    function maybeSpawnWild() {
+      var today = localDayKey();
+      if (state.lastWildDay === today || _wildFetchInFlight || !state.userPos) return;
+
+      var needed = WILD_MAX - Object.keys(state.wild).length;
+      if (needed <= 0) {
+        // Map is full - count today as done rather than querying Overpass for
+        // spots there is no room to use.
+        state.lastWildDay = today;
+        saveState();
+        return;
+      }
+
+      _wildFetchInFlight = true;
+      overpassFetch(state.userPos.lat, state.userPos.lng).then(function (json) {
+        var spots = pickWildSpots(roadPointsFrom(json), needed);
+        spots.forEach(function (h) {
+          var c = hexCenter(h.q, h.r);
+          var sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
+          state.wild[hexKey(h.q, h.r)] = {
+            q: h.q, r: h.r, lat: c.lat, lng: c.lng, species: sp.key,
+            stage: 2, spawnedAt: Date.now()
+          };
+        });
+        // Mark the day done even when nothing was placed (no paths in range, or
+        // everything too close to what's already there) - otherwise a player in
+        // a sparse area would re-query Overpass on every single page open.
+        state.lastWildDay = today;
+        saveState();
+        renderWild();
+        updateHUD();
+        if (spots.length > 0) {
+          toast('\u{1F33C} ' + spots.length + ' wild ' + (spots.length === 1 ? 'flower has' : 'flowers have') +
+            ' bloomed along the paths near you!');
+          vibrate(25);
+        }
+      }).catch(function () {
+        // Deliberately silent: a missing daily extra isn't worth an error
+        // message in a game with no other failure states. lastWildDay stays
+        // unset, so the next open retries.
+      }).then(function () { _wildFetchInFlight = false; });
+    }
+
+    // ---------------------------------------------------------------------
     //  VISUALS
     // ---------------------------------------------------------------------
     // Builds the emoji "look" for a plant at a given stage/size and returns
@@ -795,6 +991,22 @@
           'font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,0.35)">\u{1F4A7}</div></div>';
       }
       return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h / 2], className: '' });
+    }
+
+    // Same bloom artwork as a planted flower, wrapped in a pulsing halo so a
+    // wild one is distinguishable at a glance without inventing a second
+    // marker shape. Always drawn at single-bloom stage and never wilted -
+    // wild flowers don't grow and can't be neglected.
+    function makeWildIcon(w) {
+      var v = buildPlantVisual(speciesFor(w.species), 2, false, plantIconBase());
+      var pad = Math.max(6, Math.round(v.w * 0.18));
+      var box = v.w + pad * 2, boxH = v.h + pad * 2;
+      var html = '<div style="position:relative;width:' + box + 'px;height:' + boxH + 'px;' +
+        'display:flex;align-items:center;justify-content:center">' +
+        '<div class="wild-glow" style="position:absolute;inset:0;border-radius:50%;background:' +
+        'radial-gradient(circle,rgba(255,255,255,0.9),rgba(255,236,150,0.5) 52%,rgba(255,236,150,0) 72%)"></div>' +
+        '<div style="position:relative">' + v.html + '</div></div>';
+      return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, boxH / 2], className: '' });
     }
 
     // ---------------------------------------------------------------------
@@ -887,10 +1099,27 @@
         if (!seen[key]) { map.removeLayer(plantMarkers[key]); delete plantMarkers[key]; }
       });
     }
+    // Wild flowers sit just under the player's own plants (zIndexOffset 90 vs
+    // 100), so on the rare overlap your garden is never hidden by scenery.
+    var wildMarkers = {};
+    function renderWild() {
+      var seen = {};
+      Object.keys(state.wild).forEach(function (key) {
+        var w = state.wild[key];
+        seen[key] = true;
+        var icon = makeWildIcon(w);
+        if (wildMarkers[key]) wildMarkers[key].setIcon(icon);
+        else wildMarkers[key] = L.marker([w.lat, w.lng], { icon: icon, interactive: false, zIndexOffset: 90 }).addTo(map);
+      });
+      Object.keys(wildMarkers).forEach(function (key) {
+        if (!seen[key]) { map.removeLayer(wildMarkers[key]); delete wildMarkers[key]; }
+      });
+    }
+
     // Rebuild every icon at the new zoom's size once a zoom gesture settles -
     // see plantIconBase()/makePlantIcon above for why this is what actually
     // makes zooming in grow the flowers instead of them snapping back.
-    map.on('zoomend', renderPlants);
+    map.on('zoomend', function () { renderPlants(); renderWild(); });
 
     // Empty ground within range plants immediately; an occupied hex opens its
     // panel (from any distance - browsing your garden from afar is fine,
@@ -899,6 +1128,7 @@
       var h = latLngToHex(e.latlng.lat, e.latlng.lng);
       var key = hexKey(h.q, h.r);
       if (state.plants[key]) { openPlantPanel(key); return; }
+      if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
       if (hexDist(uh.q, uh.r, h.q, h.r) > PLANT_RANGE_HEX) {
@@ -914,7 +1144,7 @@
     // No player marker - only the translucent range circle marks the player,
     // so it never sits on top of (and hides) a flower planted right next to
     // them. userHexQ/userHexR is the hex the circle is currently snapped to.
-    var rangeCircle = null, viewingKey = null;
+    var rangeCircle = null, viewingKey = null, viewingWild = false;
     var userHexQ = null, userHexR = null;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1000,6 +1230,9 @@
       scheduleGridRedraw();
       vibrate(30);
       tickPlants();
+      // Needs a real fix before it can ask "what paths are near here?", so it
+      // hangs off the lock rather than off init. No-ops if today already ran.
+      maybeSpawnWild();
       // Brand-new player: show the welcome modal, then the tutorial starts
       // once they dismiss it (see openWelcome). Returning to a save where the
       // tutorial was started but never finished/skipped (app closed mid-way)
@@ -1030,20 +1263,94 @@
       return rem > 0 ? hr + 'h ' + rem + 'm' : hr + 'h';
     }
 
-    function openPlantPanel(key) {
+    function openPlantPanel(key, isWild) {
       closeShop(); // the shop and plant panel are both bottom sheets - only one at a time
       viewingKey = key;
+      viewingWild = !!isWild;
       renderPlantPanel(key);
       document.getElementById('plant-panel').classList.add('open');
     }
     function closePlantPanel() {
       viewingKey = null;
+      viewingWild = false;
       document.getElementById('plant-panel').classList.remove('open');
     }
 
+    // A wild flower reuses the same sheet, minus everything that only applies
+    // to something you planted: no growth bar (it never grows) and no water
+    // button (it can't be tended). All that's left is picking it.
+    function renderWildPanel(key) {
+      var w = state.wild[key];
+      if (!w) { closePlantPanel(); return; }
+      var species = speciesFor(w.species);
+
+      var v = buildPlantVisual(species, 2, false, 88);
+      var iconEl = document.getElementById('plant-icon-big');
+      iconEl.innerHTML = v.html;
+      iconEl.style.width = v.w + 'px';
+      iconEl.style.height = v.h + 'px';
+
+      document.getElementById('plant-title').textContent = 'Wild ' + species.name;
+      document.getElementById('plant-meta').textContent = 'Found growing wild \u{1F33C} ' + formatAgo(w.spawnedAt);
+      document.getElementById('growth-bar-track').style.display = 'none';
+      document.getElementById('growth-bar-label').style.display = 'none';
+
+      var btn = document.getElementById('plant-action-btn');
+      btn.style.display = 'none';
+      btn.onclick = null;
+
+      var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
+      var inRange = uh && hexDist(uh.q, uh.r, w.q, w.r) <= PLANT_RANGE_HEX;
+
+      var statusEl = document.getElementById('plant-status-line');
+      statusEl.textContent = inRange ? 'Ready to pick - it\'s yours if you want it' : 'Walk over to pick it';
+      statusEl.className = inRange ? 'status-good' : 'status-wilt';
+
+      var harvestRow = document.getElementById('harvest-row');
+      if (inRange) {
+        harvestRow.style.display = 'flex';
+        document.getElementById('sell-btn').textContent = 'Sell ' + SELL_SINGLE + ' \u{1F338}';
+        document.getElementById('sell-btn').onclick = function () { pickWild(key, true); };
+        document.getElementById('keep-btn').onclick = function () { pickWild(key, false); };
+      } else {
+        harvestRow.style.display = 'none';
+      }
+    }
+
+    // Wild flowers are free, so picking one is pure upside either way - Keep
+    // adds it to your tally, Sell pays the single-bloom rate. Either way the
+    // hex clears, which is also what makes room for the next daily spawn.
+    function pickWild(key, sell) {
+      var w = state.wild[key];
+      if (!w) return;
+      var species = speciesFor(w.species);
+      delete state.wild[key];
+
+      if (sell) {
+        state.currency += SELL_SINGLE;
+        state.stats.sold++;
+        state.stats.earned += SELL_SINGLE;
+        toast('Sold a wild ' + species.name + ' for ' + SELL_SINGLE + ' \u{1F338}');
+      } else {
+        state.stats.kept++;
+        toast('Picked a wild ' + species.name + ' \u{1F33C}');
+      }
+
+      saveState();
+      renderWild();
+      updateHUD();
+      updateCurrencyPill();
+      closePlantPanel();
+      vibrate(20);
+    }
+
     function renderPlantPanel(key) {
+      if (viewingWild) { renderWildPanel(key); return; }
       var p = state.plants[key];
       if (!p) { closePlantPanel(); return; }
+      // Undo whatever the wild variant may have hidden last time round.
+      document.getElementById('growth-bar-track').style.display = '';
+      document.getElementById('growth-bar-label').style.display = '';
       var d = recomputePlant(p, Date.now());
       var species = speciesFor(p.species);
 
@@ -1148,18 +1455,32 @@
         return d && d.ready;
       }).length;
 
+      // Wild flowers are a standing "there's something out there to find", so
+      // they get a tail on every line rather than competing for the whole one.
+      var wildCount = Object.keys(state.wild).length;
+      var wildTail = wildCount > 0
+        ? ' &bull; \u{1F33C} ' + wildCount + ' wild to find'
+        : '';
+
       var line;
-      if (total === 0) line = 'Tap the map near you to plant your first seed \u{1F331}';
-      else if (ready > 0) {
+      if (total === 0) {
+        line = 'Tap the map near you to plant your first seed \u{1F331}' + wildTail;
+        document.getElementById('hud-status-line').innerHTML = line;
+        return;
+      }
+      if (ready > 0) {
         line = '\u{1F4A7} ' + ready + (ready === 1 ? ' flower is' : ' flowers are') +
           ' ready to grow &bull; go water ' + (ready === 1 ? 'it' : 'them') + '!';
       } else if (wilted > 0) {
         line = wilted + (wilted === 1 ? ' flower is' : ' flowers are') + ' looking wilted \u{1F4A7} &bull; ' +
           blooming + ' in bloom';
       } else {
-        line = '\u{1F338} ' + total + ' growing &bull; ' + blooming + ' in bloom &bull; all watered';
+        // No "all watered" tail here any more - watering stopped being upkeep
+        // when it became the thing that grows a plant, so there is nothing to
+        // reassure the player about, and the line needs room for wildTail.
+        line = '\u{1F338} ' + total + ' growing &bull; ' + blooming + ' in bloom';
       }
-      document.getElementById('hud-status-line').innerHTML = line;
+      document.getElementById('hud-status-line').innerHTML = line + wildTail;
     }
 
     function toggleMenu() { document.getElementById('menu-dropdown').classList.toggle('open'); }
@@ -1232,6 +1553,10 @@
         'yourself or Sell it for Petals \u{1F338} - clusters sell for much more than a single bloom.</p>' +
         '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds. All seven flowers cost the same ' +
         'and sell for the same, so pick by looks, not by value.</p>' +
+        '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, a few wild blooms appear along real ' +
+        'roads and footpaths near you, marked with a soft glow. They cost nothing and need no looking ' +
+        'after - just walk over and pick one. Up to ten sit out at a time, so picking them is what makes ' +
+        'room for tomorrow\'s.</p>' +
         '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
         'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +
@@ -1469,6 +1794,7 @@
     //  INIT
     // ---------------------------------------------------------------------
     tickPlants();               // recompute any growth/wilt accrued while closed
+    renderWild();               // wild flowers persist across sessions until picked
     updateHUD();
     updateCurrencyPill();
     setInterval(tickPlants, 60000);

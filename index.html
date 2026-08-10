@@ -279,21 +279,27 @@
     }
     #stand-counter {
       flex: 1 1 auto; min-height: 0;
-      display: flex; flex-wrap: wrap; gap: 14px;
-      align-items: center; justify-content: center; align-content: center;
+      display: flex; flex-direction: column; gap: 14px;
+      align-items: center; justify-content: center;
       background: repeating-linear-gradient(180deg, #b8824a 0 13px, #a06f3d 13px 15px);
       border: 3px solid #6b4423; border-radius: 14px;
       padding: 16px 14px 14px; box-shadow: inset 0 3px 10px rgba(0,0,0,0.28);
       overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
-    /* Seven crates, one per species on sale that day - auto-fill so the grid
-       stays tidy on any phone width without a hardcoded column count. */
-    #stand-seeds {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-      gap: 9px; flex: 3 1 220px;
-    }
+    /* Seven crates, one per species on sale that day, always laid out three
+       to a row - a fixed count (not a responsive auto-fill) since the
+       species list itself is fixed, so there is no "does it still fit"
+       guesswork. The seventh has no row-mate among the crates, so it shares
+       the last row with the fertilizer sack instead: that row is centered
+       and left at natural size (not stretched edge to edge like the two
+       rows above it), so the odd flower-plus-sack pair reads as one small
+       group under the two full rows rather than a stretched mismatch. */
+    .stand-row { display: flex; gap: 9px; }
+    .stand-row-crates { width: 100%; }
+    .stand-row-crates .stand-item { flex: 1 1 0; min-width: 0; }
+    .stand-row-last { justify-content: center; }
     .stand-item {
-      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
       background: linear-gradient(180deg, #fff6e0, #ecdcb2); border: 2px solid #6b4423;
       border-radius: 12px; padding: 8px 3px 6px; cursor: pointer; box-shadow: var(--shadow-sm);
     }
@@ -301,14 +307,11 @@
     .stand-item-name { font-size: 9.5px; font-weight: 800; color: #5a3d22; text-align: center; line-height: 1.15; }
     .stand-item-price { font-size: 8.5px; font-weight: 700; color: #a06a00; }
     .stand-item-owned { font-size: 8px; font-weight: 700; color: #8a7550; }
-    /* Fertilizer stands apart from the seed grid - its own sack, its own
-       column, a dashed line between them rather than one more crate. */
-    #stand-fert {
-      flex: 0 0 86px; display: flex; flex-direction: column; align-items: center;
-      padding-left: 14px; border-left: 2px dashed rgba(255,246,224,0.45);
-    }
+    /* Fertilizer's own sack, styled apart from the seed crates but no
+       longer set off with a divider line - it now just sits beside the
+       seventh flower on their shared, centered row. */
     .stand-fert-btn {
-      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%;
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 86px;
       background: linear-gradient(180deg, #e8cfa0, #c9a565); border: 2px solid #6b4423;
       border-radius: 12px; padding: 10px 6px 7px; cursor: pointer; box-shadow: var(--shadow-sm);
     }
@@ -496,7 +499,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.23.0</span>
+      <span id="game-version">v1.23.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -555,8 +558,9 @@
       <div id="stand-canopy"></div>
       <div id="stand-sign">&nbsp;</div>
       <div id="stand-counter">
-        <div id="stand-seeds"></div>
-        <div id="stand-fert"></div>
+        <div id="stand-row-1" class="stand-row stand-row-crates"></div>
+        <div id="stand-row-2" class="stand-row stand-row-crates"></div>
+        <div id="stand-row-3" class="stand-row stand-row-last"></div>
       </div>
     </div>
   </div>
@@ -3291,7 +3295,7 @@
       document.getElementById('stand-sign').innerHTML = 'ALL ITEMS<br>' + SEED_COST + ' \u{1F338}';
       var afford = state.currency >= SEED_COST;
 
-      document.getElementById('stand-seeds').innerHTML = dailyStock().map(function (vk) {
+      var crates = dailyStock().map(function (vk) {
         var v = parseVariant(vk), s = speciesFor(v.species), c = colorFor(v.color);
         var owned = state.seeds[vk] || 0;
         return '<button class="stand-item"' + (afford ? '' : ' disabled') +
@@ -3302,12 +3306,15 @@
           '<span class="stand-item-price">' + SEED_COST + ' \u{1F338}</span>' +
           (owned > 0 ? '<span class="stand-item-owned">have ' + owned + '</span>' : '') +
           '</button>';
-      }).join('');
+      });
 
-      // Fertilizer stands apart from the seed crates - the only non-seed
-      // thing for sale, and the only way into the colors the stand never
-      // stocks - so it gets its own sack instead of blending into the row.
-      document.getElementById('stand-fert').innerHTML =
+      // Fertilizer is the only non-seed thing for sale, and the only way
+      // into the colors the stand never stocks - so it gets its own sack
+      // rather than blending into the crate rows. Species come seven to a
+      // day (see dailyStock), three per row, so the seventh always ends up
+      // alone; rather than leave it stranded on its own row, it shares the
+      // last row with the sack instead (see .stand-row-last).
+      var fert =
         '<button class="stand-fert-btn"' + (state.currency >= FERTILIZER_COST ? '' : ' disabled') +
         ' title="Fertilizer - ' + FERTILIZER_COST + ' Petals" onclick="confirmBuyFertilizer()">' +
         '<span class="stand-fert-icon">\u{1F33E}</span>' +
@@ -3315,6 +3322,10 @@
         '<span class="stand-fert-price">' + FERTILIZER_COST + ' \u{1F338}</span>' +
         '<span class="stand-fert-owned">have ' + state.fertilizer + '</span>' +
         '</button>';
+
+      document.getElementById('stand-row-1').innerHTML = crates.slice(0, 3).join('');
+      document.getElementById('stand-row-2').innerHTML = crates.slice(3, 6).join('');
+      document.getElementById('stand-row-3').innerHTML = crates.slice(6, 7).join('') + fert;
     }
 
     // Nothing in the shop spends Petals on a single tap. The buy controls are

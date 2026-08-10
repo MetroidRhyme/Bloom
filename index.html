@@ -425,7 +425,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.20.0</span>
+      <span id="game-version">v1.21.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -986,12 +986,17 @@
     // then disappears 6 hours after that; unlike your own flowers, these are
     // genuinely fleeting, which is what makes going out today worth it.
     //
-    // Placement is purely random within WILD_SPAWN_RADIUS_M. There is no road
-    // or footpath check: the raster basemap carries no geometry to test
-    // against, and the third-party lookup that would provide it was not worth
-    // the dependency, the failure modes, or sending a location off-device.
-    // Some will land somewhere you can't stand - they expire on their own, and
-    // there are always others.
+    // Placement is within WILD_SPAWN_RADIUS_M, biased toward hexes the player
+    // has actually stood in planting range of before (state.visited - see
+    // markAccessible). There is still no road or footpath check: the raster
+    // basemap carries no geometry to test against, and the third-party
+    // lookup that would provide it was not worth the dependency, the failure
+    // modes, or sending a location off-device. Once enough ground has been
+    // walked, "reachable before" is a decent stand-in for "reachable at
+    // all" - pickWildSpots() falls back to the old random dart-throw for
+    // whatever a fresh or sparsely-explored map can't fill from visited
+    // ground. Some will still land somewhere you can't stand - they expire
+    // on their own, and there are always others.
     var WILD_MAX = 10;               // most wild flowers on the map at one time
     var WILD_MIN_HEX_GAP = 5;        // min hex distance from each other AND from your own plants
     // At zoom 17 a phone shows roughly 370m x 730m, so at 800m most of a crop
@@ -1124,6 +1129,11 @@
         plants: {},
         wild: {},            // hex key -> wild flower, scattered daily
         lastWildDay: null,   // local YYYY-MM-DD of the last spawn
+        // hex key -> 1, every hex ever within planting range of the player.
+        // Never shrinks - once a spot has been reachable it stays a priority
+        // for wild spawning even if the player never goes back. See
+        // markAccessible() and pickWildSpots().
+        visited: {},
         // species key -> { single, cluster, firstAt }: the flowers you chose to
         // Keep, split by what they were when picked, since a cluster extracts
         // into more seeds than a single bloom. An entry is never deleted once
@@ -1163,6 +1173,7 @@
           plants: plants,
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
+          visited: parsed.visited || {},
           inventory: migrateInventory(parsed.inventory),
           crosses: parsed.crosses || {},
           stats: Object.assign({}, def.stats, parsed.stats || {}),
@@ -1190,6 +1201,7 @@
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
+        visited: state.visited,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone
@@ -1454,11 +1466,37 @@
       };
     }
 
-    // Rejection sampling: throw darts at a disc around the player and keep the
-    // ones that land at least WILD_MIN_HEX_GAP hexes from every existing wild
-    // flower, every plant the player owns, and every spot already chosen in
-    // this same pass. Capped attempts, so a garden so dense that nothing fits
-    // simply yields fewer flowers instead of spinning.
+    // Records every hex within planting range of (q, r) as "accessible" - a
+    // spot the player was actually able to stand close enough to plant at,
+    // at least once. pickWildSpots draws from this pool first, so the wild
+    // crop gravitates toward ground that's proven reachable instead of a
+    // uniformly random disc that doesn't know about lakes, rooftops, or
+    // fenced yards. Persisted forever (once reachable, always a priority),
+    // and cheap: only newly-seen hexes trigger a save, so retracing the same
+    // streets costs nothing after the first pass.
+    function markAccessible(q, r) {
+      var added = false;
+      for (var dq = -PLANT_RANGE_HEX; dq <= PLANT_RANGE_HEX; dq++) {
+        var rMin = Math.max(-PLANT_RANGE_HEX, -dq - PLANT_RANGE_HEX);
+        var rMax = Math.min(PLANT_RANGE_HEX, -dq + PLANT_RANGE_HEX);
+        for (var dr = rMin; dr <= rMax; dr++) {
+          var key = hexKey(q + dq, r + dr);
+          if (!state.visited[key]) { state.visited[key] = 1; added = true; }
+        }
+      }
+      if (added) saveState();
+    }
+
+    // Priority + rejection sampling. First fills from state.visited - hexes
+    // proven reachable before, within WILD_SPAWN_RADIUS_M and shuffled so the
+    // same handful near home don't always win - then, if that pool can't
+    // cover `needed` (a fresh save, or a walk into brand-new territory),
+    // falls back to throwing darts at the disc around the player like
+    // before. Either way, a spot only survives if it's at least
+    // WILD_MIN_HEX_GAP hexes from every existing wild flower, every plant
+    // the player owns, and every spot already chosen in this same pass.
+    // Capped attempts on the fallback, so a garden so dense that nothing
+    // fits simply yields fewer flowers instead of spinning.
     function pickWildSpots(needed) {
       if (!state.userPos) return [];
       var avoid = [];
@@ -1468,6 +1506,30 @@
       var origin = state.userPos;
       var lngScale = 111111 * Math.cos(origin.lat * Math.PI / 180);
       var chosen = [];
+
+      var visitedCandidates = [];
+      Object.keys(state.visited).forEach(function (k) {
+        var parts = k.split(','), q = +parts[0], r = +parts[1];
+        var c = hexCenter(q, r);
+        if (metersBetween(origin, c) <= WILD_SPAWN_RADIUS_M) visitedCandidates.push({ q: q, r: r });
+      });
+      // Fisher-Yates - an unshuffled visited list would always favor the
+      // earliest-discovered hexes over ground found more recently.
+      for (var i = visitedCandidates.length - 1; i > 0; i--) {
+        var j0 = Math.floor(Math.random() * (i + 1));
+        var tmp = visitedCandidates[i]; visitedCandidates[i] = visitedCandidates[j0]; visitedCandidates[j0] = tmp;
+      }
+      for (var vi = 0; vi < visitedCandidates.length && chosen.length < needed; vi++) {
+        var vh = visitedCandidates[vi];
+        var vok = true;
+        for (var vj = 0; vj < avoid.length; vj++) {
+          if (hexDist(vh.q, vh.r, avoid[vj].q, avoid[vj].r) < WILD_MIN_HEX_GAP) { vok = false; break; }
+        }
+        if (!vok) continue;
+        chosen.push(vh);
+        avoid.push(vh);
+      }
+
       var attempts = needed * 200;
       for (var a = 0; a < attempts && chosen.length < needed; a++) {
         // sqrt of a uniform gives an even spread over the disc's *area*;
@@ -2019,6 +2081,7 @@
 
       if (!rangeCircle) {
         userHexQ = h.q; userHexR = h.r;
+        markAccessible(h.q, h.r);
         rangeCircle = L.circle([c.lat, c.lng], {
           radius: RANGE_METERS, color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
@@ -2028,6 +2091,7 @@
       } else if (h.q !== userHexQ || h.r !== userHexR) {
         var from = hexCenter(userHexQ, userHexR);
         userHexQ = h.q; userHexR = h.r;
+        markAccessible(h.q, h.r);
         animateCircleTo(from.lat, from.lng, c.lat, c.lng);
         if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }

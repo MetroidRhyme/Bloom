@@ -198,36 +198,100 @@
     .breed-plus { font-size: 20px; font-weight: 800; color: var(--text-dim); flex-shrink: 0; }
 
     /* ================= TOOL RAIL ================= */
-    /* A tool is a mode, not a one-shot: tap to pick it up, tap every flower
-       you want it applied to, tap it again to put it away. That is what makes
+    /* A tool is a mode, not a one-shot: equip it, tap (or hold-confirm) every
+       flower you want it applied to, then put it away. That is what makes
        watering a whole bed a row of taps instead of a panel round-trip per
-       flower. Left edge - the right side already belongs to the recenter
-       button, and the top and bottom to the two HUDs.
+       flower.
+
+       Presented as a toolbox at the top-left corner rather than a permanent
+       stack of buttons: a single tap (or a press-and-hold-then-drag) flies
+       the three tools out to the right, down-right and below, and picking
+       one swaps the toolbox for that tool's own icon in place - so there is
+       exactly one button here at rest, and the fan only exists while you are
+       actively choosing. #tool-rail is a fixed-size anchor box; #tool-toggle
+       and the three .petal buttons are all absolutely positioned inside it
+       from the same top-left origin, so every "fly out" is just a transform.
 
        Anchored below the top bar rather than vertically centred, and stacked
        ABOVE the plant panel (1100): the panel's hints name these tools, so on
        a short phone they have to stay tappable even when the sheet is up.
-       Picking one up closes the sheet anyway. */
+       Equipping one closes the sheet anyway. */
     #tool-rail {
       position: fixed; left: 12px; top: calc(var(--hud-top-h) + 90px); z-index: 1150;
-      display: flex; flex-direction: column; gap: 10px;
+      width: 52px; height: 52px;
     }
+    #tool-toggle { position: absolute; left: 0; top: 0; z-index: 2; }
+    /* Zero-size on purpose - it only exists to give the three petals a shared
+       transform origin; pointer-events stay off here and are switched on per
+       petal only once flown out, so a closed fan can never eat a map tap. */
+    #tool-petals { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+
     .tool-btn {
       width: 52px; height: 52px; border-radius: 50%; padding: 0;
       border: 2px solid var(--panel-border); background: var(--panel-bg);
       box-shadow: var(--shadow); cursor: pointer; color: var(--text-dim);
       display: flex; align-items: center; justify-content: center;
-      transition: transform 0.12s ease;
+      transition: transform 0.12s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
     }
-    .tool-btn:active { transform: scale(0.92); }
-    /* Each tool keeps its own accent when held, so a glance at the rail says
-       which mode you are in without reading the HUD line. */
+    #tool-toggle:active { transform: scale(0.92); }
+    /* Small green badge on the resting toolbox hints there is more inside;
+       it steps aside the instant the fan is open, since that is now obvious. */
+    .tool-btn.toolbox { position: relative; }
+    .tool-btn.toolbox::after {
+      content: ''; position: absolute; right: 2px; bottom: 2px; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--panel-bg);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+    .tool-btn.toolbox.rail-open::after { opacity: 0; transform: scale(0.4); }
+
+    /* Each tool keeps its own accent when equipped, so a glance at the
+       toolbox says which mode you are in without reading the HUD line - the
+       toggle button itself picks up these classes once a tool is equipped. */
     .tool-btn.active { border-color: currentColor; }
     .tool-btn.water.active { color: var(--blue); background: rgba(74,163,255,0.15); }
     .tool-btn.shear.active { color: var(--green-dark); background: rgba(76,175,109,0.17); }
     .tool-btn.sell.active { color: #a06a00; background: rgba(240,169,58,0.2); }
     .tool-sell-glyph { font-weight: 900; line-height: 1; }
-    /* First run only - the tutorial points at whichever tool it is asking for. */
+    /* The equip/unequip swap gets a small spring pop so the icon change reads
+       as a physical action rather than a jump-cut. Triggered by JS re-adding
+       this class on every activeTool change. */
+    @keyframes tool-equip-pop {
+      0% { transform: scale(0.55) rotate(-8deg); }
+      65% { transform: scale(1.14) rotate(3deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    .tool-btn.equip-pop { animation: tool-equip-pop 0.32s cubic-bezier(.34,1.56,.64,1); }
+
+    /* The three tools themselves. Closed = collapsed onto the toolbox origin,
+       shrunk, faded and untappable. Each one flies out to its own spot -
+       right, down-right, below - on an overshoot easing with a slight
+       counter-rotation, staggered so they cascade out rather than jumping
+       together; closing reverses the stagger so the last one out is the
+       first one home. */
+    .tool-btn.petal {
+      position: absolute; left: 0; top: 0;
+      transform: translate(0, 0) scale(0.3) rotate(-32deg);
+      opacity: 0; pointer-events: none;
+      transition: transform 0.38s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
+    }
+    .tool-btn.petal.water { transition-delay: 0.10s, 0.10s; }
+    .tool-btn.petal.shear { transition-delay: 0.05s, 0.05s; }
+    .tool-btn.petal.sell  { transition-delay: 0s, 0s; }
+    #tool-petals.open .tool-btn.petal { opacity: 1; pointer-events: auto; }
+    #tool-petals.open .tool-btn.water { transform: translate(76px, 0) scale(1) rotate(0deg); transition-delay: 0s, 0s; }
+    #tool-petals.open .tool-btn.shear { transform: translate(54px, 54px) scale(1) rotate(0deg); transition-delay: 0.06s, 0.06s; }
+    #tool-petals.open .tool-btn.sell  { transform: translate(0, 76px) scale(1) rotate(0deg); transition-delay: 0.12s, 0.12s; }
+    /* Live highlight while a press-and-hold drag is passing over a petal -
+       the fast path from the skill spec: hold the toolbox, drag over the
+       icon you want, release to equip it without a second tap. */
+    .tool-btn.petal.drag-hover { box-shadow: 0 0 0 5px rgba(255,255,255,0.55), var(--shadow); }
+    #tool-petals.open .tool-btn.water.drag-hover { transform: translate(76px, 0) scale(1.22) rotate(0deg); }
+    #tool-petals.open .tool-btn.shear.drag-hover { transform: translate(54px, 54px) scale(1.22) rotate(0deg); }
+    #tool-petals.open .tool-btn.sell.drag-hover  { transform: translate(0, 76px) scale(1.22) rotate(0deg); }
+
+    /* First run only - the tutorial points at whichever tool it is asking
+       for, on the toolbox itself while it is stowed and on the real petal
+       once the fan is open. */
     @keyframes tool-hint {
       0%, 100% { box-shadow: 0 0 0 0 rgba(240,169,58,0.6), var(--shadow); }
       50% { box-shadow: 0 0 0 9px rgba(240,169,58,0), var(--shadow); }
@@ -778,7 +842,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.27.0</span>
+      <span id="game-version">v1.28.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -799,11 +863,18 @@
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
 
   <!-- Icons are filled in by initToolRail() so the same artwork can be reused
-       by the hold ring, the panel hints and the watering animation. -->
+       by the hold ring, the panel hints and the watering animation. Pointer
+       handling for the open/drag/equip gesture is wired up in JS, not via
+       onclick, since the toolbox has to track the finger while it is still
+       down; the three petals each still take a plain click for the tap-then-
+       tap path. -->
   <div id="tool-rail">
-    <button id="tool-water" class="tool-btn water" onclick="toggleTool('water')" title="Watering can"></button>
-    <button id="tool-shear" class="tool-btn shear" onclick="toggleTool('shear')" title="Shears - collect"></button>
-    <button id="tool-sell" class="tool-btn sell" onclick="toggleTool('sell')" title="Sell"></button>
+    <button id="tool-toggle" class="tool-btn toolbox" title="Tools" onclick="onToolboxEquippedClick()"></button>
+    <div id="tool-petals">
+      <button id="tool-water" class="tool-btn petal water" onclick="selectTool('water')" title="Watering can"></button>
+      <button id="tool-shear" class="tool-btn petal shear" onclick="selectTool('shear')" title="Shears - collect"></button>
+      <button id="tool-sell" class="tool-btn petal sell" onclick="selectTool('sell')" title="Sell"></button>
+    </div>
   </div>
 
   <div id="fx-layer"></div>
@@ -2443,6 +2514,11 @@
     // TOOLS section below, which drives itself off pointer events so it can
     // tell a tap from a press-and-hold.
     map.on('click', function (e) {
+      // A tap anywhere else on the map while the tool fan is out is just a
+      // "never mind" - it closes the fan instead of planting or opening a
+      // panel underneath it. See onToolboxPointerUp for why the fan can be
+      // left open after a plain tap on the toolbox.
+      if (railOpen) { setRailOpen(false); return; }
       if (activeTool) return;
       var h = latLngToHex(e.latlng.lat, e.latlng.lng);
       var key = hexKey(h.q, h.r);
@@ -2459,16 +2535,22 @@
 
     // ---------------------------------------------------------------------
     //  TOOLS
-    //  Three tools live on the rail down the left edge: the watering can, the
-    //  shears (collect into your journal) and $ (sell). Picking one up is a
-    //  MODE - you tap every flower you want it applied to and then tap the
-    //  tool again to put it away - which is what turns watering a whole bed
+    //  Three tools live behind a toolbox icon at the top-left: the watering
+    //  can, the shears (collect into your journal) and $ (sell). Equipping
+    //  one is a MODE - you tap every flower you want it applied to and then
+    //  unequip it to put it away - which is what turns watering a whole bed
     //  into a row of taps rather than open-panel/tap-Water/close per flower.
     //
     //  Watering is a plain tap, because it is the routine action and it can't
     //  cost you anything. Collecting and selling take a one-second press and
     //  hold with a filling ring, because both take the flower off the map for
     //  good and there is no undo.
+    //
+    //  Picking a tool up is itself a two-stage gesture (see the RAIL section
+    //  below): tap the toolbox to fan the three tools out and tap the one you
+    //  want, or press-and-hold the toolbox and drag straight to it. Whichever
+    //  one gets equipped replaces the toolbox icon in place; tapping it again
+    //  unequips and the toolbox comes back.
     // ---------------------------------------------------------------------
     var HOLD_MS = 1000;      // press-and-hold to confirm a collect or a sale
     var HOLD_MOVE_PX = 14;   // finger travel that turns a hold back into a pan
@@ -2503,6 +2585,17 @@
       if (tool === 'shear') return shearIconSVG(px);
       return '<span class="tool-sell-glyph" style="font-size:' + Math.round(px * 1.05) + 'px">$</span>';
     }
+    // The toolbox itself: a handle, a lid seam and a latch, drawn stroke-only
+    // like the shears so the set reads as one hand-drawn family.
+    function toolboxIconSVG(px) {
+      return '<svg viewBox="0 0 32 26" width="' + px + '" height="' + Math.round(px * 26 / 32) + '" ' +
+        'fill="none" stroke="currentColor" stroke-linecap="round">' +
+        '<path d="M9 9 a7 6.5 0 0 1 14 0" stroke-width="2.4"/>' +
+        '<rect x="2" y="9" width="28" height="15" rx="3" stroke-width="2.4"/>' +
+        '<line x1="2" y1="15.5" x2="30" y2="15.5" stroke-width="2.2"/>' +
+        '<rect x="13" y="13" width="6" height="5" rx="1.2" stroke-width="2.2"/>' +
+        '</svg>';
+    }
 
     var activeTool = null;
     var TOOL_KEYS = ['water', 'shear', 'sell'];
@@ -2511,18 +2604,38 @@
       TOOL_KEYS.forEach(function (t) {
         document.getElementById('tool-' + t).innerHTML = toolIconHtml(t, t === 'water' ? 27 : 24);
       });
+      document.getElementById('tool-toggle').innerHTML = toolboxIconSVG(26);
+      var toggle = document.getElementById('tool-toggle');
+      toggle.addEventListener('pointerdown', onToolboxPointerDown);
+      window.addEventListener('pointermove', onToolboxPointerMove);
+      window.addEventListener('pointerup', onToolboxPointerUp);
+      window.addEventListener('pointercancel', onToolboxPointerUp);
     }
+    // Uses classList.toggle rather than overwriting className wholesale, so a
+    // pending tutorial .hint on the toggle button survives an equip/unequip.
     function renderToolRail() {
+      var toggle = document.getElementById('tool-toggle');
       TOOL_KEYS.forEach(function (t) {
         document.getElementById('tool-' + t).classList.toggle('active', activeTool === t);
+        toggle.classList.toggle(t, activeTool === t);
       });
+      toggle.classList.toggle('active', !!activeTool);
+      toggle.classList.toggle('toolbox', !activeTool);
+      toggle.innerHTML = activeTool ? toolIconHtml(activeTool, activeTool === 'water' ? 27 : 24) : toolboxIconSVG(26);
+      toggle.title = activeTool ? ('Put away the ' + TOOL_NAMES[activeTool]) : 'Tools';
+      // Spring pop on every change so the icon swap reads as a physical
+      // action. Removed and re-added to restart the animation even when the
+      // class is already there from a previous swap.
+      toggle.classList.remove('equip-pop');
+      void toggle.offsetWidth;
+      toggle.classList.add('equip-pop');
     }
 
     // The rail floats above the plant sheet on purpose - that sheet's hints
     // name these tools, so they have to stay tappable underneath it - but it
-    // must never float above a full-screen panel: three tool buttons stuck on
-    // top of the scrapbook or the market stand read as a rendering bug, and
-    // there is nothing to tend in any of them. One check called wherever a
+    // must never float above a full-screen panel: a toolbox stuck on top of
+    // the scrapbook or the market stand reads as a rendering bug, and there
+    // is nothing to tend in any of them. One check called wherever a
     // full-screen panel opens or closes, rather than a display toggle
     // duplicated across six functions.
     var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'notes-panel'];
@@ -2531,18 +2644,21 @@
         return document.getElementById(id).classList.contains('open');
       });
       document.getElementById('tool-rail').style.display = covered ? 'none' : '';
+      if (covered) setRailOpen(false); // don't come back with the fan stuck out
     }
     // The tutorial's pointer at whichever tool it is asking for next; cleared
-    // the moment any tool is picked up. A tool already in hand is never
-    // pointed at - the player has plainly found it.
+    // the moment that tool is equipped. A tool already in hand is never
+    // pointed at - the player has plainly found it. Pulses the toolbox itself
+    // (so it's visible while stowed) as well as the real petal underneath,
+    // which starts pulsing the moment the fan is opened.
     function setToolHint(tool) {
       if (tool && tool === activeTool) tool = null;
+      document.getElementById('tool-toggle').classList.toggle('hint', !!tool && !activeTool);
       TOOL_KEYS.forEach(function (t) {
         document.getElementById('tool-' + t).classList.toggle('hint', tool === t);
       });
     }
 
-    function toggleTool(tool) { setActiveTool(activeTool === tool ? null : tool); }
     function setActiveTool(tool) {
       cancelHold();
       activeTool = tool;
@@ -2554,6 +2670,78 @@
       }
       renderToolRail();
       updateHUD();
+    }
+
+    // ---- The toolbox fan: open/close state and the tap-or-drag gesture ----
+    var railOpen = false;
+    var RAIL_HOVER_PAD = 10; // px of slop added around a petal's hit box for finger imprecision
+    function setRailOpen(open) {
+      railOpen = open;
+      document.getElementById('tool-petals').classList.toggle('open', open);
+      document.getElementById('tool-toggle').classList.toggle('rail-open', open);
+      clearRailHover();
+    }
+    function clearRailHover() {
+      if (!railPointer || !railPointer.hoverTool) return;
+      document.getElementById('tool-' + railPointer.hoverTool).classList.remove('drag-hover');
+      railPointer.hoverTool = null;
+    }
+    // Picking a tool selects it, closes the fan, and cancels any hover glow.
+    function selectTool(tool) {
+      setRailOpen(false);
+      setActiveTool(tool);
+    }
+    // Equipped-state tap: fires as a normal click after pointerup, since
+    // onToolboxPointerDown below does not preventDefault while a tool is
+    // already active (there is nothing to fan out to).
+    function onToolboxEquippedClick() {
+      if (activeTool) setActiveTool(null);
+    }
+
+    function hitTestPetal(x, y) {
+      for (var i = 0; i < TOOL_KEYS.length; i++) {
+        var t = TOOL_KEYS[i];
+        var r = document.getElementById('tool-' + t).getBoundingClientRect();
+        if (x >= r.left - RAIL_HOVER_PAD && x <= r.right + RAIL_HOVER_PAD &&
+            y >= r.top - RAIL_HOVER_PAD && y <= r.bottom + RAIL_HOVER_PAD) return t;
+      }
+      return null;
+    }
+
+    var railPointer = null;
+    function onToolboxPointerDown(ev) {
+      // With a tool already equipped the toggle button is a plain unequip
+      // tap (handled by onToolboxEquippedClick) - there is no fan to open.
+      if (activeTool || railPointer) return;
+      ev.preventDefault();
+      railPointer = { id: ev.pointerId, startedOpen: railOpen, hoverTool: null };
+      if (!railOpen) { setRailOpen(true); vibrate(10); }
+    }
+    function onToolboxPointerMove(ev) {
+      if (!railPointer || ev.pointerId !== railPointer.id) return;
+      var hit = hitTestPetal(ev.clientX, ev.clientY);
+      if (hit === railPointer.hoverTool) return;
+      if (railPointer.hoverTool) document.getElementById('tool-' + railPointer.hoverTool).classList.remove('drag-hover');
+      railPointer.hoverTool = hit;
+      if (hit) {
+        document.getElementById('tool-' + hit).classList.add('drag-hover');
+        vibrate(8);
+      }
+    }
+    function onToolboxPointerUp(ev) {
+      if (!railPointer || ev.pointerId !== railPointer.id) return;
+      var rp = railPointer;
+      railPointer = null;
+      if (rp.hoverTool) {
+        document.getElementById('tool-' + rp.hoverTool).classList.remove('drag-hover');
+        selectTool(rp.hoverTool);
+        return;
+      }
+      // Released over nothing. If the fan was already open when this press
+      // started, this was a second deliberate tap on the toolbox - close it.
+      // If this press is what opened the fan (a plain tap, or a hold that
+      // never reached a petal), leave it open so a follow-up tap can pick one.
+      if (rp.startedOpen) setRailOpen(false);
     }
 
     // ---- Screen-space effects over the map -------------------------------
@@ -3361,6 +3549,11 @@
     document.addEventListener('click', function (e) {
       var menu = document.getElementById('menu-dropdown'), btn = document.getElementById('top-menu-btn');
       if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) menu.classList.remove('open');
+      // Any tap outside the toolbox fan closes it without picking a tool -
+      // the map's own click handler does the equivalent for taps on the map
+      // itself (and stops them from also planting/opening a panel).
+      var rail = document.getElementById('tool-rail');
+      if (railOpen && !rail.contains(e.target)) setRailOpen(false);
     });
 
     function onRecenter() {
@@ -3397,9 +3590,9 @@
         '<p>Watering is what makes it grow. About every 12 hours a plant is ready for a drink, and each ' +
         'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
         'back, three stages.</p>' +
-        '<p>Your tools are down the left edge: the watering can, the shears for collecting, and $ for ' +
-        'selling. Tap one to pick it up, use it on as many flowers as you like, then tap it again to put ' +
-        'it away.</p>' +
+        '<p>Your tools live in the toolbox, top left: the watering can, the shears for collecting, and $ ' +
+        'for selling. Tap it and the three fly out - tap the one you want, or hold the toolbox down and ' +
+        'drag straight to it. Use it on as many flowers as you like, then tap it again to put it away.</p>' +
         '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on more ' +
         'seeds. Every flower costs and sells for the same, so plant whichever ones you like the look of.</p>' +
         '<p>Nothing here can be lost. Go a couple of days without watering and a flower just looks a bit ' +
@@ -3421,9 +3614,10 @@
       document.getElementById('modal-body').innerHTML =
         '<p><b>Plant</b> - with no tool in hand, tap the ground within a couple hexes of you, then ' +
         'confirm which seed to plant - a quick safety check so a stray tap never spends one by accident.</p>' +
-        '<p><b>Your tools</b> - the three buttons down the left edge are the watering can, the shears ' +
-        '(collect) and $ (sell). Tap one to pick it up, use it on as many flowers as you like, then tap ' +
-        'it again to put it away. Tapping a flower with no tool in hand just opens its details.</p>' +
+        '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
+        '(sell) fly out; tap the one you want, or hold the toolbox down and drag straight to it and let ' +
+        'go. It replaces the toolbox while equipped - tap it again to put it away. Use it on as many ' +
+        'flowers as you like first. Tapping a flower with no tool in hand just opens its details.</p>' +
         '<p><b>Water</b> - pick up the watering can and tap each flower you want watered. You have to be ' +
         'within a couple hexes of it.</p>' +
         '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +
@@ -4235,7 +4429,8 @@
       if (!tutorial.active || tutorial.step !== 'plant') return;
       tutorial.plantKey = key;
       showTutorialBanner('Nice! Give it a moment to settle in&hellip; \u{1F331}');
-      tutorialReadyAfterPause('It\'s ready! Pick up the watering can on the left, then tap your flower \u{1F4A7}');
+      tutorialReadyAfterPause('It\'s ready! Tap the toolbox (top left), pick the watering can, then tap ' +
+        'your flower \u{1F4A7}');
     }
 
     // Out in the real game each of these beats is a 12-hour wait and a walk
@@ -4250,7 +4445,8 @@
       if (p.stage >= MAX_STAGE) {
         tutorial.step = 'harvest';
         setToolHint('shear');
-        showTutorialBanner('Flourishing! Take the shears (or the $ to sell) and press and hold on it \u{1F337}');
+        showTutorialBanner('Flourishing! From the toolbox take the shears (or $ to sell) and press and ' +
+          'hold on it \u{1F337}');
         return;
       }
       showTutorialBanner(GROWTH_MESSAGES[p.stage] + ' Give it another moment&hellip;');

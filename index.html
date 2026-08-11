@@ -899,7 +899,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.31.0</span>
+      <span id="game-version">v1.31.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -2801,16 +2801,27 @@
     // full-screen panel opens or closes, rather than a display toggle
     // duplicated across six functions.
     var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'notes-panel'];
-    function syncToolRail() {
-      var covered = FULLSCREEN_PANELS.some(function (id) {
+    function fullscreenPanelOpen() {
+      return FULLSCREEN_PANELS.some(function (id) {
         return document.getElementById(id).classList.contains('open');
       });
+    }
+    function syncToolRail() {
+      var covered = fullscreenPanelOpen();
       document.getElementById('tool-rail').style.display = covered ? 'none' : '';
       if (covered) setRailOpen(false); // don't come back with the fan stuck out
-      // Same treatment for the seed packet - there is nothing to plant while
-      // a full-screen panel is up, and it would otherwise float over it.
-      document.getElementById('seed-rail').style.display = covered ? 'none' : '';
-      if (covered && seedRailOpen) closeSeedFan();
+      syncSeedRail();
+    }
+    // The seed pouch hides for either of two independent reasons - a
+    // full-screen panel covering the map (nothing to plant underneath it),
+    // or the top-right ... menu being open (they share that same corner and
+    // the dropdown would otherwise overlap it) - so this is its own function
+    // rather than folded into syncToolRail's tool-rail-only "covered" check,
+    // which the menu has no business affecting.
+    function syncSeedRail() {
+      var hide = fullscreenPanelOpen() || document.getElementById('menu-dropdown').classList.contains('open');
+      document.getElementById('seed-rail').style.display = hide ? 'none' : '';
+      if (hide && seedRailOpen) closeSeedFan();
     }
     // The tutorial's pointer at whichever tool it is asking for next; cleared
     // the moment that tool is equipped. A tool already in hand is never
@@ -4033,10 +4044,16 @@
       document.getElementById('hud-status-line').innerHTML = line + wildTail;
     }
 
-    function toggleMenu() { document.getElementById('menu-dropdown').classList.toggle('open'); }
+    function toggleMenu() {
+      document.getElementById('menu-dropdown').classList.toggle('open');
+      syncSeedRail();
+    }
     document.addEventListener('click', function (e) {
       var menu = document.getElementById('menu-dropdown'), btn = document.getElementById('top-menu-btn');
-      if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) menu.classList.remove('open');
+      if (menu.classList.contains('open') && !menu.contains(e.target) && e.target !== btn) {
+        menu.classList.remove('open');
+        syncSeedRail();
+      }
       // Any tap outside the toolbox fan closes it without picking a tool -
       // the map's own click handler does the equivalent for taps on the map
       // itself (and stops them from also planting/opening a panel).

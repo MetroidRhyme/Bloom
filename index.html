@@ -696,7 +696,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.26.1</span>
+      <span id="game-version">v1.26.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3279,18 +3279,22 @@
         var vk = variantKey(speciesKey, c.id);
         var kept = !!state.inventory[vk];
         var n = heldTotalOf(vk);
-        // Tracked per species, not globally - finding White on a Sunflower
-        // used to reveal the name "White" on every other species' still-
-        // empty spot too. Each page now only names a color once this exact
-        // species has actually had it kept.
-        var label = kept ? c.name : '?';
-        var cls = 'color-cell slot' + (kept ? '' : ' blank') + (n > 0 ? ' held' : '') +
+        // The four standards are unlocked on every page by default, kept
+        // or not - they're sold in the Shop for any species already, so
+        // there was never really a mystery to preserve there. Everything
+        // past a standard still has to be bred and kept to reveal its
+        // name, tracked per species (not globally - finding White on a
+        // Sunflower used to reveal the name "White" on every other
+        // species' still-empty spot too).
+        var unlocked = kept || STANDARD_COLORS.indexOf(c.id) >= 0;
+        var label = unlocked ? c.name : '?';
+        var cls = 'color-cell slot' + (unlocked ? '' : ' blank') + (n > 0 ? ' held' : '') +
           (vk === journalPick ? ' picked' : '');
-        return '<div class="' + cls + '" title="' + (kept ? label : 'Not found yet') + '"' +
+        return '<div class="' + cls + '" title="' + (unlocked ? label : 'Not found yet') + '"' +
           (n > 0 ? ' onclick="pickJournalSpot(\'' + vk + '\')"' : '') + '>' +
-          (kept ? speciesChip(s, c.id, 30) : '<span class="slot-unknown">?</span>') +
+          (unlocked ? speciesChip(s, c.id, 30) : '<span class="slot-unknown">?</span>') +
           '<span class="slot-line"><span class="slot-label">' + label + '</span>' +
-          (kept ? '<span class="slot-note' + (n > 0 ? ' some' : '') + '">' + n + '</span>' : '') +
+          (unlocked ? '<span class="slot-note' + (n > 0 ? ' some' : '') + '">' + n + '</span>' : '') +
           '</span></div>';
       }).join('') + '</div>';
 

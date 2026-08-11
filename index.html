@@ -899,7 +899,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.30.0</span>
+      <span id="game-version">v1.30.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -2473,10 +2473,13 @@
     // Flower icons are sized relative to the current zoom (a fixed real-world
     // size, not a fixed screen-pixel size) so zooming in genuinely makes them
     // bigger and easier to see instead of staying constant while everything
-    // else on the map grows. Leaflet's built-in zoom animation already scales
-    // markers up visually mid-gesture, but snaps them back to their built-in
-    // iconSize once the gesture settles - rebuilding icons on 'zoomend' (see
-    // the map.on binding below) is what makes the bigger size actually stick.
+    // else on the map grows. A divIcon's DOM size is otherwise frozen at
+    // whatever it was built at - Leaflet repositions markers continuously
+    // through a zoom gesture but never resizes them - so without help the
+    // flowers held one size through the whole gesture and only snapped to the
+    // right size once 'zoomend' rebuilt them. rescalePlantIcons() below covers
+    // the gap by CSS-scaling the live DOM every 'zoom' tick; 'zoomend' (see the
+    // map.on binding further down) then does the real rebuild.
     // Clamped so icons stay legible at minZoom and don't get absurd at maxZoom.
     var PLANT_ICON_REF_ZOOM = 17; // the zoom PLANT_ICON_REF_PX looks "normal" at
     var PLANT_ICON_REF_PX = 44;
@@ -2484,10 +2487,16 @@
       var scale = Math.pow(2, map.getZoom() - PLANT_ICON_REF_ZOOM);
       return PLANT_ICON_REF_PX * Math.max(0.5, Math.min(2.5, scale));
     }
+    // The px plantIconBase() returned the last time icons were actually
+    // rebuilt (makePlantIcon/makeWildIcon). rescalePlantIcons() compares the
+    // current value against this to know how far the live gesture has drifted.
+    var _iconBuiltPx = PLANT_ICON_REF_PX;
 
     function makePlantIcon(plant) {
       var d = recomputePlant(plant, Date.now());
-      var v = buildPlantVisual(speciesFor(plant.species), paletteOf(plant), d.stage, d.wilted, plantIconBase());
+      var px = plantIconBase();
+      _iconBuiltPx = px;
+      var v = buildPlantVisual(speciesFor(plant.species), paletteOf(plant), d.stage, d.wilted, px);
       var html = v.html;
       // A corner droplet marks any plant that wants a visit, so the map alone
       // answers "is there anything to do right now?". Green means it is ready
@@ -2509,7 +2518,9 @@
     // wild flowers don't grow and can't be neglected.
     function makeWildIcon(w) {
       var d = wildDerived(w, Date.now());
-      var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, plantIconBase());
+      var px = plantIconBase();
+      _iconBuiltPx = px;
+      var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, px);
       var pad = Math.max(6, Math.round(v.w * 0.18));
       var box = v.w + pad * 2, boxH = v.h + pad * 2;
       var html = '<div style="position:relative;width:' + box + 'px;height:' + boxH + 'px;' +
@@ -2631,6 +2642,38 @@
     // see plantIconBase()/makePlantIcon above for why this is what actually
     // makes zooming in grow the flowers instead of them snapping back.
     map.on('zoomend', function () { renderPlants(); renderWild(); });
+
+    // Live in-between-frames fix for the gap 'zoomend' alone leaves: CSS-scale
+    // each marker's inner content div (never the marker element itself, which
+    // carries Leaflet's own translate3d positioning transform and must not be
+    // clobbered) on every 'zoom' event, which fires continuously through a
+    // wheel/button zoom animation and a touch pinch alike. makePlantIcon and
+    // makeWildIcon always emit exactly one wrapping div as the marker's whole
+    // content, so firstElementChild is always that div. zoomend's real rebuild
+    // then hands back fresh, untransformed DOM and updates _iconBuiltPx, so the
+    // live scale falls back to identity on its own once the true size lands.
+    var _iconRescalePending = false, _lastIconScale = 1;
+    function rescalePlantIcons() {
+      if (!_iconBuiltPx) return;
+      var s = plantIconBase() / _iconBuiltPx;
+      if (!(s > 0) || s === _lastIconScale) return;
+      _lastIconScale = s;
+      var t = s === 1 ? '' : 'scale(' + s + ')';
+      function apply(markers) {
+        Object.keys(markers).forEach(function (key) {
+          var el = markers[key].getElement();
+          var c = el && el.firstElementChild;
+          if (c) c.style.transform = t;
+        });
+      }
+      apply(plantMarkers);
+      apply(wildMarkers);
+    }
+    map.on('zoom', function () {
+      if (_iconRescalePending) return;
+      _iconRescalePending = true;
+      requestAnimationFrame(function () { _iconRescalePending = false; rescalePlantIcons(); });
+    });
 
     // Empty ground within range plants immediately; an occupied hex opens its
     // panel (from any distance - browsing your garden from afar is fine,

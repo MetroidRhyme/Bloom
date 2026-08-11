@@ -613,7 +613,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.24.3</span>
+      <span id="game-version">v1.24.4</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3052,16 +3052,6 @@
       renderJournalPage(parseVariant(vk).species);
     }
 
-    // Which colors have ever been kept, on any species at all. A color you
-    // found as a Tulip is a color you know, so its name shows on every
-    // species' page - only the spot itself stays empty.
-    function discoveredColorSet() {
-      var found = {};
-      Object.keys(state.inventory).forEach(function (vk) {
-        found[parseVariant(vk).color] = true;
-      });
-      return found;
-    }
     // The variants of one species you are actually holding right now, as
     // opposed to discoveredColorsOf(), which is everything ever kept.
     function heldVariantsOf(speciesKey) {
@@ -3172,8 +3162,6 @@
       document.getElementById('journal-heading').innerHTML =
         speciesChip(s, headColor, 22) + ' ' + s.name;
 
-      var known = discoveredColorSet();
-
       // Resolved before the grid is drawn: selling the last of a color has to
       // drop the selection with it, or the page keeps highlighting a spot that
       // is now empty and has no actions left under it.
@@ -3198,10 +3186,11 @@
         var vk = variantKey(speciesKey, c.id);
         var kept = !!state.inventory[vk];
         var n = heldTotalOf(vk);
-        // The name shows once the color is known from ANY species - the spot
-        // stays empty, but you are no longer being asked to guess a name you
-        // have already earned elsewhere.
-        var label = known[c.id] ? c.name : '?';
+        // Tracked per species, not globally - finding White on a Sunflower
+        // used to reveal the name "White" on every other species' still-
+        // empty spot too. Each page now only names a color once this exact
+        // species has actually had it kept.
+        var label = kept ? c.name : '?';
         var cls = 'color-cell slot' + (kept ? '' : ' blank') + (n > 0 ? ' held' : '') +
           (vk === journalPick ? ' picked' : '');
         return '<div class="' + cls + '" title="' + (kept ? label : 'Not found yet') + '"' +

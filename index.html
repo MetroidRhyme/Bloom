@@ -1124,7 +1124,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.5.1</span>
+      <span id="game-version">v2.5.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -5400,8 +5400,10 @@
         state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made</p>';
 
       if (!Object.keys(state.crosses).length) {
-        html += '<p class="tree-hint">Grow two flowers to <b>flourishing</b> on neighbouring tiles, buy ' +
-          'a bag of fertilizer in the Shop, then tap <b>Cross with a neighbour</b> to start filling this in.</p>';
+        html += '<p class="tree-hint">Grow two flowers to <b>flourishing</b> on neighbouring tiles and buy ' +
+          'a bag of fertilizer in the Shop. Then equip the fertilizer tool from the toolbox and press and ' +
+          'hold either one to cross it with a ready neighbour, or open its details and tap <b>Cross with a ' +
+          'neighbour</b> to pick which one yourself - either way starts filling this in.</p>';
       }
 
       var rows = [

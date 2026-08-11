@@ -12,13 +12,22 @@ There's no score, no timer, and no way to "lose" quickly - it's just a colorful,
 
 1. **Grant GPS access** when prompted. The map centers on your location once locked.
    - First time playing? A short guided tutorial walks you through planting, watering, harvesting, and buying your next seed - it speeds up growth just for that one demo flower so you see the whole loop in under a minute. Skippable anytime via the banner's link.
-2. **Tap the ground** near you to plant a seed from your inventory (you start with one Sunflower, one Tulip, and one Daisy) - a picker always confirms which seed before it's spent, so a stray tap never plants one by accident.
-3. **Walk back** every so often and tap a growing flower, then tap **Water** once you're close enough.
+2. **Tap the ground** near you to plant a seed from your inventory (you start with one Sunflower, one Tulip, and one Daisy) - a picker always confirms which seed before it's spent, so a stray tap never plants one by accident. Planting the same variant repeatedly? Tap the **seed packet** (top right) instead: it fans out into your species, then into that species' colors, and whichever one you tap stays equipped so every tap on empty ground plants it directly - no picker each time.
+3. **Walk back** every so often and tap a growing flower, then tap **Water** once you're close enough - or equip the **watering can** from the toolbox (top left) to water every flower you tap with a single press, no panel per flower.
 4. Watering is what advances a stage - not elapsed time. A flower becomes *ready* 12 hours after it was planted or last grew, and your next visit is what moves it up. Seed to sprout to bloom to flourishing cluster is three separate walks back.
 5. Once a flower is in bloom or flourishing, **Keep** it for your journal or **Sell** it to the shop for Petals - clusters sell for far more than a single bloom.
 6. Spend Petals in the **Seed Shop** (tap your Petals total, top right) on more seeds. Every purchase confirms first - showing the exact flower, the price, and the balance you'd be left with - so a stray tap on a small swatch never quietly costs you 20 Petals.
 
-You can tap any flower on the map to check on it from a distance - only *watering*, *harvesting*, and *planting* require being physically close (within 2 hex cells, about a short walk).
+You can tap any flower on the map to check on it from a distance - only *watering*, *harvesting*, and *planting* require being physically close (within 2 hex cells, about a short walk) - the translucent green hexagon around you is exactly that reach, not an approximation of it.
+
+### Tools and the seed packet
+
+Two icons sit at the top corners of the map, both working the same way: tap (or press-and-hold and drag) to fan out your options, then tap (or release over) the one you want. Whichever you pick replaces the icon in place; tapping it again puts it away.
+
+- **Toolbox** (top left) holds the **watering can** (a plain tap on any flower), the **shears** (collect into your journal), and **$** (sell) - the shears and $ take a one-second press-and-hold to confirm, since both take the flower off the map for good.
+- **Seed packet** (top right) is one level deeper: it fans out to every species you're holding a seed of, tapping one swaps the fan for that species' colors, and tapping a color equips it. Every icon carries a count of how many seeds are behind it - the packet shows your total, a species shows its total, a color shows that exact variant.
+
+Both stay equipped across many taps, so watering a whole bed or planting a whole row of the same color is a string of taps rather than a panel or picker per flower.
 
 ### Seeds and Petals
 
@@ -91,7 +100,7 @@ Once per day, the first time you open the game, up to 10 wild flowers scatter at
 - **Dependencies** - [Leaflet 1.9.4](https://leafletjs.com/) loaded from CDN; CartoDB Voyager tiles for a colorful basemap.
 - **Storage** - all state lives in a single `localStorage` key (`bloom_state_v1`). Corrupted saves fall back to defaults rather than breaking load. Every historical save format is migrated forward on load: pre-economy saves get starter seeds bootstrapped in, tier-keyed seeds are dealt out per species, and species-keyed seeds and collections are re-keyed to `species:color` with the species' standard base color - never a bred rarity the player didn't earn.
 - **Hex grid** - flat-top axial coordinates (q, r), same ~20 m cell size as Porter; longitude is corrected for the player's latitude on first GPS lock. A soft translucent mesh is drawn once zoomed in close (17+).
-- **Player position** - the player isn't shown as a marker, only as a translucent green range circle, so it never sits on top of (and hides) a nearby flower. The circle snaps to the current hex's center rather than following raw GPS, and eases smoothly between hexes.
+- **Player position** - the player isn't shown as a marker, only as a translucent green hexagon tracing every hex within planting range, so it never sits on top of (and hides) a nearby flower and never misrepresents range the way a circle standing in for a hex-distance would. It snaps to the current hex's center rather than following raw GPS, and eases smoothly between hexes.
 - **Flower artwork is generated SVG** - every flower is drawn at runtime from a species *shape* (rows of petals, described as data) painted with a *color* palette, so any color can be worn by any species without a single new asset. Flowers used to be system emoji glyphs, which meant their colors came from a font the game doesn't control - unrecolorable, and different on every device.
 - **Flower icons scale with zoom** - sized relative to a fixed real-world size rather than a fixed screen-pixel size, so zooming in genuinely makes them bigger.
 - **Growth engine** - fully timestamp-derived (not tick-accumulated), so time spent away from the app while the game is closed still counts correctly toward growth, drying out, and wilting.

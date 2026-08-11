@@ -302,6 +302,59 @@
     }
     .tool-btn.hint { border-color: var(--amber); color: #a06a00; animation: tool-hint 1.6s ease-out infinite; }
 
+    /* ================= SEED RAIL ================= */
+    /* Same idea as the tool rail (see above), mirrored to the top-right
+       corner and one level deeper: tap (or hold-and-drag) the seed packet to
+       fan out every species you actually hold a seed of, tap one of those to
+       swap the fan for that species' owned colors, then tap a color to equip
+       it - which replaces the packet with that flower's own icon, exactly
+       like a tool. An equipped seed is planted with a plain tap on empty
+       ground (see plantEquippedSeedAt), and it stays equipped across many
+       taps so a whole bed of the same color is a row of taps, not a picker
+       round-trip per hex.
+
+       Species and color counts are both open-ended (up to 7 species, up to
+       14 colors each), unlike the tool rail's fixed three, so there is no
+       per-item CSS selector to fan them out with - .seed-petal only carries
+       the closed rest state and the transition; the open position for each
+       one is computed by JS (seedFanSlots) and written as an inline
+       transform. See renderSeedPetals/animateSeedFanOpen in the SEEDS
+       section of the script for the JS half of this. */
+    #seed-rail {
+      position: fixed; right: 12px; top: calc(var(--hud-top-h) + 10px); z-index: 1150;
+      width: 52px; height: 52px;
+    }
+    #seed-toggle { position: absolute; right: 0; top: 0; z-index: 2; }
+    #seed-toggle:active { transform: scale(0.92); }
+    #seed-petals { position: absolute; right: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+
+    .tool-btn.seed-packet { position: relative; }
+    .tool-btn.seed-packet::after {
+      content: ''; position: absolute; left: 2px; bottom: 2px; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--panel-bg);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+    .tool-btn.seed-packet.seed-rail-open::after { opacity: 0; transform: scale(0.4); }
+
+    .seed-petal {
+      position: absolute; right: 0; top: 0; width: 40px; height: 40px;
+      transform: translate(0, 0) scale(0.3) rotate(28deg);
+      opacity: 0; pointer-events: none;
+      transition: transform 0.38s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
+    }
+    #seed-petals.open .seed-petal { opacity: 1; pointer-events: auto; }
+    .seed-petal.drag-hover { box-shadow: 0 0 0 5px rgba(255,255,255,0.55), var(--shadow); z-index: 1; }
+
+    /* Same shape/position as the journal's slot badge - a small filled pill
+       in the corner rather than a bare number, so it reads at a glance
+       against every flower color instead of blending into pale petals. */
+    .seed-count-badge {
+      position: absolute; top: -4px; right: -3px; min-width: 16px; padding: 0 3px;
+      border-radius: 8px; background: var(--green); color: #fff;
+      font-size: 9.5px; font-weight: 800; line-height: 16px; text-align: center;
+      box-shadow: 0 0 0 2px var(--panel-bg);
+    }
+
     /* ================= MAP EFFECTS LAYER ================= */
     /* The hold-to-confirm ring and the watering can are drawn in screen space
        over the map rather than as Leaflet markers: they are transient, they
@@ -846,7 +899,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.29.0</span>
+      <span id="game-version">v1.30.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -879,6 +932,15 @@
       <button id="tool-shear" class="tool-btn petal shear" onclick="selectTool('shear')" title="Shears - collect"></button>
       <button id="tool-sell" class="tool-btn petal sell" onclick="selectTool('sell')" title="Sell"></button>
     </div>
+  </div>
+
+  <!-- Mirrors #tool-rail at the top-right corner, but the fan's contents are
+       built by JS (renderSeedPetals, in the SEEDS section of the script)
+       instead of living here as static buttons - species/color counts are
+       both open-ended, so #seed-petals starts empty. -->
+  <div id="seed-rail">
+    <button id="seed-toggle" class="tool-btn seed-packet" title="Seeds" onclick="onSeedPacketEquippedClick()"></button>
+    <div id="seed-petals"></div>
   </div>
 
   <div id="fx-layer"></div>
@@ -2582,6 +2644,7 @@
       // panel underneath it. See onToolboxPointerUp for why the fan can be
       // left open after a plain tap on the toolbox.
       if (railOpen) { setRailOpen(false); return; }
+      if (seedRailOpen) { closeSeedFan(); return; }
       if (activeTool) return;
       var h = latLngToHex(e.latlng.lat, e.latlng.lng);
       var key = hexKey(h.q, h.r);
@@ -2593,6 +2656,7 @@
         toast('Walk closer to plant a seed here \u{1F6B6}');
         return;
       }
+      if (equippedSeed) { plantEquippedSeedAt(h.q, h.r); return; }
       attemptPlant(h.q, h.r);
     });
 
@@ -2708,6 +2772,10 @@
       });
       document.getElementById('tool-rail').style.display = covered ? 'none' : '';
       if (covered) setRailOpen(false); // don't come back with the fan stuck out
+      // Same treatment for the seed packet - there is nothing to plant while
+      // a full-screen panel is up, and it would otherwise float over it.
+      document.getElementById('seed-rail').style.display = covered ? 'none' : '';
+      if (covered && seedRailOpen) closeSeedFan();
     }
     // The tutorial's pointer at whichever tool it is asking for next; cleared
     // the moment that tool is equipped. A tool already in hand is never
@@ -2729,6 +2797,9 @@
         setToolHint(null);
         closePlantPanel();  // both are ways of acting on a flower; only one at a time
         closeShop();
+        // A tool and an equipped seed are two different "what does a tap do"
+        // modes - can't have both, so picking up a tool puts any seed away.
+        if (equippedSeed) unequipSeed();
         vibrate(10);
       }
       renderToolRail();
@@ -3011,6 +3082,270 @@
     window.addEventListener('pointermove', onToolPointerMove);
     window.addEventListener('pointerup', onToolPointerUp);
     window.addEventListener('pointercancel', onToolPointerUp);
+
+    // ---------------------------------------------------------------------
+    //  SEEDS
+    //  The seed packet at the top-right is the same idea as the toolbox,
+    //  one level deeper: tap (or hold-and-drag) it to fan out every species
+    //  you hold at least one seed of; tap a species and its fan is replaced
+    //  by that species' owned colors; tap a color and it equips, replacing
+    //  the packet with that flower's own icon - exactly like a tool. An
+    //  equipped seed plants itself with a plain tap on empty ground (see
+    //  plantEquippedSeedAt, wired into the map click handler below) and
+    //  stays equipped across taps, so filling a bed with one color is a row
+    //  of taps rather than a picker round-trip per hex.
+    //
+    //  Every icon carries a count badge: the packet shows the total seeds
+    //  held, a species petal shows that species' total, and a color petal
+    //  (and the equipped toggle) show that exact variant's count. Species
+    //  and colors with zero seeds never appear - "options should be limited
+    //  to the seeds the player actually has" - so the fan is never a picker
+    //  for things you can't plant, unlike the shop.
+    // ---------------------------------------------------------------------
+    function seedPacketIconSVG(px) {
+      return '<svg viewBox="0 0 28 28" width="' + px + '" height="' + px + '" ' +
+        'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">' +
+        '<rect x="3" y="8" width="22" height="17" rx="2.5" stroke-width="2.4"/>' +
+        '<path d="M3 9 L14 17 L25 9" stroke-width="2.2"/>' +
+        '<circle cx="14" cy="20" r="2.1" fill="currentColor" stroke="none"/>' +
+        '</svg>';
+    }
+    function seedCountBadgeHtml(n) {
+      return n > 0 ? '<span class="seed-count-badge">' + n + '</span>' : '';
+    }
+
+    var equippedSeed = null;         // a variant key ("species:color"), or null
+    var seedRailOpen = false;
+    var seedLevel = 'species';       // 'species' while the fan shows species, 'color' once one is picked
+    var seedSpecies = null;          // which species' colors are showing, once seedLevel === 'color'
+
+    // ---- What's actually in the pouch, grouped for the fan -----------------
+    function ownedSeedVariantsOfSpecies(speciesKey) {
+      return sortVariants(Object.keys(state.seeds).filter(function (vk) {
+        return state.seeds[vk] > 0 && parseVariant(vk).species === speciesKey;
+      }));
+    }
+    function ownedSpeciesKeys() {
+      return SPECIES.map(function (s) { return s.key; })
+        .filter(function (k) { return ownedSeedVariantsOfSpecies(k).length > 0; });
+    }
+    function totalSeedCount() {
+      return Object.keys(state.seeds).reduce(function (n, vk) { return n + (state.seeds[vk] || 0); }, 0);
+    }
+    function speciesSeedCount(speciesKey) {
+      return ownedSeedVariantsOfSpecies(speciesKey).reduce(function (n, vk) { return n + state.seeds[vk]; }, 0);
+    }
+
+    // ---- Rendering -----------------------------------------------------
+    function renderSeedToggle() {
+      var toggle = document.getElementById('seed-toggle');
+      toggle.classList.toggle('seed-packet', !equippedSeed);
+      toggle.classList.toggle('active', !!equippedSeed);
+      if (equippedSeed) {
+        // No fixed 3-way palette to key a CSS rule off like the tools have -
+        // any of 98 variants can end up here, so the accent is resolved and
+        // applied inline instead.
+        var c = colorFor(parseVariant(equippedSeed).color);
+        toggle.style.borderColor = c.line;
+        toggle.style.color = c.ink;
+      } else {
+        toggle.style.borderColor = '';
+        toggle.style.color = '';
+      }
+      toggle.innerHTML = (equippedSeed ? variantChip(equippedSeed, 26) : seedPacketIconSVG(24)) +
+        seedCountBadgeHtml(equippedSeed ? (state.seeds[equippedSeed] || 0) : totalSeedCount());
+      toggle.title = equippedSeed ? ('Put away the ' + variantName(equippedSeed) + ' seed') : 'Seeds';
+      toggle.classList.remove('equip-pop');
+      void toggle.offsetWidth;
+      toggle.classList.add('equip-pop');
+    }
+
+    // Spreads n petals evenly across an arc starting straight down (90deg)
+    // and sweeping toward the left - away from the screen edge the packet
+    // sits against, and never past "up" into the header above it. Widens
+    // with n (up to a cap) rather than staying a fixed 90deg like the
+    // three-item tool fan, since the seed fan can hold anywhere from one
+    // item to all seven species - tight but still usable at the high end.
+    var SEED_FAN_RADIUS = 92;
+    function seedFanSlots(n) {
+      var startDeg = 90, span = Math.min(112, 55 + (n - 1) * 26);
+      var slots = [];
+      for (var i = 0; i < n; i++) {
+        var deg = n === 1 ? startDeg + span / 2 : startDeg + (span * i) / (n - 1);
+        var rad = deg * Math.PI / 180;
+        slots.push({ dx: Math.cos(rad) * SEED_FAN_RADIUS, dy: Math.sin(rad) * SEED_FAN_RADIUS });
+      }
+      return slots;
+    }
+    // Flies the current set of petal buttons out to their fan positions.
+    // Split into two rAFs: the first lets a freshly-built (still-closed)
+    // button actually paint before its transform changes, or the browser can
+    // collapse both states into one frame and skip the animation entirely.
+    function animateSeedFanOpen() {
+      var container = document.getElementById('seed-petals');
+      var petals = Array.prototype.slice.call(container.children);
+      var slots = seedFanSlots(petals.length);
+      petals.forEach(function (el) { el.style.transform = 'translate(0,0) scale(0.3) rotate(28deg)'; });
+      container.classList.add('open');
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          petals.forEach(function (el, i) {
+            el.style.transitionDelay = (i * 0.05) + 's, ' + (i * 0.05) + 's';
+            el.style.transform = 'translate(' + slots[i].dx.toFixed(1) + 'px,' + slots[i].dy.toFixed(1) + 'px) scale(1) rotate(0deg)';
+          });
+        });
+      });
+    }
+    // Rebuilds the fan's contents for the current level. Called on open and
+    // every time the level changes (species -> color) - a fresh set of
+    // buttons each time, not a morph, since they are genuinely different
+    // tap targets before and after.
+    function renderSeedPetals() {
+      var container = document.getElementById('seed-petals');
+      var items;
+      if (seedLevel === 'species') {
+        items = ownedSpeciesKeys().map(function (sk) {
+          var s = speciesFor(sk);
+          var owned = ownedSeedVariantsOfSpecies(sk);
+          // Rarest owned seed color of this species, same idea as the
+          // journal's bookmark strip - a species you can plant six colors of
+          // shows its rarest one, not always the base color.
+          var repColor = owned.length ? parseVariant(owned[owned.length - 1]).color : s.base;
+          return { key: sk, iconHtml: speciesChip(s, repColor, 26), count: speciesSeedCount(sk), title: s.name };
+        });
+      } else {
+        var s2 = speciesFor(seedSpecies);
+        items = ownedSeedVariantsOfSpecies(seedSpecies).map(function (vk) {
+          var v = parseVariant(vk);
+          return { key: vk, iconHtml: speciesChip(s2, v.color, 26), count: state.seeds[vk] || 0, title: variantName(vk) };
+        });
+      }
+      container.innerHTML = items.map(function (it) {
+        return '<button class="tool-btn seed-petal" data-key="' + it.key + '" title="' + it.title +
+          '" onclick="onSeedPetalTap(\'' + it.key + '\')">' + it.iconHtml + seedCountBadgeHtml(it.count) + '</button>';
+      }).join('');
+      if (seedRailOpen) animateSeedFanOpen();
+    }
+
+    // ---- Open/close and selection ------------------------------------------
+    function openSeedFan(level, species) {
+      seedLevel = level;
+      seedSpecies = species;
+      seedRailOpen = true;
+      document.getElementById('seed-toggle').classList.add('seed-rail-open');
+      renderSeedPetals();
+    }
+    function closeSeedFan() {
+      var container = document.getElementById('seed-petals');
+      Array.prototype.slice.call(container.children).forEach(function (el) {
+        el.style.transform = ''; el.style.transitionDelay = '';
+      });
+      container.classList.remove('open');
+      seedRailOpen = false;
+      document.getElementById('seed-toggle').classList.remove('seed-rail-open');
+      clearSeedRailHover();
+    }
+    // A species petal drills into its colors without equipping or closing;
+    // a color petal equips and closes. Shared by both the tap-then-tap path
+    // (each petal's own onclick) and the hold-and-drag release path below.
+    function onSeedPetalTap(key) {
+      if (seedLevel === 'species') {
+        openSeedFan('color', key);
+        vibrate(10);
+      } else {
+        equipSeed(key);
+      }
+    }
+    function equipSeed(vk) {
+      closeSeedFan();
+      if (!(state.seeds[vk] > 0)) return; // stale tap - already spent since the fan opened
+      if (activeTool) setActiveTool(null); // a tool and a seed are mutually exclusive modes
+      closePlantPanel(); closeShop();
+      equippedSeed = vk;
+      seedLevel = 'species'; seedSpecies = null; // reset for next time the fan opens
+      renderSeedToggle();
+      updateHUD();
+      vibrate(10);
+    }
+    function unequipSeed() {
+      equippedSeed = null;
+      seedLevel = 'species'; seedSpecies = null;
+      renderSeedToggle();
+      updateHUD();
+    }
+    function onSeedPacketEquippedClick() {
+      if (equippedSeed) unequipSeed();
+    }
+    // Plants the equipped variant directly on an empty, in-range hex - no
+    // picker, since equipping the seed already was the confirm step. Stays
+    // equipped afterward (like a tool does) unless that was the last one.
+    function plantEquippedSeedAt(q, r) {
+      if (!(state.seeds[equippedSeed] > 0)) {
+        toast("You're out of that seed - open the Shop \u{1F338} to buy more");
+        unequipSeed();
+        return;
+      }
+      plantSeedAt(q, r, equippedSeed);
+      if (!(state.seeds[equippedSeed] > 0)) unequipSeed();
+      else renderSeedToggle();
+    }
+
+    // ---- Pointer plumbing (tap-open-then-tap, or hold-and-drag-to-select) --
+    var seedRailPointer = null;
+    var SEED_HOVER_PAD = 10;
+    function hitTestSeedPetal(x, y) {
+      var petals = document.getElementById('seed-petals').children;
+      for (var i = 0; i < petals.length; i++) {
+        var r = petals[i].getBoundingClientRect();
+        if (x >= r.left - SEED_HOVER_PAD && x <= r.right + SEED_HOVER_PAD &&
+            y >= r.top - SEED_HOVER_PAD && y <= r.bottom + SEED_HOVER_PAD) return petals[i].getAttribute('data-key');
+      }
+      return null;
+    }
+    function seedPetalEl(key) { return document.querySelector('#seed-petals [data-key="' + key + '"]'); }
+    function markSeedHoverOff(key) { var el = seedPetalEl(key); if (el) el.classList.remove('drag-hover'); }
+    function clearSeedRailHover() {
+      if (!seedRailPointer || !seedRailPointer.hoverKey) return;
+      markSeedHoverOff(seedRailPointer.hoverKey);
+      seedRailPointer.hoverKey = null;
+    }
+    function onSeedPointerDown(ev) {
+      if (equippedSeed || seedRailPointer) return;
+      if (!seedRailOpen && ownedSpeciesKeys().length === 0) {
+        toast("You're out of seeds - open the Shop \u{1F338} to buy more");
+        return;
+      }
+      ev.preventDefault();
+      seedRailPointer = { id: ev.pointerId, startedOpen: seedRailOpen, hoverKey: null };
+      if (!seedRailOpen) { openSeedFan('species', null); vibrate(10); }
+    }
+    function onSeedPointerMove(ev) {
+      if (!seedRailPointer || ev.pointerId !== seedRailPointer.id) return;
+      var hit = hitTestSeedPetal(ev.clientX, ev.clientY);
+      if (hit === seedRailPointer.hoverKey) return;
+      if (seedRailPointer.hoverKey) markSeedHoverOff(seedRailPointer.hoverKey);
+      seedRailPointer.hoverKey = hit;
+      if (hit) {
+        var el = seedPetalEl(hit);
+        if (el) el.classList.add('drag-hover');
+        vibrate(8);
+      }
+    }
+    function onSeedPointerUp(ev) {
+      if (!seedRailPointer || ev.pointerId !== seedRailPointer.id) return;
+      var sp = seedRailPointer;
+      seedRailPointer = null;
+      if (sp.hoverKey) {
+        markSeedHoverOff(sp.hoverKey);
+        onSeedPetalTap(sp.hoverKey);
+        return;
+      }
+      if (sp.startedOpen) closeSeedFan();
+    }
+    document.getElementById('seed-toggle').addEventListener('pointerdown', onSeedPointerDown);
+    window.addEventListener('pointermove', onSeedPointerMove);
+    window.addEventListener('pointerup', onSeedPointerUp);
+    window.addEventListener('pointercancel', onSeedPointerUp);
 
     // ---------------------------------------------------------------------
     //  GPS
@@ -3571,10 +3906,21 @@
     //  HUD / MENU / MODAL / TOAST
     // ---------------------------------------------------------------------
     function updateHUD() {
+      // The seed packet's own badge (and the equipped icon's, if any) needs
+      // to stay current after every state change, not just while its fan is
+      // open - updateHUD is already the one function called after every
+      // action that could touch state.seeds, so it's the natural hook
+      // rather than chasing every buySeed/extractHeld/plantSeedAt call site.
+      renderSeedToggle();
       // A tool in hand takes over the status line entirely: while you're in a
       // mode, what that mode does is the only thing worth saying.
       if (activeTool) {
         document.getElementById('hud-status-line').innerHTML = TOOL_HUD[activeTool];
+        return;
+      }
+      if (equippedSeed) {
+        document.getElementById('hud-status-line').innerHTML =
+          'Tap empty ground in range to plant a ' + variantName(equippedSeed) + ' \u{1F331}';
         return;
       }
       var keys = Object.keys(state.plants);
@@ -3638,6 +3984,16 @@
       // itself (and stops them from also planting/opening a panel).
       var rail = document.getElementById('tool-rail');
       if (railOpen && !rail.contains(e.target)) setRailOpen(false);
+      // composedPath(), not contains(e.target): tapping a species petal
+      // rebuilds #seed-petals' innerHTML (to the color set) from inside that
+      // same click's own bubble phase, which detaches the clicked node
+      // before this listener runs - contains() would then see a node that
+      // is no longer anywhere in the document and wrongly close the fan it
+      // just opened one level deeper. composedPath() is captured at
+      // dispatch time, before any handler had a chance to mutate the DOM.
+      var srail = document.getElementById('seed-rail');
+      var path = e.composedPath ? e.composedPath() : [e.target];
+      if (seedRailOpen && path.indexOf(srail) === -1) closeSeedFan();
     });
 
     function onRecenter() {

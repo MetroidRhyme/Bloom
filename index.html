@@ -215,12 +215,14 @@
 
        Presented as a toolbox at the top-left corner rather than a permanent
        stack of buttons: a single tap (or a press-and-hold-then-drag) flies
-       the three tools out to the right, down-right and below, and picking
-       one swaps the toolbox for that tool's own icon in place - so there is
-       exactly one button here at rest, and the fan only exists while you are
-       actively choosing. #tool-rail is a fixed-size anchor box; #tool-toggle
-       and the three .petal buttons are all absolutely positioned inside it
-       from the same top-left origin, so every "fly out" is just a transform.
+       the tools out across the top-left quarter circle (right, down-right,
+       below - a fourth, fertilizer, only once a bag is owned; see
+       .tool-btn.fert/syncFertTool), and picking one swaps the toolbox for
+       that tool's own icon in place - so there is exactly one button here
+       at rest, and the fan only exists while you are actively choosing.
+       #tool-rail is a fixed-size anchor box; #tool-toggle and the .petal
+       buttons are all absolutely positioned inside it from the same
+       top-left origin, so every "fly out" is just a transform.
 
        Anchored flush to the top-left corner, right under the top bar -
        and stacked ABOVE both the tutorial banner (950) and the plant panel
@@ -233,7 +235,7 @@
       width: 52px; height: 52px;
     }
     #tool-toggle { position: absolute; left: 0; top: 0; z-index: 2; }
-    /* Zero-size on purpose - it only exists to give the three petals a shared
+    /* Zero-size on purpose - it only exists to give the petals a shared
        transform origin; pointer-events stay off here and are switched on per
        petal only once flown out, so a closed fan can never eat a map tap. */
     #tool-petals { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
@@ -263,7 +265,9 @@
     .tool-btn.water.active { color: var(--blue); background: rgba(74,163,255,0.15); }
     .tool-btn.shear.active { color: var(--green-dark); background: rgba(76,175,109,0.17); }
     .tool-btn.sell.active { color: #a06a00; background: rgba(240,169,58,0.2); }
+    .tool-btn.fert.active { color: #6b4423; background: rgba(201,165,101,0.35); }
     .tool-sell-glyph { font-weight: 900; line-height: 1; }
+    .tool-fert-glyph { line-height: 1; }
     /* The equip/unequip swap gets a small spring pop so the icon change reads
        as a physical action rather than a jump-cut. Triggered by JS re-adding
        this class on every activeTool change. */
@@ -274,18 +278,30 @@
     }
     .tool-btn.equip-pop { animation: tool-equip-pop 0.32s cubic-bezier(.34,1.56,.64,1); }
 
-    /* The three tools themselves. Closed = collapsed onto the toolbox origin,
-       shrunk, faded and untappable. Each one flies out to its own spot -
-       right, down-right, below - on an overshoot easing with a slight
-       counter-rotation, staggered so they cascade out rather than jumping
-       together; closing reverses the stagger so the last one out is the
-       first one home. */
+    /* The tools themselves. Closed = collapsed onto the toolbox origin,
+       shrunk, faded and untappable. Each one flies out to its own spot on an
+       overshoot easing with a slight counter-rotation, staggered so they
+       cascade out rather than jumping together; closing reverses the
+       stagger so the last one out is the first one home.
+
+       Fertilizer is a fourth petal, but only ever shown once a bag is
+       actually owned (see .tool-btn.fert below and syncFertTool) - so there
+       are two layouts here: the original three spots (right, down-right,
+       below, unchanged) for the common case, and a wider evenly-spaced
+       quarter-circle (#tool-petals.has-fert) for the four-tool case, rather
+       than always reserving a fourth spot nobody without fertilizer would
+       ever see filled. */
     .tool-btn.petal {
       position: absolute; left: 0; top: 0;
       transform: translate(0, 0) scale(0.3) rotate(-32deg);
       opacity: 0; pointer-events: none;
       transition: transform 0.38s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
     }
+    /* Never a tap target and never occupies a spot in the 3-tool layout -
+       only #tool-petals.has-fert (state.fertilizer > 0) makes it visible. */
+    .tool-btn.fert { display: none; }
+    #tool-petals.has-fert .tool-btn.fert { display: flex; }
+
     .tool-btn.petal.water { transition-delay: 0.10s, 0.10s; }
     .tool-btn.petal.shear { transition-delay: 0.05s, 0.05s; }
     .tool-btn.petal.sell  { transition-delay: 0s, 0s; }
@@ -300,6 +316,34 @@
     #tool-petals.open .tool-btn.water.drag-hover { transform: translate(76px, 0) scale(1.22) rotate(0deg); }
     #tool-petals.open .tool-btn.shear.drag-hover { transform: translate(54px, 54px) scale(1.22) rotate(0deg); }
     #tool-petals.open .tool-btn.sell.drag-hover  { transform: translate(0, 76px) scale(1.22) rotate(0deg); }
+
+    /* Four-tool layout: same 76px radius, now spread evenly across the
+       quarter circle (0/30/60/90deg) instead of 0/45/90, so the new fourth
+       spot (fert, at 90deg/straight down) doesn't just bolt on past the old
+       "sell" spot - closing order is reversed and re-staggered the same way
+       the three-tool layout is (last opened, first home). Higher specificity
+       than the plain .open rules above (two classes vs one), so this wins
+       whenever has-fert is set. */
+    #tool-petals.has-fert .tool-btn.water { transition-delay: 0.18s, 0.18s; }
+    #tool-petals.has-fert .tool-btn.shear { transition-delay: 0.12s, 0.12s; }
+    #tool-petals.has-fert .tool-btn.sell  { transition-delay: 0.06s, 0.06s; }
+    #tool-petals.has-fert .tool-btn.fert  { transition-delay: 0s, 0s; }
+    #tool-petals.open.has-fert .tool-btn.water {
+      transform: translate(76px, 0) scale(1) rotate(0deg); transition-delay: 0s, 0s;
+    }
+    #tool-petals.open.has-fert .tool-btn.shear {
+      transform: translate(65.8px, 38px) scale(1) rotate(0deg); transition-delay: 0.06s, 0.06s;
+    }
+    #tool-petals.open.has-fert .tool-btn.sell {
+      transform: translate(38px, 65.8px) scale(1) rotate(0deg); transition-delay: 0.12s, 0.12s;
+    }
+    #tool-petals.open.has-fert .tool-btn.fert {
+      transform: translate(0, 76px) scale(1) rotate(0deg); transition-delay: 0.18s, 0.18s;
+    }
+    #tool-petals.open.has-fert .tool-btn.water.drag-hover { transform: translate(76px, 0) scale(1.22) rotate(0deg); }
+    #tool-petals.open.has-fert .tool-btn.shear.drag-hover { transform: translate(65.8px, 38px) scale(1.22) rotate(0deg); }
+    #tool-petals.open.has-fert .tool-btn.sell.drag-hover  { transform: translate(38px, 65.8px) scale(1.22) rotate(0deg); }
+    #tool-petals.open.has-fert .tool-btn.fert.drag-hover  { transform: translate(0, 76px) scale(1.22) rotate(0deg); }
 
     /* First run only - the tutorial points at whichever tool it is asking
        for, on the toolbox itself while it is stowed and on the real petal
@@ -977,7 +1021,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.32.1</span>
+      <span id="game-version">v1.33.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1009,6 +1053,9 @@
       <button id="tool-water" class="tool-btn petal water" onclick="selectTool('water')" title="Watering can"></button>
       <button id="tool-shear" class="tool-btn petal shear" onclick="selectTool('shear')" title="Shears - collect"></button>
       <button id="tool-sell" class="tool-btn petal sell" onclick="selectTool('sell')" title="Sell"></button>
+      <!-- Only shown once you own a bag - see .tool-btn.fert/#tool-petals.has-fert
+           and syncFertTool(). -->
+      <button id="tool-fert" class="tool-btn petal fert" onclick="selectTool('fert')" title="Fertilizer - cross with a neighbour"></button>
     </div>
   </div>
 
@@ -2800,18 +2847,24 @@
     // ---------------------------------------------------------------------
     //  TOOLS
     //  Three tools live behind a toolbox icon at the top-left: the watering
-    //  can, the shears (collect into your journal) and $ (sell). Equipping
-    //  one is a MODE - you tap every flower you want it applied to and then
+    //  can, the shears (collect into your journal) and $ (sell). A fourth,
+    //  fertilizer, joins them once a bag is actually owned (see .tool-btn.fert
+    //  and syncFertTool below) - press-and-hold a flourishing flower with it
+    //  out and it crosses with a random ready neighbour, the same worker
+    //  (doBreed) the plant panel's "Cross with a neighbour" button already
+    //  uses, just without picking which neighbour first. Equipping any tool
+    //  is a MODE - you tap every flower you want it applied to and then
     //  unequip it to put it away - which is what turns watering a whole bed
     //  into a row of taps rather than open-panel/tap-Water/close per flower.
     //
     //  Watering is a plain tap, because it is the routine action and it can't
-    //  cost you anything. Collecting and selling take a one-second press and
-    //  hold with a filling ring, because both take the flower off the map for
-    //  good and there is no undo.
+    //  cost you anything. Collecting, selling and fertilizing take a
+    //  one-second press and hold with a filling ring, because all three take
+    //  something off the board for good (a flower, or a fertilizer bag plus
+    //  both parents' next 12h) and there is no undo.
     //
     //  Picking a tool up is itself a two-stage gesture (see the RAIL section
-    //  below): tap the toolbox to fan the three tools out and tap the one you
+    //  below): tap the toolbox to fan the tools out and tap the one you
     //  want, or press-and-hold the toolbox and drag straight to it. Whichever
     //  one gets equipped replaces the toolbox icon in place; tapping it again
     //  unequips and the toolbox comes back.
@@ -2820,11 +2873,12 @@
     var HOLD_MOVE_PX = 14;   // finger travel that turns a hold back into a pan
     var WATER_ANIM_MS = 1150; // matches the can-pour keyframes; growth lands after
 
-    var TOOL_NAMES = { water: 'watering can', shear: 'shears', sell: '$' };
+    var TOOL_NAMES = { water: 'watering can', shear: 'shears', sell: '$', fert: 'fertilizer' };
     var TOOL_HUD = {
       water: '\u{1F4A7} Watering can out &bull; tap each flower to water it',
       shear: 'Shears out &bull; press and hold a flower to collect it',
-      sell: 'Selling &bull; press and hold a flower to sell it'
+      sell: 'Selling &bull; press and hold a flower to sell it',
+      fert: '\u{1F33E} Fertilizer out &bull; press and hold a flourishing flower to cross it with a neighbour'
     };
 
     // Tool artwork is drawn, not emoji, for the same reason the flowers are:
@@ -2847,6 +2901,11 @@
     function toolIconHtml(tool, px) {
       if (tool === 'water') return canIconSVG(px);
       if (tool === 'shear') return shearIconSVG(px);
+      // Same sheaf-of-rice glyph the shop's fertilizer sack already uses
+      // (see .stand-fert-icon) - reused rather than hand-drawing a second
+      // stroke-only icon for the same concept.
+      if (tool === 'fert') return '<span class="tool-fert-glyph" style="font-size:' +
+        Math.round(px * 1.05) + 'px">\u{1F33E}</span>';
       return '<span class="tool-sell-glyph" style="font-size:' + Math.round(px * 1.05) + 'px">$</span>';
     }
     // The toolbox itself: a handle, a lid seam and a latch, drawn stroke-only
@@ -2862,7 +2921,7 @@
     }
 
     var activeTool = null;
-    var TOOL_KEYS = ['water', 'shear', 'sell'];
+    var TOOL_KEYS = ['water', 'shear', 'sell', 'fert'];
 
     function initToolRail() {
       TOOL_KEYS.forEach(function (t) {
@@ -2874,6 +2933,16 @@
       window.addEventListener('pointermove', onToolboxPointerMove);
       window.addEventListener('pointerup', onToolboxPointerUp);
       window.addEventListener('pointercancel', onToolboxPointerUp);
+      syncFertTool();
+    }
+    // The fourth petal only shows up once there's actually a bag to spend -
+    // an always-visible slot nobody without fertilizer could ever use would
+    // just be dead weight the other three don't carry. Called at boot and
+    // wherever state.fertilizer actually changes (buyFertilizer, doBreed),
+    // rather than folded into updateHUD, which runs far more often than
+    // fertilizer count does.
+    function syncFertTool() {
+      document.getElementById('tool-petals').classList.toggle('has-fert', state.fertilizer > 0);
     }
     // Uses classList.toggle rather than overwriting className wholesale, so a
     // pending tutorial .hint on the toggle button survives an equip/unequip.
@@ -2991,7 +3060,13 @@
     function hitTestPetal(x, y) {
       for (var i = 0; i < TOOL_KEYS.length; i++) {
         var t = TOOL_KEYS[i];
-        var r = document.getElementById('tool-' + t).getBoundingClientRect();
+        var el = document.getElementById('tool-' + t);
+        // A hidden petal (fert with no fertilizer - see .tool-btn.fert)
+        // collapses to a degenerate 0,0,0,0 rect at the viewport origin, not
+        // to nothing - skip it explicitly rather than let a drag near the
+        // literal top-left corner of the screen phantom-hit it.
+        if (el.offsetParent === null) continue;
+        var r = el.getBoundingClientRect();
         if (x >= r.left - RAIL_HOVER_PAD && x <= r.right + RAIL_HOVER_PAD &&
             y >= r.top - RAIL_HOVER_PAD && y <= r.bottom + RAIL_HOVER_PAD) return t;
       }
@@ -3170,6 +3245,17 @@
           ? 'Fully grown - the shears or $ take it from here'
           : 'Not thirsty yet - ready to grow in ' + formatDuration(d.readyIn);
       }
+      if (tool === 'fert') {
+        if (target.kind === 'wild') return 'Wild flowers can\'t be crossed - only your own';
+        if (state.fertilizer <= 0) return "You're out of fertilizer - buy some from the Shop \u{1F338}";
+        var pd = recomputePlant(o, Date.now());
+        if (pd.stage < MAX_STAGE) return 'Not flourishing yet - it needs to fully grow first';
+        if (Date.now() < (o.breedReadyAt || 0)) {
+          return 'Still resting from its last cross - ready in ' + formatDuration(breedWaitMs(o));
+        }
+        if (!breedPartnersFor(target.key).length) return 'No flourishing neighbour ready to cross with';
+        return null;
+      }
       // Shears and $ both need something worth taking. Wild flowers always are.
       if (target.kind === 'wild') return null;
       if (recomputePlant(o, Date.now()).stage < 2) return 'Not in bloom yet - it needs more water first';
@@ -3177,6 +3263,20 @@
     }
 
     function applyToolAction(tool, target) {
+      if (tool === 'fert') {
+        // toolBlockedReason already guarantees at least one ready neighbour
+        // by this point (checked before the hold even starts, and again
+        // here can't have changed mid-hold in a single-player game) - a
+        // random pick among them, instead of the plant panel's "which one"
+        // picker (openBreedPicker), is the whole point of the tool: one
+        // press-and-hold to cross, no extra decision first. doBreed does
+        // its own full re-validation and is the same worker the panel's
+        // "Cross with a neighbour" button already uses.
+        var partners = breedPartnersFor(target.key);
+        var partnerKey = partners[Math.floor(Math.random() * partners.length)];
+        doBreed(target.key, partnerKey);
+        return;
+      }
       var sell = tool === 'sell';
       if (target.kind === 'wild') pickWild(target.key, sell);
       else onHarvestClick(target.key, sell);  // via onHarvestClick so the tutorial still sees it
@@ -3313,6 +3413,13 @@
     }
 
     // ---- Rendering -----------------------------------------------------
+    // Pure DOM sync, safe to call as often as needed - updateHUD() calls
+    // this unconditionally on every state change AND on the 60s tick (see
+    // tickPlants), so nothing in here may have a visible side effect beyond
+    // reflecting current state. The spring-pop animation used to live here
+    // and replayed on every one of those calls forever, even with nothing
+    // equipped and nothing changing - see popSeedToggle() below, which is
+    // what the actual equip/unequip transitions call instead.
     function renderSeedToggle() {
       var toggle = document.getElementById('seed-toggle');
       toggle.classList.toggle('seed-packet', !equippedSeed);
@@ -3331,6 +3438,13 @@
       toggle.innerHTML = (equippedSeed ? variantChip(equippedSeed, 26) : seedPacketIconSVG(24)) +
         seedCountBadgeHtml(equippedSeed ? (state.seeds[equippedSeed] || 0) : totalSeedCount());
       toggle.title = equippedSeed ? ('Put away the ' + variantName(equippedSeed) + ' seed') : 'Seeds';
+    }
+    // Small spring pop so an equip/unequip genuinely reads as a physical
+    // action - called only by equipSeed()/unequipSeed() themselves, the two
+    // places `equippedSeed` actually changes, never by the constant DOM-sync
+    // above.
+    function popSeedToggle() {
+      var toggle = document.getElementById('seed-toggle');
       toggle.classList.remove('equip-pop');
       void toggle.offsetWidth;
       toggle.classList.add('equip-pop');
@@ -3441,6 +3555,7 @@
       seedLevel = 'species'; seedSpecies = null; // reset for next time the fan opens
       setSeedHint(false); // the tutorial's pouch pointer, if any - the player just found it
       renderSeedToggle();
+      popSeedToggle();
       updateHUD();
       vibrate(10);
     }
@@ -3448,6 +3563,7 @@
       equippedSeed = null;
       seedLevel = 'species'; seedSpecies = null;
       renderSeedToggle();
+      popSeedToggle();
       updateHUD();
     }
     function onSeedPacketEquippedClick() {
@@ -4007,6 +4123,7 @@
       saveState();
       renderPlants();
       updateHUD();
+      syncFertTool(); // fertilizer just dropped by one - the toolbox petal may need to disappear
       closePlantPanel();
       toast('\u{1F331} A seedling came up between them! Water it to see what it is.');
       vibrate(30);
@@ -4242,9 +4359,10 @@
         'couple hexes of you to plant it. A bare tap with nothing equipped won\'t plant anything on its ' +
         'own - it just points you back at the pouch.</p>' +
         '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
-        '(sell) fly out; tap the one you want, or hold the toolbox down and drag straight to it and let ' +
-        'go. It replaces the toolbox while equipped - tap it again to put it away. Use it on as many ' +
-        'flowers as you like first. Tapping a flower with no tool in hand just opens its details.</p>' +
+        '(sell) fly out - fertilizer joins them once you own a bag. Tap the one you want, or hold the ' +
+        'toolbox down and drag straight to it and let go. It replaces the toolbox while equipped - tap it ' +
+        'again to put it away. Use it on as many flowers as you like first. Tapping a flower with no tool ' +
+        'in hand just opens its details.</p>' +
         '<p><b>Water</b> - pick up the watering can and tap each flower you want watered. You have to be ' +
         'within a couple hexes of it.</p>' +
         '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +
@@ -4262,9 +4380,11 @@
         '<p><b>Signature colors</b> - past all of those, each species has <b>two colors of its own</b> ' +
         'that no other flower can wear. They shimmer and glow, and the only way to reach one is to ' +
         'cross two flowers <b>of the same species</b> deep in the Gold line.</p>' +
-        '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on hexes next to each other, buy a ' +
-        'bag of fertilizer, and tap <b>Cross with a neighbour</b>. A seedling comes up in the gap between ' +
-        'them, and its color stays a mystery until you water it into bloom. Crossing two of the four ' +
+        '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on hexes next to each other and buy ' +
+        'a bag of fertilizer. Press and hold either one with the fertilizer tool to cross it with a random ' +
+        'ready neighbour, or open its details and tap <b>Cross with a neighbour</b> to pick which one ' +
+        'yourself. A seedling comes up in the gap between them, and its color stays a mystery until you ' +
+        'water it into bloom. Crossing two of the four ' +
         'standards always gives the same result - six pairs, six new colors - and those in turn cross ' +
         'into the rarer ones. Both parents rest for ' + formatDuration(BREED_COOLDOWN_MS) +
         ' afterwards, and they stay right where they are. Your Crossing Notes in the menu remember every ' +
@@ -4973,6 +5093,7 @@
       saveState();
       renderShopRows();
       updateCurrencyPill();
+      syncFertTool(); // first bag ever bought - the toolbox petal can show up now
       toast('Bought a bag of fertilizer \u{1F331}');
       vibrate(15);
     }

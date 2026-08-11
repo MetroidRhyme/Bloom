@@ -27,7 +27,9 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); }
     button { font-family: inherit; }
 
-    #map { position: fixed; inset: 0; background: var(--bg); }
+    /* -webkit-touch-callout so a one-second press-and-hold on a flower is a
+       tool confirmation rather than an iOS long-press menu. */
+    #map { position: fixed; inset: 0; background: var(--bg); -webkit-touch-callout: none; }
     .leaflet-container { background: var(--bg); }
 
     /* ================= TOP BAR ================= */
@@ -159,12 +161,15 @@
     .status-good { color: var(--green-dark); }
     .status-wilt { color: var(--blue); }
 
-    #plant-action-btn {
-      display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
-      font-size: 15px; font-weight: 800; letter-spacing: 0.3px; cursor: pointer;
-      background: linear-gradient(90deg, var(--blue), #7ec8ff); color: #fff; box-shadow: var(--shadow-sm);
+    /* The panel does not act on a flower any more - the tool rail does - so
+       this line names whichever tool applies right now instead of offering a
+       button that would duplicate it. */
+    #panel-hint {
+      font-size: 12.5px; color: var(--text-dim); text-align: center;
+      line-height: 1.6; margin-bottom: 12px;
     }
-    #plant-action-btn:disabled { background: #d8d4c8; color: #948e80; box-shadow: none; cursor: default; }
+    .hint-tool { color: var(--text); font-weight: 800; white-space: nowrap; }
+    .hint-icon { display: inline-block; vertical-align: -3px; margin-right: 3px; line-height: 0; }
 
     /* Hidden by default - renderBreedButton shows it only when this plant is
        flourishing and has a flourishing neighbour, so it never advertises a
@@ -192,15 +197,92 @@
     }
     .breed-plus { font-size: 20px; font-weight: 800; color: var(--text-dim); flex-shrink: 0; }
 
-    /* Hidden by default - renderPlantPanel shows this only once a plant has
-       reached single-bloom or flourishing stage and the player is in range. */
-    #harvest-row { display: none; gap: 10px; margin-top: 10px; }
-    .harvest-btn {
-      flex: 1; padding: 13px; border-radius: 14px; font-size: 14px; font-weight: 800;
-      cursor: pointer; box-shadow: var(--shadow-sm);
+    /* ================= TOOL RAIL ================= */
+    /* A tool is a mode, not a one-shot: tap to pick it up, tap every flower
+       you want it applied to, tap it again to put it away. That is what makes
+       watering a whole bed a row of taps instead of a panel round-trip per
+       flower. Left edge - the right side already belongs to the recenter
+       button, and the top and bottom to the two HUDs.
+
+       Anchored below the top bar rather than vertically centred, and stacked
+       ABOVE the plant panel (1100): the panel's hints name these tools, so on
+       a short phone they have to stay tappable even when the sheet is up.
+       Picking one up closes the sheet anyway. */
+    #tool-rail {
+      position: fixed; left: 12px; top: calc(var(--hud-top-h) + 90px); z-index: 1150;
+      display: flex; flex-direction: column; gap: 10px;
     }
-    .keep-btn { background: #fff; color: var(--green-dark); border: 2px solid var(--green); }
-    .sell-btn { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; border: none; }
+    .tool-btn {
+      width: 52px; height: 52px; border-radius: 50%; padding: 0;
+      border: 2px solid var(--panel-border); background: var(--panel-bg);
+      box-shadow: var(--shadow); cursor: pointer; color: var(--text-dim);
+      display: flex; align-items: center; justify-content: center;
+      transition: transform 0.12s ease;
+    }
+    .tool-btn:active { transform: scale(0.92); }
+    /* Each tool keeps its own accent when held, so a glance at the rail says
+       which mode you are in without reading the HUD line. */
+    .tool-btn.active { border-color: currentColor; }
+    .tool-btn.water.active { color: var(--blue); background: rgba(74,163,255,0.15); }
+    .tool-btn.shear.active { color: var(--green-dark); background: rgba(76,175,109,0.17); }
+    .tool-btn.sell.active { color: #a06a00; background: rgba(240,169,58,0.2); }
+    .tool-sell-glyph { font-weight: 900; line-height: 1; }
+    /* First run only - the tutorial points at whichever tool it is asking for. */
+    @keyframes tool-hint {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(240,169,58,0.6), var(--shadow); }
+      50% { box-shadow: 0 0 0 9px rgba(240,169,58,0), var(--shadow); }
+    }
+    .tool-btn.hint { border-color: var(--amber); color: #a06a00; animation: tool-hint 1.6s ease-out infinite; }
+
+    /* ================= MAP EFFECTS LAYER ================= */
+    /* The hold-to-confirm ring and the watering can are drawn in screen space
+       over the map rather than as Leaflet markers: they are transient, they
+       must never become tap targets, and a divIcon would be rebuilt out from
+       under them by the next renderPlants(). Positions are refreshed on map
+       move so they stay glued to their flower. */
+    #fx-layer { position: fixed; inset: 0; z-index: 940; pointer-events: none; overflow: hidden; }
+    .fx-item { position: absolute; width: 0; height: 0; }
+
+    /* Press-and-hold confirmation. The arc sweeps from empty to a full green
+       ring over HOLD_MS with the tool's own icon in the middle, so collecting
+       and selling - the two irreversible taps in the game - can't happen by
+       brushing the screen. Driven from JS per frame rather than a CSS
+       animation, because it has to be cancellable mid-sweep. */
+    /* Real size rather than the 0x0 box the other effects use, because the
+       icon inside is centred with inset:0 - it needs a box to be centred in.
+       The negative margins are what sit that box over the flower. */
+    .fx-item.hold-ring { width: 56px; height: 56px; margin-left: -28px; margin-top: -28px; }
+    .hold-ring svg { display: block; }
+    .hold-ring-icon {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--green-dark);
+    }
+
+    /* The can drifts in above the flower, tips towards its spout, rains for a
+       beat, then rights itself and leaves - the plant grows only once it is
+       gone, so the animation reads as the cause of the growth rather than
+       decoration alongside it. */
+    .water-fx { color: var(--blue); }
+    .water-can { position: absolute; left: 6px; bottom: 24px; transform-origin: 78% 72%; }
+    .water-can.pour { animation: can-pour 1150ms ease-in-out forwards; }
+    @keyframes can-pour {
+      0%   { opacity: 0; transform: translate(7px, -14px) rotate(6deg); }
+      16%  { opacity: 1; transform: translate(0, 0) rotate(6deg); }
+      30%  { opacity: 1; transform: translate(0, 0) rotate(-44deg); }
+      70%  { opacity: 1; transform: translate(0, 0) rotate(-44deg); }
+      86%  { opacity: 1; transform: translate(0, 0) rotate(4deg); }
+      100% { opacity: 0; transform: translate(5px, -13px) rotate(4deg); }
+    }
+    .water-drop {
+      position: absolute; width: 5px; height: 7px; background: var(--blue); opacity: 0;
+      border-radius: 50% 50% 55% 55% / 62% 62% 40% 40%;
+      animation: drop-fall 480ms ease-in forwards;
+    }
+    @keyframes drop-fall {
+      0% { opacity: 0; transform: translateY(0) scale(0.6); }
+      22% { opacity: 0.95; }
+      100% { opacity: 0; transform: translateY(30px) scale(1); }
+    }
 
     /* ================= SHOP PANEL ================= */
     /* Full-screen takeover rather than a bottom sheet - stepping up to the
@@ -696,7 +778,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.26.2</span>
+      <span id="game-version">v1.27.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -716,6 +798,16 @@
 
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
 
+  <!-- Icons are filled in by initToolRail() so the same artwork can be reused
+       by the hold ring, the panel hints and the watering animation. -->
+  <div id="tool-rail">
+    <button id="tool-water" class="tool-btn water" onclick="toggleTool('water')" title="Watering can"></button>
+    <button id="tool-shear" class="tool-btn shear" onclick="toggleTool('shear')" title="Shears - collect"></button>
+    <button id="tool-sell" class="tool-btn sell" onclick="toggleTool('sell')" title="Sell"></button>
+  </div>
+
+  <div id="fx-layer"></div>
+
   <div id="tutorial-banner">
     <div id="tutorial-text">&nbsp;</div>
     <span id="tutorial-skip-link" onclick="skipTutorial()">Skip tutorial</span>
@@ -734,12 +826,8 @@
     <div id="growth-bar-track" class="growth-bar-track"><div id="growth-bar-fill" style="width:0%"></div></div>
     <div id="growth-bar-label">&nbsp;</div>
     <div id="plant-status-line">&nbsp;</div>
-    <button id="plant-action-btn">Water</button>
+    <div id="panel-hint">&nbsp;</div>
     <button id="breed-btn">Cross with a neighbour</button>
-    <div id="harvest-row">
-      <button id="keep-btn" class="harvest-btn keep-btn">Keep &#x1F33C;</button>
-      <button id="sell-btn" class="harvest-btn sell-btn">Sell</button>
-    </div>
   </div>
 
   <div id="shop-panel">
@@ -2351,7 +2439,11 @@
     // Empty ground within range plants immediately; an occupied hex opens its
     // panel (from any distance - browsing your garden from afar is fine,
     // only *acting* on a plant requires being physically close).
+    // With a tool in hand every map tap belongs to the tool instead - see the
+    // TOOLS section below, which drives itself off pointer events so it can
+    // tell a tap from a press-and-hold.
     map.on('click', function (e) {
+      if (activeTool) return;
       var h = latLngToHex(e.latlng.lat, e.latlng.lng);
       var key = hexKey(h.q, h.r);
       if (state.plants[key]) { openPlantPanel(key); return; }
@@ -2364,6 +2456,310 @@
       }
       attemptPlant(h.q, h.r);
     });
+
+    // ---------------------------------------------------------------------
+    //  TOOLS
+    //  Three tools live on the rail down the left edge: the watering can, the
+    //  shears (collect into your journal) and $ (sell). Picking one up is a
+    //  MODE - you tap every flower you want it applied to and then tap the
+    //  tool again to put it away - which is what turns watering a whole bed
+    //  into a row of taps rather than open-panel/tap-Water/close per flower.
+    //
+    //  Watering is a plain tap, because it is the routine action and it can't
+    //  cost you anything. Collecting and selling take a one-second press and
+    //  hold with a filling ring, because both take the flower off the map for
+    //  good and there is no undo.
+    // ---------------------------------------------------------------------
+    var HOLD_MS = 1000;      // press-and-hold to confirm a collect or a sale
+    var HOLD_MOVE_PX = 14;   // finger travel that turns a hold back into a pan
+    var WATER_ANIM_MS = 1150; // matches the can-pour keyframes; growth lands after
+
+    var TOOL_NAMES = { water: 'watering can', shear: 'shears', sell: '$' };
+    var TOOL_HUD = {
+      water: '\u{1F4A7} Watering can out &bull; tap each flower to water it',
+      shear: 'Shears out &bull; press and hold a flower to collect it',
+      sell: 'Selling &bull; press and hold a flower to sell it'
+    };
+
+    // Tool artwork is drawn, not emoji, for the same reason the flowers are:
+    // a glyph from a font we don't control can't be recolored to match the
+    // tool's state, and looks different on every device.
+    function canIconSVG(px) {
+      return '<svg viewBox="0 0 32 28" width="' + px + '" height="' + Math.round(px * 28 / 32) + '">' +
+        '<path d="M13 8 a5 4.5 0 0 1 9 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>' +
+        '<path d="M12 11 L3 6 L1 11 L3 13 L12 16 Z" fill="currentColor"/>' +
+        '<path d="M11 9 h16 v9 a5 5 0 0 1 -5 5 h-6 a5 5 0 0 1 -5 -5 z" fill="currentColor"/>' +
+        '</svg>';
+    }
+    function shearIconSVG(px) {
+      return '<svg viewBox="0 0 32 32" width="' + px + '" height="' + px + '" fill="none" ' +
+        'stroke="currentColor" stroke-width="2.6" stroke-linecap="round">' +
+        '<circle cx="8" cy="25" r="4"/><circle cx="24" cy="25" r="4"/>' +
+        '<path d="M10.7 21.6 L25 4"/><path d="M21.3 21.6 L7 4"/>' +
+        '</svg>';
+    }
+    function toolIconHtml(tool, px) {
+      if (tool === 'water') return canIconSVG(px);
+      if (tool === 'shear') return shearIconSVG(px);
+      return '<span class="tool-sell-glyph" style="font-size:' + Math.round(px * 1.05) + 'px">$</span>';
+    }
+
+    var activeTool = null;
+    var TOOL_KEYS = ['water', 'shear', 'sell'];
+
+    function initToolRail() {
+      TOOL_KEYS.forEach(function (t) {
+        document.getElementById('tool-' + t).innerHTML = toolIconHtml(t, t === 'water' ? 27 : 24);
+      });
+    }
+    function renderToolRail() {
+      TOOL_KEYS.forEach(function (t) {
+        document.getElementById('tool-' + t).classList.toggle('active', activeTool === t);
+      });
+    }
+
+    // The rail floats above the plant sheet on purpose - that sheet's hints
+    // name these tools, so they have to stay tappable underneath it - but it
+    // must never float above a full-screen panel: three tool buttons stuck on
+    // top of the scrapbook or the market stand read as a rendering bug, and
+    // there is nothing to tend in any of them. One check called wherever a
+    // full-screen panel opens or closes, rather than a display toggle
+    // duplicated across six functions.
+    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'notes-panel'];
+    function syncToolRail() {
+      var covered = FULLSCREEN_PANELS.some(function (id) {
+        return document.getElementById(id).classList.contains('open');
+      });
+      document.getElementById('tool-rail').style.display = covered ? 'none' : '';
+    }
+    // The tutorial's pointer at whichever tool it is asking for next; cleared
+    // the moment any tool is picked up. A tool already in hand is never
+    // pointed at - the player has plainly found it.
+    function setToolHint(tool) {
+      if (tool && tool === activeTool) tool = null;
+      TOOL_KEYS.forEach(function (t) {
+        document.getElementById('tool-' + t).classList.toggle('hint', tool === t);
+      });
+    }
+
+    function toggleTool(tool) { setActiveTool(activeTool === tool ? null : tool); }
+    function setActiveTool(tool) {
+      cancelHold();
+      activeTool = tool;
+      if (tool) {
+        setToolHint(null);
+        closePlantPanel();  // both are ways of acting on a flower; only one at a time
+        closeShop();
+        vibrate(10);
+      }
+      renderToolRail();
+      updateHUD();
+    }
+
+    // ---- Screen-space effects over the map -------------------------------
+    // Kept out of Leaflet entirely: these are transient, must never be tap
+    // targets, and a divIcon would be thrown away by the next renderPlants().
+    var fxItems = [];
+    function positionFx(item) {
+      var pt = map.latLngToContainerPoint([item.lat, item.lng]);
+      item.el.style.left = pt.x + 'px';
+      item.el.style.top = pt.y + 'px';
+    }
+    function addFx(html, lat, lng, cls, ms) {
+      var el = document.createElement('div');
+      el.className = 'fx-item ' + (cls || '');
+      el.innerHTML = html;
+      document.getElementById('fx-layer').appendChild(el);
+      var item = { el: el, lat: lat, lng: lng };
+      fxItems.push(item);
+      positionFx(item);
+      if (ms) setTimeout(function () { removeFx(item); }, ms);
+      return item;
+    }
+    function removeFx(item) {
+      var i = fxItems.indexOf(item);
+      if (i >= 0) fxItems.splice(i, 1);
+      if (item.el.parentNode) item.el.parentNode.removeChild(item.el);
+    }
+    map.on('move zoom', function () { fxItems.forEach(positionFx); });
+
+    // ---- Watering animation ----------------------------------------------
+    // waterPlant() is deliberately called at the END, so the flower grows once
+    // the can has poured and left rather than the instant you tap. Guarded per
+    // hex so a second tap during the pour can't water the same plant twice.
+    var wateringKeys = {};
+    function waterWithCan(key) {
+      var p = state.plants[key];
+      if (!p || wateringKeys[key]) return;
+      // Reduced motion collapses every animation to 0.01ms, so the can would
+      // never be seen - waiting out its duration would just be dead time.
+      if (reduceMotion) { waterPlant(key); return; }
+
+      wateringKeys[key] = true;
+      var drops = '';
+      for (var i = 0; i < 5; i++) {
+        drops += '<div class="water-drop" style="left:' + (i * 4 - 1) + 'px;bottom:17px;' +
+          'animation-delay:' + (350 + i * 85) + 'ms"></div>';
+      }
+      addFx('<div class="water-can pour">' + canIconSVG(30) + '</div>' + drops,
+        p.lat, p.lng, 'water-fx', WATER_ANIM_MS + 140);
+      setTimeout(function () {
+        delete wateringKeys[key];
+        if (state.plants[key]) waterPlant(key);
+      }, WATER_ANIM_MS);
+    }
+
+    // ---- Press-and-hold confirmation --------------------------------------
+    var RING_R = 22;
+    var RING_C = 2 * Math.PI * RING_R;
+    function holdRingHtml(tool) {
+      return '<svg width="56" height="56" viewBox="0 0 56 56">' +
+        '<circle cx="28" cy="28" r="' + RING_R + '" fill="rgba(255,255,255,0.94)" ' +
+        'stroke="rgba(60,40,20,0.14)" stroke-width="5"/>' +
+        '<circle class="hold-arc" cx="28" cy="28" r="' + RING_R + '" fill="none" stroke="#bfe6cd" ' +
+        'stroke-width="5" stroke-linecap="round" transform="rotate(-90 28 28)" ' +
+        'stroke-dasharray="' + RING_C.toFixed(1) + '" stroke-dashoffset="' + RING_C.toFixed(1) + '"/>' +
+        '</svg><div class="hold-ring-icon">' + toolIconHtml(tool, 22) + '</div>';
+    }
+
+    var hold = null;
+    function startHold(tool, target) {
+      cancelHold();
+      var o = target.obj;
+      var item = addFx(holdRingHtml(tool), o.lat, o.lng, 'hold-ring', 0);
+      hold = {
+        tool: tool, target: target, item: item, raf: null,
+        arc: item.el.querySelector('.hold-arc'), start: performance.now()
+      };
+      vibrate(8);
+      stepHold();
+    }
+    function stepHold() {
+      if (!hold) return;
+      var t = Math.min(1, (performance.now() - hold.start) / HOLD_MS);
+      hold.arc.setAttribute('stroke-dashoffset', (RING_C * (1 - t)).toFixed(1));
+      hold.arc.setAttribute('stroke', mixHex('#bfe6cd', '#4caf6d', t));
+      if (t >= 1) { completeHold(); return; }
+      hold.raf = requestAnimationFrame(stepHold);
+    }
+    function cancelHold() {
+      if (!hold) return;
+      if (hold.raf) cancelAnimationFrame(hold.raf);
+      removeFx(hold.item);
+      hold = null;
+    }
+    function completeHold() {
+      var h = hold;
+      cancelHold();
+      // The finger is still down at this point, so the pointerup that follows
+      // must not read as an aborted hold and nag about holding longer.
+      if (pointerState) pointerState.completed = true;
+      vibrate(30);
+      applyToolAction(h.tool, h.target);
+    }
+
+    // ---- What a tool can act on ------------------------------------------
+    // One shape for both kinds of flower, so every check below can work in
+    // terms of `obj` (which always has q/r/lat/lng) and only branch on kind
+    // where the two genuinely differ.
+    function toolTargetAt(key) {
+      if (state.plants[key]) return { kind: 'plant', key: key, obj: state.plants[key] };
+      if (state.wild[key]) return { kind: 'wild', key: key, obj: state.wild[key] };
+      return null;
+    }
+
+    // The reason this tool can't be used on this flower, or null if it can.
+    // Checked before the hold ring starts (so you never hold for a second and
+    // then get refused) and again on release (so the message is only spoken
+    // for a genuine tap, never for a pan that happened to start on a flower).
+    function toolBlockedReason(tool, target) {
+      var o = target.obj;
+      if (!state.userPos) return 'Waiting for GPS to lock on...';
+      var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
+      if (hexDist(uh.q, uh.r, o.q, o.r) > PLANT_RANGE_HEX) return 'Walk closer to reach this one \u{1F6B6}';
+
+      if (tool === 'water') {
+        if (target.kind === 'wild') return 'Wild flowers look after themselves - pick this one instead';
+        var d = recomputePlant(o, Date.now());
+        if (d.ready || d.wilted) return null;
+        return d.stage >= MAX_STAGE
+          ? 'Fully grown - the shears or $ take it from here'
+          : 'Not thirsty yet - ready to grow in ' + formatDuration(d.readyIn);
+      }
+      // Shears and $ both need something worth taking. Wild flowers always are.
+      if (target.kind === 'wild') return null;
+      if (recomputePlant(o, Date.now()).stage < 2) return 'Not in bloom yet - it needs more water first';
+      return null;
+    }
+
+    function applyToolAction(tool, target) {
+      var sell = tool === 'sell';
+      if (target.kind === 'wild') pickWild(target.key, sell);
+      else onHarvestClick(target.key, sell);  // via onHarvestClick so the tutorial still sees it
+    }
+
+    // ---- Pointer plumbing --------------------------------------------------
+    // Tool taps can't ride on Leaflet's click event: a press-and-hold has to
+    // start reacting while the finger is still down. Dragging is left enabled
+    // and a hold is simply cancelled once the finger travels far enough, so
+    // panning the map with a tool in hand still works normally.
+    var pointerState = null;
+    function onToolPointerDown(ev) {
+      if (!activeTool || pointerState) return;
+      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+      var ll = map.mouseEventToLatLng(ev);
+      var h = latLngToHex(ll.lat, ll.lng);
+      var target = toolTargetAt(hexKey(h.q, h.r));
+      pointerState = {
+        id: ev.pointerId, x: ev.clientX, y: ev.clientY,
+        hex: h, target: target, moved: false, completed: false
+      };
+      // Nothing starts sweeping for a tap-action tool, an empty hex, or a
+      // flower this tool can't be used on - those are all resolved on release.
+      if (activeTool === 'water' || !target) return;
+      if (!toolBlockedReason(activeTool, target)) startHold(activeTool, target);
+    }
+    function onToolPointerMove(ev) {
+      if (!pointerState || ev.pointerId !== pointerState.id) return;
+      if (Math.abs(ev.clientX - pointerState.x) > HOLD_MOVE_PX ||
+          Math.abs(ev.clientY - pointerState.y) > HOLD_MOVE_PX) {
+        pointerState.moved = true;
+        cancelHold();
+      }
+    }
+    function onToolPointerUp(ev) {
+      if (!pointerState || ev.pointerId !== pointerState.id) return;
+      var ps = pointerState;
+      pointerState = null;
+      cancelHold();
+      if (ps.moved || ps.completed || !activeTool) return;
+      resolveToolTap(ps);
+    }
+
+    function resolveToolTap(ps) {
+      if (!ps.target) {
+        // Empty ground. Only worth a word inside planting range, where the tap
+        // was probably meant to plant something - otherwise stay quiet.
+        if (state.userPos) {
+          var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
+          if (hexDist(uh.q, uh.r, ps.hex.q, ps.hex.r) <= PLANT_RANGE_HEX) {
+            toast('Put the ' + TOOL_NAMES[activeTool] + ' away to plant here \u{1F331}');
+          }
+        }
+        return;
+      }
+      var reason = toolBlockedReason(activeTool, ps.target);
+      if (reason) { toast(reason); return; }
+      if (activeTool === 'water') { waterWithCan(ps.target.key); return; }
+      toast('Press and hold to confirm');
+    }
+
+    map.getContainer().addEventListener('pointerdown', onToolPointerDown);
+    // Move and release go on the window: a mouse can leave the map mid-hold,
+    // and a hold that was never cleaned up would keep its ring on screen.
+    window.addEventListener('pointermove', onToolPointerMove);
+    window.addEventListener('pointerup', onToolPointerUp);
+    window.addEventListener('pointercancel', onToolPointerUp);
 
     // ---------------------------------------------------------------------
     //  GPS
@@ -2536,9 +2932,6 @@
       fill.style.width = Math.round(d.lifeFrac * 100) + '%';
       barLabel.textContent = 'Fades in ' + formatDuration(d.goneIn);
 
-      var btn = document.getElementById('plant-action-btn');
-      btn.style.display = 'none';
-      btn.onclick = null;
       // Wild flowers can't be crossed - they aren't yours and never flourish.
       var breedBtn = document.getElementById('breed-btn');
       breedBtn.style.display = 'none';
@@ -2552,15 +2945,18 @@
       else if (d.wilted) { statusEl.textContent = 'Wilting - pick it before it fades'; statusEl.className = 'status-wilt'; }
       else { statusEl.textContent = 'Ready to pick - it\'s yours if you want it'; statusEl.className = 'status-good'; }
 
-      var harvestRow = document.getElementById('harvest-row');
-      if (inRange) {
-        harvestRow.style.display = 'flex';
-        document.getElementById('sell-btn').textContent = 'Sell ' + SELL_SINGLE + ' \u{1F338}';
-        document.getElementById('sell-btn').onclick = function () { pickWild(key, true); };
-        document.getElementById('keep-btn').onclick = function () { pickWild(key, false); };
-      } else {
-        harvestRow.style.display = 'none';
-      }
+      document.getElementById('panel-hint').innerHTML = inRange
+        ? hintTool('shear') + ' to pick it, or ' + hintTool('sell') + ' to sell it for ' +
+          SELL_SINGLE + ' \u{1F338}'
+        : 'Walk over to pick it.';
+    }
+
+    // Names a tool inline, with its own icon, so a hint in the panel points at
+    // something the player can actually see on the rail.
+    function hintTool(tool) {
+      var label = tool === 'water' ? 'watering can' : tool === 'shear' ? 'shears' : 'sell';
+      return '<span class="hint-tool"><span class="hint-icon">' + toolIconHtml(tool, 14) +
+        '</span>' + label + '</span>';
     }
 
     // Wild flowers are free, so picking one is pure upside either way - Keep
@@ -2641,39 +3037,24 @@
 
       var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
       var inRange = uh && hexDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE_HEX;
-      // Watering is only offered when it would actually do something: advance
-      // a stage, or clear a cosmetic wilt. A plant that is mid-wait has no
-      // action to take, so the button is hidden rather than shown as a tap
-      // that quietly achieves nothing.
-      var btn = document.getElementById('plant-action-btn');
-      if (!d.ready && !d.wilted) {
-        btn.style.display = 'none';
-        btn.onclick = null;
-      } else {
-        btn.style.display = '';
-        if (inRange) {
-          btn.disabled = false;
-          btn.textContent = d.ready ? 'Water + Grow \u{1F4A7}' : 'Water \u{1F4A7}';
-          btn.onclick = function () { waterPlant(key); };
-        } else {
-          btn.disabled = true;
-          btn.textContent = 'Walk closer to water';
-          btn.onclick = null;
-        }
-      }
 
-      // Harvesting (Keep or Sell) only shows up once a plant has something to
-      // harvest - single bloom or flourishing cluster - and only when close
-      // enough to act on it, same proximity rule as watering.
-      var harvestRow = document.getElementById('harvest-row');
-      if (d.stage >= 2 && inRange) {
-        harvestRow.style.display = 'flex';
-        document.getElementById('sell-btn').textContent = 'Sell ' + harvestValue(p, d.stage) + ' \u{1F338}';
-        document.getElementById('sell-btn').onclick = function () { onHarvestClick(key, true); };
-        document.getElementById('keep-btn').onclick = function () { onHarvestClick(key, false); };
-      } else {
-        harvestRow.style.display = 'none';
+      // The panel is a read-out now, not a control surface - tending happens
+      // with the tools on the rail. So instead of a Water button and a
+      // Keep/Sell row, it names whichever tools would do something to this
+      // flower right now, and says nothing where nothing applies. Watering is
+      // only worth mentioning when it would advance a stage or clear a wilt;
+      // a mid-wait plant has no action to take at all.
+      var hints = [];
+      if (d.ready || d.wilted) {
+        hints.push(hintTool('water') + ' to ' + (d.ready ? 'water and grow it' : 'perk it back up'));
       }
+      if (d.stage >= 2) {
+        hints.push(hintTool('shear') + ' to collect, or ' + hintTool('sell') + ' to sell for ' +
+          harvestValue(p, d.stage) + ' \u{1F338}');
+      }
+      document.getElementById('panel-hint').innerHTML =
+        !hints.length ? 'Nothing to do here yet - it is still growing.' :
+        !inRange ? 'Walk closer to tend it.' : hints.join('<br>');
 
       renderBreedButton(key, p, d, inRange);
     }
@@ -2918,6 +3299,12 @@
     //  HUD / MENU / MODAL / TOAST
     // ---------------------------------------------------------------------
     function updateHUD() {
+      // A tool in hand takes over the status line entirely: while you're in a
+      // mode, what that mode does is the only thing worth saying.
+      if (activeTool) {
+        document.getElementById('hud-status-line').innerHTML = TOOL_HUD[activeTool];
+        return;
+      }
       var keys = Object.keys(state.plants);
       var total = keys.length;
       var wilted = keys.filter(function (k) {
@@ -3010,6 +3397,9 @@
         '<p>Watering is what makes it grow. About every 12 hours a plant is ready for a drink, and each ' +
         'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
         'back, three stages.</p>' +
+        '<p>Your tools are down the left edge: the watering can, the shears for collecting, and $ for ' +
+        'selling. Tap one to pick it up, use it on as many flowers as you like, then tap it again to put ' +
+        'it away.</p>' +
         '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on more ' +
         'seeds. Every flower costs and sells for the same, so plant whichever ones you like the look of.</p>' +
         '<p>Nothing here can be lost. Go a couple of days without watering and a flower just looks a bit ' +
@@ -3029,15 +3419,20 @@
       document.getElementById('modal-title').textContent = 'How to Play';
       var s = state.stats;
       document.getElementById('modal-body').innerHTML =
-        '<p><b>Plant</b> - tap the ground within a couple hexes of you, then confirm which seed to plant ' +
-        '- a quick safety check so a stray tap never spends one by accident.</p>' +
-        '<p><b>Water</b> - tap a growing flower, then walk close enough for the Water button to light up.</p>' +
+        '<p><b>Plant</b> - with no tool in hand, tap the ground within a couple hexes of you, then ' +
+        'confirm which seed to plant - a quick safety check so a stray tap never spends one by accident.</p>' +
+        '<p><b>Your tools</b> - the three buttons down the left edge are the watering can, the shears ' +
+        '(collect) and $ (sell). Tap one to pick it up, use it on as many flowers as you like, then tap ' +
+        'it again to put it away. Tapping a flower with no tool in hand just opens its details.</p>' +
+        '<p><b>Water</b> - pick up the watering can and tap each flower you want watered. You have to be ' +
+        'within a couple hexes of it.</p>' +
         '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +
         'ready, and your next watering visit moves it up a stage: seed, sprout, single bloom, full ' +
         'flourishing cluster. A green \u{1F4A7} on the map means one is ready right now. Watering early is ' +
         'never wasted - it still tops up the tank and holds off wilting.</p>' +
-        '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and Keep it or Sell ' +
-        'it for Petals \u{1F338} - clusters sell for much more than a single bloom. Kept flowers go into ' +
+        '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and use the shears ' +
+        'to keep it or $ to sell it for Petals \u{1F338} - clusters sell for much more than a single ' +
+        'bloom. Both take a one-second press and hold, since neither can be undone. Kept flowers go into ' +
         'your Flower Journal in the menu, which has a page per species and tracks all ' + TOTAL_VARIANTS +
         ' flowers.</p>' +
         '<p><b>Color</b> - every flower has a species (its shape) and a color, and almost any color can ' +
@@ -3184,8 +3579,12 @@
       // returns to the page you were last reading.
       openJournalPage(journalSpecies || defaultJournalSpecies());
       document.getElementById('journal-panel').classList.add('open');
+      syncToolRail();
     }
-    function closeJournal() { document.getElementById('journal-panel').classList.remove('open'); }
+    function closeJournal() {
+      document.getElementById('journal-panel').classList.remove('open');
+      syncToolRail();
+    }
 
     // The bookmark strip: the species' flower, in the rarest color of it you
     // own, with a superscript count of how many you're holding.
@@ -3514,8 +3913,12 @@
       closeShop(); closePlantPanel(); closeJournal(); // only one full-screen/bottom-sheet panel open at a time
       renderCrossTree(notesSpecies || defaultJournalSpecies());
       document.getElementById('notes-panel').classList.add('open');
+      syncToolRail();
     }
-    function closeCrossNotes() { document.getElementById('notes-panel').classList.remove('open'); }
+    function closeCrossNotes() {
+      document.getElementById('notes-panel').classList.remove('open');
+      syncToolRail();
+    }
 
     // Answers "where are they, then?". Most of a day's wild flowers land
     // off-screen on purpose - the whole point is to walk to them - so without
@@ -3727,10 +4130,15 @@
     // (see the menu button's onclick) so this doesn't force it open/closed.
     function openShop() {
       closePlantPanel(); closeJournal(); closeCrossNotes(); // only one full-screen/bottom-sheet panel open at a time
+      if (activeTool) setActiveTool(null); // shopping is not tending; don't leave a tool armed behind the sheet
       renderShopRows();
       document.getElementById('shop-panel').classList.add('open');
+      syncToolRail();
     }
-    function closeShop() { document.getElementById('shop-panel').classList.remove('open'); }
+    function closeShop() {
+      document.getElementById('shop-panel').classList.remove('open');
+      syncToolRail();
+    }
 
     function toast(msg) {
       var c = document.getElementById('toast-container');
@@ -3782,6 +4190,7 @@
       tutorial.active = false;
       state.tutorialDone = true;
       saveState();
+      setToolHint(null);
       hideTutorialBanner();
     }
 
@@ -3789,6 +4198,7 @@
       tutorial.active = false;
       state.tutorialDone = true;
       saveState();
+      setToolHint(null);
       showTutorialBanner('You\'ve got the hang of it! Plant, water, harvest, and shop for better seeds ' +
         'whenever you like. Have fun out there! \u{1F337}');
       setTimeout(hideTutorialBanner, 6000);
@@ -3816,6 +4226,7 @@
         if (!p || !tutorial.active || tutorial.step !== 'settling') return;
         tutorialMakeReady(p);
         tutorial.step = 'water';
+        setToolHint('water');
         showTutorialBanner(bannerHtml);
       }, 2500);
     }
@@ -3824,7 +4235,7 @@
       if (!tutorial.active || tutorial.step !== 'plant') return;
       tutorial.plantKey = key;
       showTutorialBanner('Nice! Give it a moment to settle in&hellip; \u{1F331}');
-      tutorialReadyAfterPause('It\'s ready! Tap it, then tap Water to grow it \u{1F4A7}');
+      tutorialReadyAfterPause('It\'s ready! Pick up the watering can on the left, then tap your flower \u{1F4A7}');
     }
 
     // Out in the real game each of these beats is a 12-hour wait and a walk
@@ -3838,7 +4249,8 @@
       if (!p) return;
       if (p.stage >= MAX_STAGE) {
         tutorial.step = 'harvest';
-        showTutorialBanner('Flourishing! Tap it, then Keep it for yourself or Sell it to the shop \u{1F337}');
+        setToolHint('shear');
+        showTutorialBanner('Flourishing! Take the shears (or the $ to sell) and press and hold on it \u{1F337}');
         return;
       }
       showTutorialBanner(GROWTH_MESSAGES[p.stage] + ' Give it another moment&hellip;');
@@ -3865,6 +4277,7 @@
       saveState();
       updateCurrencyPill();
       tutorial.step = 'shop';
+      setToolHint(null);
       var msg = sell
         ? 'Nice sale! Plus a first-harvest bonus of +' + bonus + ' \u{1F338}.'
         : 'Kept for your collection! Here\'s a first-harvest bonus of +' + bonus + ' \u{1F338} to get you started.';
@@ -3879,6 +4292,7 @@
     // ---------------------------------------------------------------------
     //  INIT
     // ---------------------------------------------------------------------
+    initToolRail();             // draw the three tool icons once
     tickPlants();               // recompute any growth/wilt accrued while closed
     renderWild();               // wild flowers persist across sessions until picked
     updateHUD();

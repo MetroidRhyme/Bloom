@@ -1128,7 +1128,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.7.0</span>
+      <span id="game-version">v2.7.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1762,8 +1762,13 @@
     // harvested ten flowers, kept or sold, the same combined tally the
     // Harvester milestone already tracks. Pricier than anything else on sale
     // (25x a seed) since one placement keeps watering a whole ring of tiles
-    // forever with no further cost or visits - see tickSprinklers.
+    // forever with no further cost or visits - see tickSprinklers. Each one
+    // bought costs SPRINKLER_COST_STEP more than the last (see
+    // nextSprinklerCost) - covering a whole garden in sprinklers stays a real
+    // sink for Petals rather than a one-time purchase that trivializes
+    // watering forever.
     var SPRINKLER_COST = 500;
+    var SPRINKLER_COST_STEP = 100;
     var SPRINKLER_UNLOCK_FLOWERS = 10;
 
     // Pair key is order-independent, so a cross is one entry, not two.
@@ -2512,6 +2517,20 @@
     // rather than cached, since state.stats never shrinks.
     function sprinklerUnlocked() {
       return (state.stats.kept + state.stats.sold) >= SPRINKLER_UNLOCK_FLOWERS;
+    }
+    // Every sprinkler you have ever bought, whether it's currently placed or
+    // still sitting unplaced in the equipment toggle - nothing ever destroys
+    // one, so "owned" and "lifetime purchased" are the same number.
+    function sprinklerOwnedCount() {
+      return state.sprinklerInventory + Object.keys(state.sprinklers).length;
+    }
+    // What the NEXT purchase costs - each one already owned adds another
+    // SPRINKLER_COST_STEP on top of the base price, so the first is 500, the
+    // second 600, and so on. Recomputed live off sprinklerOwnedCount rather
+    // than stored, so it can never drift out of sync with what's actually
+    // owned.
+    function nextSprinklerCost() {
+      return SPRINKLER_COST + SPRINKLER_COST_STEP * sprinklerOwnedCount();
     }
     // Fires the one-time "you can buy this now" toast the moment the gate
     // above first opens. Called from every place stats.kept/sold changes
@@ -5173,10 +5192,11 @@
         'and fertilizer. Every seed costs the same and every flower sells for the same, so pick by looks, ' +
         'not by value.</p>' +
         '<p><b>Sprinkler</b> \u{1F4A6} - keep or sell ' + SPRINKLER_UNLOCK_FLOWERS + ' flowers and it ' +
-        'unlocks in the Shop for ' + SPRINKLER_COST + ' Petals. Once bought, tap the sprinkler button ' +
-        '(bottom left) and tap empty ground to place it - it waters every flower on the eight tiles ' +
-        'around it automatically from then on, no walk-up visit needed. Tap a placed one any time to pick ' +
-        'it back up and move it.</p>' +
+        'unlocks in the Shop, starting at ' + SPRINKLER_COST + ' Petals - each one you buy costs ' +
+        SPRINKLER_COST_STEP + ' more than the last. Once bought, tap the sprinkler button (bottom left) ' +
+        'and tap empty ground to place it - it waters every flower on the eight tiles around it ' +
+        'automatically from then on, no walk-up visit needed. Tap a placed one any time to pick it back ' +
+        'up and move it.</p>' +
         '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, up to ten wild blooms are scattered ' +
         'around you, marked with a soft glow. They cost nothing - just walk over and pick one. Unlike your ' +
         'own flowers they don\'t last: a wild bloom wilts after 12 hours and is gone 6 hours later, so ' +
@@ -5944,12 +5964,13 @@
           '<span class="stand-sprinkler-owned">' + need + ' more flower' + (need === 1 ? '' : 's') +
           '</span></button>';
       } else {
+        var sprinklerCost = nextSprinklerCost();
         row4.innerHTML =
-          '<button class="stand-sprinkler-btn"' + (state.currency >= SPRINKLER_COST ? '' : ' disabled') +
-          ' title="Sprinkler - ' + SPRINKLER_COST + ' Petals" onclick="confirmBuySprinkler()">' +
+          '<button class="stand-sprinkler-btn"' + (state.currency >= sprinklerCost ? '' : ' disabled') +
+          ' title="Sprinkler - ' + sprinklerCost + ' Petals" onclick="confirmBuySprinkler()">' +
           '<span class="stand-sprinkler-icon">' + sprinklerIconSVG(26) + '</span>' +
           '<span class="stand-sprinkler-label">Sprinkler</span>' +
-          '<span class="stand-sprinkler-price">' + SPRINKLER_COST + ' \u{1F338}</span>' +
+          '<span class="stand-sprinkler-price">' + sprinklerCost + ' \u{1F338}</span>' +
           '<span class="stand-sprinkler-owned">have ' + state.sprinklerInventory + '</span>' +
           '</button>';
       }
@@ -6043,8 +6064,9 @@
         preview: '<p>Place it on an empty tile and it automatically waters every flower on the eight ' +
           'tiles around it - no walk-up visit needed. Tap a placed sprinkler any time to pick it back up ' +
           'and move it somewhere else.</p>' +
-          '<p>You have <b>' + state.sprinklerInventory + '</b> unplaced.</p>',
-        cost: SPRINKLER_COST,
+          '<p>You have <b>' + state.sprinklerInventory + '</b> unplaced. Each one costs ' +
+          SPRINKLER_COST_STEP + ' \u{1F338} more than the last.</p>',
+        cost: nextSprinklerCost(),
         okText: 'Buy it \u{1F4A6}',
         onOk: buySprinkler
       });
@@ -6052,15 +6074,20 @@
 
     function buySprinkler() {
       if (!sprinklerUnlocked()) return;
-      if (state.currency < SPRINKLER_COST) return;
-      state.currency -= SPRINKLER_COST;
+      // Recomputed here rather than reusing whatever confirmBuySprinkler
+      // showed - it's the same live formula (see nextSprinklerCost), so
+      // there's nothing to drift, and this way the deduction can never fall
+      // out of sync with sprinklerOwnedCount at the actual moment of purchase.
+      var cost = nextSprinklerCost();
+      if (state.currency < cost) return;
+      state.currency -= cost;
       if (state.cheatMode) state.currency = CHEAT_CURRENCY; // never actually runs down
       state.sprinklerInventory++;
       saveState();
       renderShopRows();
       updateCurrencyPill();
       updateHUD(); // the equipment toggle can show up now, same as syncFertTool above
-      toast('Bought a sprinkler \u{1F4A6}');
+      toast('Bought a sprinkler for ' + cost + ' \u{1F338}');
       vibrate(15);
     }
 

@@ -846,7 +846,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.28.1</span>
+      <span id="game-version">v1.29.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -976,10 +976,6 @@
     var CELL_LNG_DEG = parseFloat(localStorage.getItem('bloom_cell_lng')) || CELL_LAT_DEG;
 
     var PLANT_RANGE_HEX = 2;   // how close (in hexes) you must be to plant or water
-    // Visual-only radius for the glow circle around the player; derived from
-    // the same hex lattice so it roughly matches the real (hex-distance)
-    // interaction range without needing a second magic number.
-    var RANGE_METERS = PLANT_RANGE_HEX * CELL_LAT_DEG * 111111 * SQ3;
 
     // Full water drains to empty over 2 days, at which point the flower starts
     // *looking* wilted. That is the entire consequence: wilting is cosmetic.
@@ -1756,6 +1752,69 @@
         return v.x >= b.min.x - 4 && v.x <= b.max.x + 4 && v.y >= b.min.y - 4 && v.y <= b.max.y + 4;
       });
     }
+    // Same six corners as hexVerticesPx, but in lat/lng instead of screen
+    // pixels - used to build the range overlay below, which is a real
+    // Leaflet vector layer (so it survives pan/zoom on its own) rather than
+    // a canvas mesh redrawn per-frame.
+    function hexCornersLatLng(q, r) {
+      var pts = [];
+      for (var i = 0; i < 6; i++) {
+        var angle = Math.PI / 3 * i;
+        var lat = (SQ3 / 2 * q + SQ3 * r + Math.sin(angle)) * CELL_LAT_DEG;
+        var lng = (3 / 2 * q + Math.cos(angle)) * CELL_LNG_DEG;
+        pts.push([lat, lng]);
+      }
+      return pts;
+    }
+    // The outer boundary of every hex within hexDist <= N of (centerQ,
+    // centerR) - i.e. the exact shape of "in range", not a circle that only
+    // approximates it. Built by edge-cancellation rather than a hand-derived
+    // formula: every one of the N-cluster's hexes contributes its 6 edges,
+    // any edge shared by two hexes in the cluster cancels out (interior),
+    // and whatever's left over is walked into a single ordered ring. Works
+    // for any N with no special-casing, at the cost of leaving collinear
+    // points along each side of the big hexagon instead of 6 clean corners -
+    // harmless for rendering, and this only runs when the player crosses
+    // into a new hex, not per animation frame (see animateRangeTo).
+    function hexRingLatLngs(centerQ, centerR, N) {
+      var hexes = [];
+      for (var dq = -N; dq <= N; dq++) {
+        var rMin = Math.max(-N, -dq - N), rMax = Math.min(N, -dq + N);
+        for (var dr = rMin; dr <= rMax; dr++) hexes.push({ q: centerQ + dq, r: centerR + dr });
+      }
+      function ptKey(p) { return Math.round(p[0] * 1e7) + '_' + Math.round(p[1] * 1e7); }
+      var edgeMap = {}, edgeOrder = [];
+      hexes.forEach(function (h) {
+        var c = hexCornersLatLng(h.q, h.r);
+        for (var i = 0; i < 6; i++) {
+          var a = c[i], b = c[(i + 1) % 6];
+          var ka = ptKey(a), kb = ptKey(b);
+          var ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+          if (edgeMap[ek]) { edgeMap[ek].count++; }
+          else { edgeMap[ek] = { count: 1, a: a, b: b }; edgeOrder.push(ek); }
+        }
+      });
+      var boundary = edgeOrder.filter(function (ek) { return edgeMap[ek].count === 1; })
+        .map(function (ek) { return edgeMap[ek]; });
+      if (!boundary.length) return [];
+      var used = new Array(boundary.length).fill(false);
+      var ring = [boundary[0].a];
+      var curPt = boundary[0].b;
+      used[0] = true;
+      for (var iter = 0; iter < boundary.length; iter++) {
+        ring.push(curPt);
+        var foundIdx = -1;
+        for (var bi = 0; bi < boundary.length; bi++) {
+          if (used[bi]) continue;
+          var e = boundary[bi];
+          if (ptKey(e.a) === ptKey(curPt)) { foundIdx = bi; curPt = e.b; break; }
+          if (ptKey(e.b) === ptKey(curPt)) { foundIdx = bi; curPt = e.a; break; }
+        }
+        if (foundIdx === -1) break;
+        used[foundIdx] = true;
+      }
+      return ring;
+    }
 
     // ---------------------------------------------------------------------
     //  GROWTH ENGINE
@@ -2410,7 +2469,7 @@
     }).addTo(map);
 
     // Pane ladder (bottom -> top): tilePane 200 < gridPane 350 (hex mesh) <
-    // overlayPane 400 (range circle, Leaflet default) < markerPane 600 (plants/
+    // overlayPane 400 (range shape, Leaflet default) < markerPane 600 (plants/
     // user, Leaflet default). Much shorter than Porter's ladder since Bloom has
     // no zones or connection lines to layer in between.
     map.createPane('gridPane').style.zIndex = 350;
@@ -2956,10 +3015,13 @@
     // ---------------------------------------------------------------------
     //  GPS
     // ---------------------------------------------------------------------
-    // No player marker - only the translucent range circle marks the player,
+    // No player marker - only the translucent range shape marks the player,
     // so it never sits on top of (and hides) a flower planted right next to
-    // them. userHexQ/userHexR is the hex the circle is currently snapped to.
-    var rangeCircle = null, viewingKey = null, viewingWild = false;
+    // them. userHexQ/userHexR is the hex it's currently snapped to. The shape
+    // itself is the exact union of every hex within PLANT_RANGE_HEX (see
+    // hexRingLatLngs) rather than a circle standing in for it, so what's
+    // highlighted matches what actually counts as "in range" hex-for-hex.
+    var rangeArea = null, viewingKey = null, viewingWild = false;
     var userHexQ = null, userHexR = null;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -2972,21 +3034,27 @@
       });
     }
 
-    // Eases the range circle from one hex center to the next over ~450ms
+    // Eases the range shape from one hex center to the next over ~450ms
     // instead of jumping. Only runs on an actual hex change (see
     // onLocationUpdate), so ordinary GPS jitter within the same hex never
-    // moves the circle at all - that's the real fix for the twitchiness,
-    // this animation just makes real hex-to-hex steps read as movement
-    // rather than a teleport.
+    // moves it at all - that's the real fix for the twitchiness, this
+    // animation just makes real hex-to-hex steps read as movement rather
+    // than a teleport. fromRing/toRing are two hexRingLatLngs() outputs -
+    // congruent, same vertex count and order, purely translated relative to
+    // each other - so a per-vertex lerp is enough; no reshaping needed.
     var _circleAnimRAF = null;
-    function animateCircleTo(fromLat, fromLng, toLat, toLng) {
+    function animateRangeTo(fromRing, toRing) {
       if (_circleAnimRAF) cancelAnimationFrame(_circleAnimRAF);
-      if (reduceMotion) { rangeCircle.setLatLng([toLat, toLng]); return; }
+      if (reduceMotion) { rangeArea.setLatLngs(toRing); return; }
       var start = performance.now(), dur = 450;
       function step(now) {
         var t = Math.min(1, (now - start) / dur);
         var e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out-quad
-        rangeCircle.setLatLng([fromLat + (toLat - fromLat) * e, fromLng + (toLng - fromLng) * e]);
+        var frame = fromRing.map(function (p, i) {
+          var tp = toRing[i];
+          return [p[0] + (tp[0] - p[0]) * e, p[1] + (tp[1] - p[1]) * e];
+        });
+        rangeArea.setLatLngs(frame);
         _circleAnimRAF = (t < 1) ? requestAnimationFrame(step) : null;
       }
       _circleAnimRAF = requestAnimationFrame(step);
@@ -2999,24 +3067,24 @@
       // Snap the displayed position to the current hex's center rather than
       // following raw GPS - range checks elsewhere already work in hex
       // distance (hexDist), not raw lat/lng, so this changes nothing about
-      // what counts as "in range", only how steady the circle looks.
+      // what counts as "in range", only how steady the shape looks.
       var h = latLngToHex(lat, lng);
       var c = hexCenter(h.q, h.r);
 
-      if (!rangeCircle) {
+      if (!rangeArea) {
         userHexQ = h.q; userHexR = h.r;
         markAccessible(h.q, h.r);
-        rangeCircle = L.circle([c.lat, c.lng], {
-          radius: RANGE_METERS, color: '#4caf6d', weight: 1.5,
+        rangeArea = L.polygon(hexRingLatLngs(h.q, h.r, PLANT_RANGE_HEX), {
+          color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
         }).addTo(map);
         map.setView([c.lat, c.lng], 17);
         onGpsLocked();
       } else if (h.q !== userHexQ || h.r !== userHexR) {
-        var from = hexCenter(userHexQ, userHexR);
+        var fromRing = hexRingLatLngs(userHexQ, userHexR, PLANT_RANGE_HEX);
         userHexQ = h.q; userHexR = h.r;
         markAccessible(h.q, h.r);
-        animateCircleTo(from.lat, from.lng, c.lat, c.lng);
+        animateRangeTo(fromRing, hexRingLatLngs(h.q, h.r, PLANT_RANGE_HEX));
         if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
       if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
@@ -3040,6 +3108,18 @@
       if (!localStorage.getItem('bloom_cell_lng')) {
         CELL_LNG_DEG = CELL_LAT_DEG / Math.cos(state.userPos.lat * Math.PI / 180);
         localStorage.setItem('bloom_cell_lng', CELL_LNG_DEG);
+        // rangeArea was built (in onLocationUpdate, just before this call)
+        // using the uncorrected CELL_LNG_DEG - rebuild it now with the fixed
+        // value so the very first shape isn't stretched either. userHexQ/R
+        // must be re-derived from the real lat/lng too, not just reused:
+        // they were computed under the old CELL_LNG_DEG, and pairing a hex
+        // index from one longitude scale with corners built at another
+        // scale produces a wildly wrong shape, not just a stretched one.
+        if (rangeArea) {
+          var hh = latLngToHex(state.userPos.lat, state.userPos.lng);
+          userHexQ = hh.q; userHexR = hh.r;
+          rangeArea.setLatLngs(hexRingLatLngs(userHexQ, userHexR, PLANT_RANGE_HEX));
+        }
       }
       // The map.setView() a moment ago in onLocationUpdate already fired
       // 'moveend' (and so a grid redraw) before CELL_LNG_DEG was corrected

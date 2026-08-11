@@ -1118,7 +1118,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.4.1</span>
+      <span id="game-version">v2.4.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -4821,9 +4821,9 @@
       closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); // only one full-screen panel at a time
       var s = state.stats;
       document.getElementById('howto-body').innerHTML =
-        '<p><b>Plant</b> - tap the seed pouch (top right), pick a seed, then tap the ground within a ' +
-        'couple tiles of you to plant it. A bare tap with nothing equipped won\'t plant anything on its ' +
-        'own - it just points you back at the pouch.</p>' +
+        '<p><b>Plant</b> - tap the seed pouch (top right), pick a species, then a color, then tap the ' +
+        'ground within a couple tiles of you to plant it. A bare tap with nothing equipped won\'t plant ' +
+        'anything on its own - it just points you back at the pouch.</p>' +
         '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
         '(sell) fly out - fertilizer joins them once you own a bag. Tap the one you want, or hold the ' +
         'toolbox down and drag straight to it and let go. It replaces the toolbox while equipped - tap it ' +
@@ -5749,8 +5749,8 @@
       tutorial.step = 'plant';
       tutorial.plantKey = null;
       setSeedHint(true);
-      showTutorialBanner('Let\'s plant your first seed - tap the seed pouch (top right), pick one, then ' +
-        'tap the ground within the green circle \u{1F331}');
+      showTutorialBanner('Let\'s plant your first seed - tap the seed pouch (top right), pick a species, ' +
+        'then a color, then tap the ground within the green square \u{1F331}');
     }
 
     function skipTutorial() {

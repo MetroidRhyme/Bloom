@@ -1027,7 +1027,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.33.1</span>
+      <span id="game-version">v1.34.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1909,6 +1909,27 @@
     var state = loadState();
     state.userPos = null; // runtime-only, never persisted
 
+    // One-time catch-up for anything already blooming the moment
+    // journal-on-bloom discovery shipped (see discoverVariant/waterPlant) -
+    // discoverVariant only ever fires from the exact instant reachedBloom
+    // flips false->true, so a flower that had already crossed that line
+    // under the older Keep-only journal would otherwise sit blooming on the
+    // map forever without ever showing up in the collection. Skips anything
+    // still mystery - that reveal (and its own discovery) hasn't happened
+    // yet and shouldn't be forced here.
+    (function backfillBloomedIntoJournal() {
+      var changed = false;
+      Object.keys(state.plants).forEach(function (key) {
+        var p = state.plants[key];
+        if (p.stage < 2 || p.mystery) return;
+        var vk = variantKey(p.species, colorOfPlant(p));
+        if (state.inventory[vk]) return;
+        discoverVariant(vk);
+        changed = true;
+      });
+      if (changed) saveState();
+    })();
+
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
@@ -2109,13 +2130,29 @@
       if (grew) {
         p.stage++;
         p.readyAt = now + stageReadyMs();
-        if (p.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
+        if (p.stage >= 2 && !p.reachedBloom) {
+          p.reachedBloom = true;
+          state.stats.bloomed++;
+          // Discovered the moment it's actually seen in bloom, not only if
+          // it's later Kept or sold - growing it is the whole point, so the
+          // journal shouldn't require a second decision on top of that.
+          // discoverVariant never touches held counts, only Keep does.
+          discoverVariant(variantKey(p.species, colorOfPlant(p)));
+        }
         if (p.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
         // A bred seedling opening is the payoff of the whole crossing loop, so
         // it gets its own message instead of the generic "burst into bloom".
+        // This is also the right moment (not doBreed, back when the cross was
+        // started) to record it in the Crossing Notes - recording it earlier
+        // would let the Notes screen spoil a still-mystery seedling's color
+        // before the player ever saw it revealed here.
         if (p.mystery && p.stage >= 2) {
           delete p.mystery;
           revealed = variantKey(p.species, colorOfPlant(p));
+          if (p.parentColors) {
+            recordCross(p.parentColors[0], p.parentColors[1], colorOfPlant(p));
+            delete p.parentColors;
+          }
         }
       }
 
@@ -2146,6 +2183,17 @@
       var e = state.inventory[vk];
       if (!e) e = state.inventory[vk] = { single: 0, cluster: 0, firstAt: Date.now() };
       if (isCluster) e.cluster++; else e.single++;
+    }
+
+    // Marks a variant as discovered without crediting any held count - called
+    // when one of your own plants blooms for the first time (see
+    // waterPlant), so the journal remembers everything you've ever grown,
+    // not just what you chose to Keep. Never overwrites an existing entry
+    // (and so never disturbs an earlier real Keep/pick's firstAt or counts) -
+    // it only creates one if this variant has truly never been seen before.
+    function discoverVariant(vk) {
+      if (state.inventory[vk]) return;
+      state.inventory[vk] = { single: 0, cluster: 0, firstAt: Date.now() };
     }
 
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
@@ -4072,7 +4120,11 @@
     }
 
     // Records that this pairing produced this color, so the Crossing Notes
-    // screen can show what you have actually seen rather than the whole table.
+    // screen can show what you have actually seen rather than the whole
+    // table. Called from waterPlant() at the actual reveal moment (stage
+    // reaching 2 on a mystery seedling), not from doBreed() when the cross
+    // is started - recording it that early would let this screen spoil a
+    // still-mystery seedling before its own reveal ever happens.
     function recordCross(ca, cb, result) {
       var k = crossKey(ca, cb);
       if (!state.crosses[k]) state.crosses[k] = {};
@@ -4109,7 +4161,11 @@
       // every table entry. There is no such thing as an Ember Daisy.
       var lock = exclusiveSpeciesOf(color);
       if (lock) species = lock;
-      recordCross(ca, cb, color);
+      // NOT recordCross(ca, cb, color) here - the Crossing Notes screen
+      // reads state.crosses directly, so recording the result the instant
+      // the cross is started would spoil a still-mystery seedling before
+      // its own reveal ever happens. parentColors carries what's needed to
+      // record it at the actual reveal moment instead (see waterPlant).
 
       var c = hexCenter(spot.q, spot.r);
       var key = hexKey(spot.q, spot.r);
@@ -4118,10 +4174,9 @@
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
         reachedBloom: false, reachedFlourish: false,
         // The color is decided now but stays hidden until it blooms. Seed and
-        // sprout artwork is colorless anyway, so nothing leaks - and the
-        // reveal is the payoff the whole feature is built around. Nothing is
-        // at stake while it is hidden: the outcome is already recorded.
-        mystery: true
+        // sprout artwork is colorless anyway, so nothing leaks, and the
+        // reveal is the payoff the whole feature is built around.
+        mystery: true, parentColors: [ca, cb]
       };
       state.stats.planted++;
       state.stats.bred++;

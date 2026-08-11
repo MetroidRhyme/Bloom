@@ -430,6 +430,16 @@
       width: 32px; height: 32px; border-radius: 50%; z-index: 2;
       border: none; background: rgba(0,0,0,0.06); font-size: 18px; color: var(--text-dim); cursor: pointer;
     }
+    /* Deliberately plain rather than themed to the stand - a debug shortcut,
+       not a piece of the market fiction, so it should read as separate from
+       it at a glance. Off is a muted outline; on turns solid red as an
+       unmissable "yes, this is really on" cue, same idea as an armed tool. */
+    #cheat-toggle-btn {
+      position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; z-index: 2;
+      border: 2px solid #6b4423; border-radius: 14px; padding: 6px 11px;
+      font-size: 11px; font-weight: 800; color: #5a3d22; background: #fff6e0; cursor: pointer;
+    }
+    #cheat-toggle-btn.on { background: #c0453c; border-color: #7a2a22; color: #fff; }
     /* The petal basket: how much you have to spend, front and center instead
        of a sentence of stats. A woven basket (repeating gradients, same
        trick as the stand counter) with a handle arc, flowers spilling over
@@ -749,6 +759,66 @@
     .tree-row .color-cell.slot:not(.blank)::before { left: -3px; }
     .tree-row .color-cell.slot:not(.blank)::after { right: -3px; }
 
+    /* ================= HOW TO PLAY PANEL ================= */
+    /* Full-screen and paper-toned like the journal/notes panels, but the
+       ruled lines and blotches live on #howto-body (the scrolling element,
+       background-attachment: local) instead of the static outer panel. The
+       journal and notes panels never needed that - their content is a grid
+       of cards that doesn't care about pixel-exact line position - but this
+       page is prose set to sit on those rules, so the rules have to scroll
+       along with the text or the two drift apart past the first screenful.
+       #howto-panel itself keeps only the flat paper base color, for
+       whatever's visible around/before the scroll container. */
+    #howto-panel {
+      position: fixed; inset: 0; z-index: 1100;
+      background: linear-gradient(#faf1da, #f0dfb8);
+      padding: calc(54px + env(safe-area-inset-top, 0px)) 0 env(safe-area-inset-bottom, 0px) 0;
+      display: flex; flex-direction: column;
+      transform: translateY(105%);
+      transition: transform 0.28s ease;
+    }
+    #howto-panel.open { transform: translateY(0); }
+    #howto-panel::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 16px;
+      background: linear-gradient(90deg, rgba(90,61,34,0.45), rgba(90,61,34,0));
+    }
+    #howto-close-btn {
+      position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px;
+      width: 32px; height: 32px; border-radius: 50%; z-index: 3;
+      border: none; background: rgba(0,0,0,0.16); color: #fff; font-size: 18px; cursor: pointer;
+    }
+    /* Extra margin below (vs. the journal/notes heading's 6px) does the
+       breathing room instead of top padding on #howto-body, which has to
+       stay at 0 - see that rule below for why. */
+    #howto-heading {
+      flex: 0 0 auto; font-size: 19px; font-weight: 800; color: #4a3218; margin: 0 0 16px;
+      text-align: center; padding: 0 22px 0 30px;
+    }
+    /* padding-top MUST stay 0: the repeating-gradient's rule pattern starts
+       counting from this box's own padding-box origin, and .howto-body p
+       below sets every line to the same 28px height as one repeat of that
+       pattern - so a 0 top offset is what keeps the very first line in
+       phase with the first rule. Any nonzero top padding here would shift
+       the text down without shifting the rules, throwing off every line
+       after it too. Left/right/bottom padding are free to be whatever looks
+       right, since nothing below relies on their exact value. */
+    #howto-body {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding: 0 22px 28px 30px;
+      background:
+        repeating-linear-gradient(180deg, transparent 0 27px, rgba(120,90,50,0.11) 27px 28px),
+        radial-gradient(ellipse 340px 200px at 18% 12%, rgba(150,110,60,0.08), transparent 60%),
+        radial-gradient(ellipse 300px 240px at 88% 85%, rgba(150,110,60,0.07), transparent 60%);
+      background-attachment: local;
+    }
+    /* One blank ruled line between paragraphs (28px margin, the same period
+       as the rule spacing) rather than a partial gap - that keeps every
+       paragraph's total height a whole multiple of 28px, so the phase set
+       by #howto-body's zero top padding never drifts no matter how many
+       paragraphs come before it. */
+    #howto-body p { margin: 0 0 28px; line-height: 28px; font-size: 14px; color: var(--text); }
+    #howto-body p:last-child { margin-bottom: 0; }
+
     /* ================= MODAL ================= */
     #modal-overlay {
       position: fixed; inset: 0; z-index: 1500; background: rgba(30,25,15,0.4);
@@ -899,7 +969,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.31.1</span>
+      <span id="game-version">v1.32.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -969,6 +1039,7 @@
 
   <div id="shop-panel">
     <button id="shop-close-btn" onclick="closeShop()">&times;</button>
+    <button id="cheat-toggle-btn" onclick="toggleCheatMode()">Cheat Mode: Off</button>
     <div id="shop-basket">
       <div id="basket-handle"></div>
       <div id="basket-body">
@@ -997,6 +1068,12 @@
     <button id="notes-close-btn" onclick="closeCrossNotes()">&times;</button>
     <div id="notes-heading">Crossing Notes &#x1F331;</div>
     <div id="notes-body"></div>
+  </div>
+
+  <div id="howto-panel">
+    <button id="howto-close-btn" onclick="closeHowToPlay()">&times;</button>
+    <div id="howto-heading">How to Play</div>
+    <div id="howto-body"></div>
   </div>
 
   <div id="modal-overlay">
@@ -1059,6 +1136,15 @@
     var STAGE_READY_MS = 12 * HOUR;
     var MAX_STAGE = 3;
     var STAGE_LABELS = ['Seed', 'Sprout', 'In Bloom', 'Flourishing'];
+
+    // Cheat Mode (see the shop panel's toggle): a dev/testing shortcut, not a
+    // real difficulty setting, so it gets one flat 15s stage-readiness time
+    // instead of anything tunable. stageReadyMs() is the one place growth
+    // timing is actually read from - every readyAt assignment and the growth
+    // bar's percentage math go through it, so flipping the toggle can never
+    // leave one of them still counting against the real 12h constant.
+    var CHEAT_STAGE_MS = 15 * 1000;
+    function stageReadyMs() { return state.cheatMode ? CHEAT_STAGE_MS : STAGE_READY_MS; }
     // Indexed by the stage just reached; index 0 is unused (you never water
     // your way *into* being a seed).
     var GROWTH_MESSAGES = [
@@ -1421,6 +1507,11 @@
     var SEED_COST = 20;
     var SELL_SINGLE = 16;
     var SELL_CLUSTER = 40;
+    // What Cheat Mode tops the balance up to (see setCheatMode) - not a real
+    // "infinite" sentinel, just a number large enough that no shop cost ever
+    // makes a dent in it, re-applied after every purchase so it never runs
+    // down for real.
+    var CHEAT_CURRENCY = 999999;
     function harvestValue(p, stage) { return stage >= MAX_STAGE ? SELL_CLUSTER : SELL_SINGLE; }
 
     // Seeds recovered by pulling a held flower apart, as [count, probability].
@@ -1710,7 +1801,8 @@
         currency: 0,
         following: true,
         seenWelcome: false,
-        tutorialDone: false // brand-new save -> the onboarding tutorial should run
+        tutorialDone: false, // brand-new save -> the onboarding tutorial should run
+        cheatMode: false     // dev/testing toggle, see the shop panel - see stageReadyMs/setCheatMode
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -1745,7 +1837,8 @@
           seenWelcome: !!parsed.seenWelcome,
           // Any save that already exists predates the tutorial - never
           // interrupt an already-playing garden with onboarding.
-          tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true
+          tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true,
+          cheatMode: !!parsed.cheatMode
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -1761,7 +1854,8 @@
         visited: state.visited,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
-        following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone
+        following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
+        cheatMode: state.cheatMode
       }));
     }
 
@@ -1923,7 +2017,7 @@
       var key = hexKey(q, r);
       state.plants[key] = {
         q: q, r: r, lat: c.lat, lng: c.lng, species: v.species, color: v.color,
-        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + STAGE_READY_MS,
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
         reachedBloom: false, reachedFlourish: false
       };
       state.stats.planted++;
@@ -1931,7 +2025,7 @@
       renderPlants();
       updateHUD();
       toast('\u{1F331} ' + variantName(vk) + ' planted! It will be ready for water in ' +
-        formatDuration(STAGE_READY_MS) + '.');
+        formatDuration(stageReadyMs()) + '.');
       vibrate(20);
       tutorialOnPlant(key);
       return key;
@@ -1953,7 +2047,7 @@
       var revealed = null;
       if (grew) {
         p.stage++;
-        p.readyAt = now + STAGE_READY_MS;
+        p.readyAt = now + stageReadyMs();
         if (p.stage >= 2 && !p.reachedBloom) { p.reachedBloom = true; state.stats.bloomed++; }
         if (p.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
         // A bred seedling opening is the payoff of the whole crossing loop, so
@@ -2800,7 +2894,7 @@
     // is nothing to tend in any of them. One check called wherever a
     // full-screen panel opens or closes, rather than a display toggle
     // duplicated across six functions.
-    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'notes-panel'];
+    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'notes-panel', 'howto-panel'];
     function fullscreenPanelOpen() {
       return FULLSCREEN_PANELS.some(function (id) {
         return document.getElementById(id).classList.contains('open');
@@ -3695,7 +3789,7 @@
       // getting there" rather than "this plant is running out of something".
       var growthPct = d.stage >= MAX_STAGE
         ? 100
-        : Math.max(0, Math.min(100, Math.round((1 - d.readyIn / STAGE_READY_MS) * 100)));
+        : Math.max(0, Math.min(100, Math.round((1 - d.readyIn / stageReadyMs()) * 100)));
       document.getElementById('growth-bar-fill').style.width = growthPct + '%';
       document.getElementById('growth-bar-label').textContent =
         d.stage >= MAX_STAGE ? 'Fully grown' :
@@ -3885,7 +3979,7 @@
       var key = hexKey(spot.q, spot.r);
       state.plants[key] = {
         q: spot.q, r: spot.r, lat: c.lat, lng: c.lng, species: species, color: color,
-        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + STAGE_READY_MS,
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
         reachedBloom: false, reachedFlourish: false,
         // The color is decided now but stays hidden until it blooms. Seed and
         // sprout artwork is colorless anyway, so nothing leaks - and the
@@ -4121,14 +4215,18 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
+    // Full-screen and scrollable like the journal/notes panels (see the HOW
+    // TO PLAY PANEL CSS above) rather than the small centered modal this
+    // used to be - eleven paragraphs plus the stats line ran well past a
+    // phone's viewport in the old modal, which had no scroll of its own.
     function openHowToPlay() {
       toggleMenu();
-      resetModalChrome();
-      document.getElementById('modal-title').textContent = 'How to Play';
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); // only one full-screen panel at a time
       var s = state.stats;
-      document.getElementById('modal-body').innerHTML =
-        '<p><b>Plant</b> - with no tool in hand, tap the ground within a couple hexes of you, then ' +
-        'confirm which seed to plant - a quick safety check so a stray tap never spends one by accident.</p>' +
+      document.getElementById('howto-body').innerHTML =
+        '<p><b>Plant</b> - tap the seed pouch (top right), pick a seed, then tap the ground within a ' +
+        'couple hexes of you to plant it. A bare tap with nothing equipped won\'t plant anything on its ' +
+        'own - it just points you back at the pouch.</p>' +
         '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
         '(sell) fly out; tap the one you want, or hold the toolbox down and drag straight to it and let ' +
         'go. It replaces the toolbox while equipped - tap it again to put it away. Use it on as many ' +
@@ -4167,12 +4265,15 @@
         '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
         'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +
-        '<p style="color:var(--text-dim);margin-top:14px">So far: ' + s.planted + ' planted &bull; ' +
+        '<p style="color:var(--text-dim)">So far: ' + s.planted + ' planted &bull; ' +
         s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished &bull; ' + s.sold + ' sold for ' +
         s.earned + ' Petals &bull; ' + s.kept + ' kept</p>';
-      document.getElementById('modal-ok-btn').textContent = 'Got it';
-      document.getElementById('modal-ok-btn').onclick = closeModal;
-      document.getElementById('modal-overlay').classList.add('open');
+      document.getElementById('howto-panel').classList.add('open');
+      syncToolRail();
+    }
+    function closeHowToPlay() {
+      document.getElementById('howto-panel').classList.remove('open');
+      syncToolRail();
     }
 
     function heldOf(vk, isCluster) {
@@ -4686,8 +4787,51 @@
     // ---------------------------------------------------------------------
     //  SHOP
     // ---------------------------------------------------------------------
+
+    // Cheat Mode: a dev/testing shortcut, not a real game feature - unlimited
+    // Petals and a 15s stage-readiness time instead of 12h. Currency isn't a
+    // true sentinel "infinite" value, just topped up to CHEAT_CURRENCY (see
+    // buySeed/buyFertilizer, which re-apply the top-up after every spend so
+    // it never actually runs down). Turning it off doesn't claw anything
+    // back - whatever Petals or grown plants you ended up with stay, only
+    // future costs/timing go back to normal, same as any other toggle in
+    // this game (nothing here is ever taken away from the player).
+    function setCheatMode(on) {
+      state.cheatMode = on;
+      if (on) {
+        state.currency = Math.max(state.currency, CHEAT_CURRENCY);
+        // Retroactively shortens whatever's left of the CURRENT wait for
+        // anything still growing, so turning the toggle on is useful right
+        // away instead of only affecting plants watered after this point.
+        // Never lengthens a wait that was already shorter than 15s.
+        var now = Date.now();
+        Object.keys(state.plants).forEach(function (key) {
+          var p = state.plants[key];
+          if (p.stage < MAX_STAGE) p.readyAt = Math.min(p.readyAt, now + CHEAT_STAGE_MS);
+        });
+      }
+      saveState();
+      renderCheatToggle();
+      renderShopRows();
+      updateCurrencyPill();
+      // renderPlants() before updateHUD(): it's what actually recomputes each
+      // plant's cached _d (see makePlantIcon -> recomputePlant) from the
+      // readyAt values just changed above - updateHUD only ever reads that
+      // cache, so calling it first would still see the pre-toggle numbers.
+      renderPlants();
+      updateHUD();
+      toast(on ? 'Cheat Mode on - unlimited Petals, 15s growth \u{1F31F}' : 'Cheat Mode off');
+    }
+    function toggleCheatMode() { setCheatMode(!state.cheatMode); }
+    function renderCheatToggle() {
+      var btn = document.getElementById('cheat-toggle-btn');
+      btn.textContent = 'Cheat Mode: ' + (state.cheatMode ? 'On' : 'Off');
+      btn.classList.toggle('on', !!state.cheatMode);
+    }
+
     function updateCurrencyPill() {
-      document.getElementById('currency-pill').innerHTML = '\u{1F338} ' + state.currency;
+      document.getElementById('currency-pill').innerHTML = '\u{1F338} ' +
+        (state.cheatMode ? 'Unlimited' : state.currency);
     }
 
     // A farmer's-market stand rather than a catalogue: one crate per species
@@ -4701,7 +4845,8 @@
       // else that used to be a sentence above the stand (sell price range,
       // "one of each flower") lives elsewhere (the sell screen, the crates
       // themselves) rather than crowding this screen with text.
-      document.getElementById('basket-tag').textContent = state.currency + ' \u{1F338}';
+      document.getElementById('basket-tag').textContent =
+        (state.cheatMode ? 'Unlimited' : state.currency) + ' \u{1F338}';
       document.getElementById('stand-sign').innerHTML = 'ALL ITEMS<br>' + SEED_COST + ' \u{1F338}';
       var afford = state.currency >= SEED_COST;
 
@@ -4750,8 +4895,9 @@
       document.getElementById('modal-title').textContent = opts.title;
       document.getElementById('modal-body').innerHTML = opts.preview +
         '<p style="color:var(--text-dim)">Costs <b>' + opts.cost + ' \u{1F338} Petals</b>. ' +
-        'You have ' + state.currency + ' and would be left with <b>' +
-        (state.currency - opts.cost) + '</b>.</p>';
+        (state.cheatMode ? 'Cheat Mode is on, so this is free.' :
+          'You have ' + state.currency + ' and would be left with <b>' +
+          (state.currency - opts.cost) + '</b>.') + '</p>';
       var ok = document.getElementById('modal-ok-btn');
       ok.textContent = opts.okText;
       // Close first: the shop sheet sits underneath and stays open, so the
@@ -4795,6 +4941,7 @@
       // markup that renders it.
       if (STANDARD_COLORS.indexOf(parseVariant(vk).color) < 0) return;
       state.currency -= SEED_COST;
+      if (state.cheatMode) state.currency = CHEAT_CURRENCY; // never actually runs down
       state.seeds[vk] = (state.seeds[vk] || 0) + 1;
       saveState();
       renderShopRows();
@@ -4807,6 +4954,7 @@
     function buyFertilizer() {
       if (state.currency < FERTILIZER_COST) return;
       state.currency -= FERTILIZER_COST;
+      if (state.cheatMode) state.currency = CHEAT_CURRENCY; // never actually runs down
       state.fertilizer++;
       saveState();
       renderShopRows();
@@ -4822,6 +4970,7 @@
       closePlantPanel(); closeJournal(); closeCrossNotes(); // only one full-screen/bottom-sheet panel open at a time
       if (activeTool) setActiveTool(null); // shopping is not tending; don't leave a tool armed behind the sheet
       renderShopRows();
+      renderCheatToggle();
       document.getElementById('shop-panel').classList.add('open');
       syncToolRail();
     }

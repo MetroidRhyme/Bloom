@@ -899,7 +899,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.30.2</span>
+      <span id="game-version">v1.31.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1907,9 +1907,9 @@
     // Consumes one seed of the given species from inventory and plants exactly
     // that flower - no randomness, you get what you chose. Callers are expected
     // to have already confirmed a seed of this species is actually owned (see
-    // attemptPlant/openSeedPicker) - this only re-checks defensively, it
-    // doesn't surface its own error UI. Returns the new plant's hex key, or
-    // null if there was no seed to spend.
+    // plantEquippedSeedAt) - this only re-checks defensively, it doesn't
+    // surface its own error UI. Returns the new plant's hex key, or null if
+    // there was no seed to spend.
     // Takes a variant key ("tulip:red"), not a bare species - a seed is a
     // species and a color, and planting spends exactly the one chosen.
     function plantSeedAt(q, r, vk) {
@@ -1935,18 +1935,6 @@
       vibrate(20);
       tutorialOnPlant(key);
       return key;
-    }
-
-    // Decides how to plant on an empty, in-range hex: always confirms via the
-    // seed-tier picker first (even with only one tier owned) so a stray tap
-    // on the map never silently spends a seed - points at the shop instead
-    // when there's nothing to plant.
-    function attemptPlant(q, r) {
-      var owned = sortVariants(Object.keys(state.seeds).filter(function (vk) {
-        return state.seeds[vk] > 0;
-      })).map(function (vk) { return { vk: vk, count: state.seeds[vk] }; });
-      if (owned.length === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
-      openSeedPicker(q, r, owned);
     }
 
     // Watering is always allowed in range and always refills the tank (which
@@ -2675,9 +2663,12 @@
       requestAnimationFrame(function () { _iconRescalePending = false; rescalePlantIcons(); });
     });
 
-    // Empty ground within range plants immediately; an occupied hex opens its
-    // panel (from any distance - browsing your garden from afar is fine,
-    // only *acting* on a plant requires being physically close).
+    // Empty ground within range plants immediately, but only with a seed
+    // already equipped from the pouch (see plantEquippedSeedAt) - a bare tap
+    // never spends a seed on its own, it just points at the pouch. An
+    // occupied hex opens its panel (from any distance - browsing your garden
+    // from afar is fine, only *acting* on a plant requires being physically
+    // close).
     // With a tool in hand every map tap belongs to the tool instead - see the
     // TOOLS section below, which drives itself off pointer events so it can
     // tell a tap from a press-and-hold.
@@ -2700,7 +2691,8 @@
         return;
       }
       if (equippedSeed) { plantEquippedSeedAt(h.q, h.r); return; }
-      attemptPlant(h.q, h.r);
+      if (totalSeedCount() === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
+      toast('Tap the seed pouch to choose what to plant \u{1F331}');
     });
 
     // ---------------------------------------------------------------------
@@ -2831,6 +2823,14 @@
       TOOL_KEYS.forEach(function (t) {
         document.getElementById('tool-' + t).classList.toggle('hint', tool === t);
       });
+    }
+
+    // Same idea as setToolHint, but for the seed pouch - it lives outside the
+    // tool rail (see #seed-toggle) so it needs its own on/off switch rather
+    // than fitting the tool-keyed one above. Cleared the moment a seed is
+    // actually equipped (see equipSeed), never toggled back on itself.
+    function setSeedHint(on) {
+      document.getElementById('seed-toggle').classList.toggle('hint', !!on);
     }
 
     function setActiveTool(tool) {
@@ -3320,6 +3320,7 @@
       closePlantPanel(); closeShop();
       equippedSeed = vk;
       seedLevel = 'species'; seedSpecies = null; // reset for next time the fan opens
+      setSeedHint(false); // the tutorial's pouch pointer, if any - the player just found it
       renderSeedToggle();
       updateHUD();
       vibrate(10);
@@ -4652,34 +4653,15 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    // Seed-tier picker shown on every plant attempt (see attemptPlant) as a
-    // confirm step, even with only one tier owned - reuses the same generic
-    // modal as Welcome/How to Play/etc, just with the OK button hidden in
-    // favor of one button per owned tier.
-    function openSeedPicker(q, r, owned) {
-      resetModalChrome();
-      document.getElementById('modal-title').textContent = 'Choose a Seed';
-      document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
-        owned.map(function (o) {
-          var c = colorFor(parseVariant(o.vk).color);
-          return '<button class="seed-pick-btn" style="border-color:' + c.line +
-            '" onclick="plantSeedAt(' + q + ',' + r + ',\'' + o.vk + '\');closeModal();">' +
-            '<span style="color:' + c.ink + '">' + variantChip(o.vk) + ' ' + variantName(o.vk) +
-            '</span><span>x' + o.count + '</span></button>';
-        }).join('') + '</div>';
-      document.getElementById('modal-ok-btn').style.display = 'none';
-      document.getElementById('modal-overlay').classList.add('open');
-    }
-
-    // Modals normally show one full-width OK button; the seed picker hides it
+    // Modals normally show one full-width OK button; the breed picker hides it
     // in favor of its own buttons. Called at the top of every other opener so
     // that state doesn't leak between modal uses.
     function resetModalChrome() { document.getElementById('modal-ok-btn').style.display = ''; }
 
     function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
     // Tapping the dimmed backdrop (not the card itself) closes whatever
-    // modal is open - mainly so the seed picker has a way to back out
-    // without planting, since it hides the usual OK/close button.
+    // modal is open - mainly so the breed picker has a way to back out
+    // without crossing, since it hides the usual OK/close button.
     document.getElementById('modal-overlay').addEventListener('click', function (e) {
       if (e.target.id === 'modal-overlay') closeModal();
     });
@@ -4874,7 +4856,9 @@
       tutorial.active = true;
       tutorial.step = 'plant';
       tutorial.plantKey = null;
-      showTutorialBanner('Let\'s plant your first seed - tap the ground within the green circle \u{1F331}');
+      setSeedHint(true);
+      showTutorialBanner('Let\'s plant your first seed - tap the seed pouch (top right), pick one, then ' +
+        'tap the ground within the green circle \u{1F331}');
     }
 
     function skipTutorial() {
@@ -4882,6 +4866,7 @@
       state.tutorialDone = true;
       saveState();
       setToolHint(null);
+      setSeedHint(false);
       hideTutorialBanner();
     }
 
@@ -4890,6 +4875,7 @@
       state.tutorialDone = true;
       saveState();
       setToolHint(null);
+      setSeedHint(false);
       showTutorialBanner('You\'ve got the hang of it! Plant, water, harvest, and shop for better seeds ' +
         'whenever you like. Have fun out there! \u{1F337}');
       setTimeout(hideTutorialBanner, 6000);

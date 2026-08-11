@@ -113,10 +113,12 @@
     #recenter-btn:active { background: rgba(0,0,0,0.06); }
 
     /* ================= TUTORIAL BANNER ================= */
-    /* First-run only (see the TUTORIAL section in the script). Sits just
-       below the top bar, using --hud-top-h so it never overlaps it. */
+    /* First-run only (see the TUTORIAL section in the script). Sits below
+       the toolbox (which now hugs the top-left corner, see #tool-rail) so
+       the two never overlap - it used to be the other way around, with the
+       toolbox pushed down to clear this banner instead. */
     #tutorial-banner {
-      position: fixed; left: 12px; right: 12px; top: calc(var(--hud-top-h) + 10px); z-index: 950;
+      position: fixed; left: 12px; right: 12px; top: calc(var(--hud-top-h) + 74px); z-index: 950;
       background: linear-gradient(135deg, #fff6e0, #ffffff);
       border: 2px solid var(--amber); border-radius: 16px; box-shadow: var(--shadow);
       padding: 12px 16px; text-align: center; display: none;
@@ -212,12 +214,14 @@
        and the three .petal buttons are all absolutely positioned inside it
        from the same top-left origin, so every "fly out" is just a transform.
 
-       Anchored below the top bar rather than vertically centred, and stacked
-       ABOVE the plant panel (1100): the panel's hints name these tools, so on
-       a short phone they have to stay tappable even when the sheet is up.
-       Equipping one closes the sheet anyway. */
+       Anchored flush to the top-left corner, right under the top bar -
+       and stacked ABOVE both the tutorial banner (950) and the plant panel
+       (1100): the panel's hints name these tools, so on a short phone they
+       have to stay tappable even when the sheet is up, and the tutorial
+       banner is pushed down below it (see #tutorial-banner) rather than the
+       other way around. Equipping a tool closes the sheet anyway. */
     #tool-rail {
-      position: fixed; left: 12px; top: calc(var(--hud-top-h) + 90px); z-index: 1150;
+      position: fixed; left: 12px; top: calc(var(--hud-top-h) + 10px); z-index: 1150;
       width: 52px; height: 52px;
     }
     #tool-toggle { position: absolute; left: 0; top: 0; z-index: 2; }
@@ -842,7 +846,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.28.0</span>
+      <span id="game-version">v1.28.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>

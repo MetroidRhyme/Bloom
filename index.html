@@ -527,6 +527,16 @@
     }
     .journal-caption { font-size: 11.5px; font-weight: 700; color: var(--text-dim); text-align: center; margin: 0 0 10px; }
     .journal-hint { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0 0 4px; }
+    /* The lifetime tally at the foot of every page - one line per stat
+       rather than a bullet-run sentence, with each count in the same
+       handwritten style as a card's note, as if it were jotted onto the
+       page rather than printed. */
+    .journal-stats { margin: 4px 0 0; }
+    .journal-stats p { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0; }
+    .journal-stats .stat-num {
+      font-family: 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive, sans-serif;
+      font-size: 14px; font-weight: 700; color: var(--green-dark);
+    }
     /* One bordered block per color held, so a Red and a Purple of the same
        species never look like one interchangeable pile. */
     .inv-variant {
@@ -613,7 +623,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.24.5</span>
+      <span id="game-version">v1.25.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1390,8 +1400,11 @@
         // screen only ever shows results you have seen yourself.
         crosses: {},
         // No `lost` counter - plants cannot die, so nothing is ever lost.
+        // extracted is the lifetime seed count extraction has paid out;
+        // extractedFlowers is how many blooms/clusters were pulled apart to
+        // get them - the same relationship sold/earned already has.
         stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0,
-                 extracted: 0, bred: 0 },
+                 extracted: 0, extractedFlowers: 0, bred: 0 },
         seeds: starterSeeds(),
         fertilizer: 0,
         currency: 0,
@@ -3043,6 +3056,7 @@
       // the shop (standards only) still matters for anything you lack.
       state.seeds[vk] = (state.seeds[vk] || 0) + gained;
       state.stats.extracted += gained;
+      state.stats.extractedFlowers += qty;
 
       saveState();
       toast('\u{1F331} Got ' + gained + ' ' + variantName(vk) + ' seed' +
@@ -3222,11 +3236,15 @@
       }
 
       // The lifetime tally lived on the contents page; it belongs somewhere,
-      // and the foot of any page is as good as a screen of its own.
+      // and the foot of any page is as good as a screen of its own. One
+      // line per stat rather than a bullet-run sentence.
       var st = state.stats;
-      html += '<p style="color:var(--text-dim);font-size:11.5px;text-align:center;margin:0">Kept ' +
-        st.kept + ' all time &bull; sold ' + st.sold + ' for ' + st.earned +
-        ' Petals &bull; ' + st.extracted + ' seeds extracted</p>';
+      function statNum(n) { return '<span class="stat-num">' + n + '</span>'; }
+      html += '<div class="journal-stats">' +
+        '<p>Kept ' + statNum(st.kept) + ' all time</p>' +
+        '<p>Sold ' + statNum(st.sold) + ' for ' + statNum(st.earned) + ' Petals</p>' +
+        '<p>Extracted ' + statNum(st.extractedFlowers) + ' for ' + statNum(st.extracted) +
+        ' seeds</p></div>';
 
       document.getElementById('journal-body').innerHTML = html;
     }

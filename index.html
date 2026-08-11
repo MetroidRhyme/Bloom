@@ -1118,7 +1118,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.3.0</span>
+      <span id="game-version">v2.4.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1832,6 +1832,28 @@
     var WILD_SPAWN_RADIUS_M = 800;
     var WILD_WILT_MS = 12 * HOUR;    // uncollected: starts looking wilted
     var WILD_GONE_MS = 18 * HOUR;    // ...and vanishes 6 hours after that
+
+    // Wild flowers are almost always a standard color - everything past
+    // tier 0 is meant to be bred (see maybeSpawnWild). WILD_RARE_CHANCE is a
+    // small, deliberately capped exception: a rare bonus discovery layer on
+    // top of breeding, not a replacement for it. Capped at tier 1 only (the
+    // six deterministic standard-cross results - pink/orange/purple/green/
+    // cream/sky) per Anthony's call, never tier 2/3 or a signature -
+    // breeding stays the only route to anything past that, and the only
+    // *deliberate, choosable* route to any specific color+species pairing
+    // at all, since a wild rare is random on both counts.
+    //
+    // 5% per spawn. At WILD_MAX (10) spawns in a day - an engaged player
+    // who clears the board daily - that is about one rare every two days;
+    // for a more typical 3-5 spawns/day it is roughly one every 5-7 days.
+    // Either way, over a week of ordinary play (7 days) the chance of
+    // seeing at least one is already >80%, and over a month it is a near
+    // certainty - so this reads as "everyone finds one eventually, most
+    // weeks bring one," not a grind. See the bloom-game skill notes for
+    // the full table this was picked from.
+    var WILD_RARE_CHANCE = 0.05;
+    var WILD_RARE_COLORS = COLORS.filter(function (c) { return c.tier === 1; })
+      .map(function (c) { return c.id; });
 
     // ---------------------------------------------------------------------
     //  STATE & PERSISTENCE
@@ -2577,13 +2599,19 @@
       }
 
       var spots = pickWildSpots(needed);
+      var rareSpawned = false;
       spots.forEach(function (h) {
         var c = cellCenter(h.q, h.r);
         var sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
-        // Wild flowers only ever come in the standard colors. Everything past
-        // tier 0 has to be bred, so a walk can never hand you what breeding is
-        // supposed to be for.
-        var col = STANDARD_COLORS[Math.floor(Math.random() * STANDARD_COLORS.length)];
+        // Wild flowers are almost always standard colors - everything past
+        // tier 0 has to be bred, so a walk can basically never hand you what
+        // breeding is for. WILD_RARE_CHANCE is the one deliberate exception,
+        // capped at tier 1 - see its own comment above.
+        var rare = Math.random() < WILD_RARE_CHANCE;
+        var col = rare
+          ? WILD_RARE_COLORS[Math.floor(Math.random() * WILD_RARE_COLORS.length)]
+          : STANDARD_COLORS[Math.floor(Math.random() * STANDARD_COLORS.length)];
+        if (rare) rareSpawned = true;
         state.wild[cellKey(h.q, h.r)] = {
           q: h.q, r: h.r, lat: c.lat, lng: c.lng, species: sp.key, color: col,
           stage: 2, spawnedAt: Date.now()
@@ -2601,9 +2629,13 @@
           'm. They wilt after ' + (WILD_WILT_MS / HOUR) + 'h and are gone by ' + (WILD_GONE_MS / HOUR) + 'h.';
         // Lead with the distance to the closest one - most of the crop lands
         // off-screen, so otherwise this announces blooms against a map that
-        // looks completely unchanged.
-        toast('\u{1F33C} ' + spots.length + ' wild ' + (spots.length === 1 ? 'flower' : 'flowers') +
-          ' bloomed nearby' + (near ? ' - nearest is ' + Math.round(near.dist) + 'm ' + near.dir : '') + '!');
+        // looks completely unchanged. A rare color in the batch gets its own
+        // call-out rather than blending into the ordinary count, since
+        // otherwise the one thing worth hurrying out for reads identically
+        // to every other day's crop.
+        toast((rareSpawned ? '\u{2728} A rare-colored wild flower is out there today! ' : '\u{1F33C} ') +
+          spots.length + ' wild ' + (spots.length === 1 ? 'flower' : 'flowers') + ' bloomed nearby' +
+          (near ? ' - nearest is ' + Math.round(near.dist) + 'm ' + near.dir : '') + '!');
         vibrate(25);
       } else {
         wildStatus = 'Nowhere free to scatter any - your flowers cover the area.';
@@ -4832,7 +4864,9 @@
         '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, up to ten wild blooms are scattered ' +
         'around you, marked with a soft glow. They cost nothing - just walk over and pick one. Unlike your ' +
         'own flowers they don\'t last: a wild bloom wilts after 12 hours and is gone 6 hours later, so ' +
-        'they\'re worth going out for today.</p>' +
+        'they\'re worth going out for today. Once in a while one turns up in a rare color you\'d ' +
+        'otherwise have to breed - a bonus, not a shortcut around breeding, since which color and which ' +
+        'flower is entirely down to chance.</p>' +
         '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
         'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +

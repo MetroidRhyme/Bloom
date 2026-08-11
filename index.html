@@ -620,7 +620,11 @@
        a spine/binding so it still reads as "the middle of a page" rather
        than a flat rectangle. Ruled lines and soft aged-paper blotches are
        CSS gradients, no image assets. */
-    #journal-panel {
+    /* #milestones-panel (see the MILESTONES section of the script) shares
+       every rule below with the journal - same aged-paper/spine page, same
+       slide-up sheet - since it's the same "page in a book" object, just a
+       different collection. */
+    #journal-panel, #milestones-panel {
       position: fixed; inset: 0; z-index: 1100;
       background:
         repeating-linear-gradient(180deg, transparent 0 27px, rgba(120,90,50,0.11) 27px 28px),
@@ -632,17 +636,17 @@
       transform: translateY(105%);
       transition: transform 0.28s ease;
     }
-    #journal-panel.open { transform: translateY(0); }
-    #journal-panel::before {
+    #journal-panel.open, #milestones-panel.open { transform: translateY(0); }
+    #journal-panel::before, #milestones-panel::before {
       content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 16px;
       background: linear-gradient(90deg, rgba(90,61,34,0.45), rgba(90,61,34,0));
     }
-    #journal-close-btn {
+    #journal-close-btn, #milestones-close-btn {
       position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px;
       width: 32px; height: 32px; border-radius: 50%; z-index: 3;
       border: none; background: rgba(0,0,0,0.16); color: #fff; font-size: 18px; cursor: pointer;
     }
-    #journal-heading {
+    #journal-heading, #milestones-heading {
       flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 8px;
       font-size: 19px; font-weight: 800; color: #4a3218; margin: 0 0 6px; text-align: center;
       padding: 0 22px 0 30px;
@@ -654,9 +658,59 @@
        drop shadow) gets clipped by the scroll container. The padding is
        the buffer that keeps the tape on the first and last columns clear
        of that edge. */
-    #journal-body {
+    #journal-body, #milestones-body {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
       padding: 4px 22px 18px 30px;
+    }
+
+    /* ================= MILESTONES (STICKER BOOK) ================= */
+    /* One row per track: an icon/label/blurb header, then always exactly
+       four tier cells (Seed/Sprout/Bloom/Cluster - see TIER_NAMES in the
+       script, reusing the plant-stage vocabulary rather than inventing a
+       bronze/silver/gold system). Always exactly 4 and never wraps, so -
+       unlike the journal's scrapbook-grid - this never needs a tall
+       inter-row gap; there is no second row within one track's own grid. */
+    .sticker-track { margin: 0 0 22px; }
+    .sticker-track-head {
+      font-size: 13px; font-weight: 700; color: #4a3218; margin: 0 0 8px; text-align: center;
+    }
+    .sticker-track-head .text-dim { font-weight: 600; color: var(--text-dim); }
+    .sticker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px 8px; }
+    /* Same taped-card grammar as the journal's .color-cell.slot (aged
+       paper, a per-cell tilt, tape corners over a dashed "not earned yet"
+       pocket when blank) but its own class rather than reused - a third
+       consumer of .color-grid/.color-cell would recreate exactly the
+       cascade-specificity trap the .color-grid.scrapbook-grid comment
+       above already warns about, for a screen that otherwise shares
+       nothing with a flower's color slot. */
+    .sticker-cell {
+      position: relative; border: none; padding: 10px 4px 7px; border-radius: 2px;
+      background:
+        radial-gradient(ellipse 42px 22px at 18% 12%, rgba(120,90,50,0.07), transparent 70%),
+        radial-gradient(ellipse 36px 20px at 82% 88%, rgba(120,90,50,0.06), transparent 70%),
+        linear-gradient(178deg, #fffaf0 0%, #fbf0d4 100%);
+      box-shadow: 0 3px 7px rgba(60,40,20,0.3), inset 0 0 0 1px rgba(120,90,50,0.1);
+      transform: rotate(var(--tilt, -2deg));
+      text-align: center;
+    }
+    .sticker-cell:nth-child(2) { --tilt: 2.5deg; }
+    .sticker-cell:nth-child(3) { --tilt: -1.5deg; }
+    .sticker-cell:nth-child(4) { --tilt: 1.5deg; }
+    .sticker-cell:not(.blank)::before, .sticker-cell:not(.blank)::after {
+      content: ''; position: absolute; top: -7px; width: 26px; height: 14px;
+      background: rgba(255,244,214,0.85); border: 1px solid rgba(160,120,60,0.4);
+      box-shadow: 0 1px 2px rgba(60,40,20,0.28);
+    }
+    .sticker-cell:not(.blank)::before { left: -6px; transform: rotate(-40deg); }
+    .sticker-cell:not(.blank)::after { right: -6px; transform: rotate(40deg); }
+    .sticker-cell.blank {
+      background: transparent; border: 2px dashed rgba(90,61,34,0.3);
+      box-shadow: none; color: #a49d90; transform: none;
+    }
+    .sticker-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 34px; height: 34px; border-radius: 50%; font-size: 17px;
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,0.55);
     }
 
     /* The scrapbook page: found colors get a looser grid than the crossing
@@ -1036,7 +1090,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.1.0</span>
+      <span id="game-version">v2.2.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1048,6 +1102,7 @@
   <div id="menu-dropdown">
     <button onclick="toggleMenu();openShop()">Seed Shop</button>
     <button onclick="openInventory()">Flower Journal</button>
+    <button onclick="openMilestones()">Milestones</button>
     <button onclick="openCrossNotes()">Crossing Notes</button>
     <button onclick="openWildInfo()">Wild Flowers</button>
     <button onclick="openHowToPlay()">How to Play</button>
@@ -1139,6 +1194,16 @@
     <button id="journal-close-btn" onclick="closeJournal()">&times;</button>
     <div id="journal-heading"></div>
     <div id="journal-body"></div>
+  </div>
+
+  <!-- Same page chrome as the journal (see the shared #journal-panel,
+       #milestones-panel CSS selectors) - a second, permanent sticker
+       collection built entirely from state.stats/state.inventory. See the
+       MILESTONES section of the script. -->
+  <div id="milestones-panel">
+    <button id="milestones-close-btn" onclick="closeMilestones()">&times;</button>
+    <div id="milestones-heading">Milestones</div>
+    <div id="milestones-body"></div>
   </div>
 
   <div id="notes-panel">
@@ -4548,6 +4613,9 @@
         'bloom. Both take a one-second press and hold, since neither can be undone. Kept flowers go into ' +
         'your Flower Journal in the menu, which has a page per species and tracks all ' + TOTAL_VARIANTS +
         ' flowers.</p>' +
+        '<p><b>Milestones</b> - a second page in the menu, tracking Petals earned, flowers grown, and ' +
+        'more with a sticker for each one - once earned a sticker is yours for good, same as everything ' +
+        'else here.</p>' +
         '<p><b>Color</b> - every flower has a species (its shape) and a color, and almost any color can ' +
         'turn up on any species. Four are standard - White, Red, Yellow and Blue - and those are the ' +
         'only ones the shop sells or wild flowers grow in. The rest have to be bred.</p>' +
@@ -4847,6 +4915,126 @@
         ' seeds</p></div>';
 
       document.getElementById('journal-body').innerHTML = html;
+    }
+
+    // ---------------------------------------------------------------------
+    //  MILESTONES (STICKER BOOK)
+    //  A second, permanent collection screen next to the Flower Journal -
+    //  every sticker is read straight off state.stats (already tracked for
+    //  the Journal's own lifetime tally) plus state.inventory for the two
+    //  collection-themed tracks. Nothing new is written to state anywhere
+    //  in this section - it is a pure render over data that already
+    //  exists, so there is no save-format migration and nothing here can
+    //  ever regress: once a tier's threshold is met the sticker renders as
+    //  earned on every future render, forever, the same "nothing here can
+    //  be lost" guarantee as the rest of the game. Deliberately no economy
+    //  hook of any kind - a sticker never grants Petals, seeds, or
+    //  anything spendable, so this can't turn into a second progression
+    //  currency and can't recreate the old seed-tier problem (see SEED_COST
+    //  section) where one axis quietly outclasses another.
+    // ---------------------------------------------------------------------
+
+    // Reuses the plant-stage vocabulary (seed -> sprout -> bloom -> cluster)
+    // as the four tier names rather than inventing a bronze/silver/gold
+    // ladder - every player already knows this progression from growing a
+    // single flower, so it needs no separate explanation here.
+    var TIER_NAMES = ['Seed', 'Sprout', 'Bloom', 'Cluster'];
+    var TIER_COLOR_VARS = ['var(--green)', 'var(--blue)', 'var(--amber)', 'var(--pink)'];
+
+    function speciesDiscoveredCount() {
+      var seen = {};
+      Object.keys(state.inventory).forEach(function (vk) { seen[parseVariant(vk).species] = true; });
+      return Object.keys(seen).length;
+    }
+    // exclusiveSpeciesOf(colorId) is truthy only for the 14 signature
+    // colors (2 per species) - see the COLORS section. Counts distinct
+    // signature colors found, not how many species they span.
+    function signatureColorsDiscoveredCount() {
+      var seen = {};
+      Object.keys(state.inventory).forEach(function (vk) {
+        var color = parseVariant(vk).color;
+        if (exclusiveSpeciesOf(color)) seen[color] = true;
+      });
+      return Object.keys(seen).length;
+    }
+
+    // Each track's top tier is deliberately sized to its own natural
+    // ceiling where one exists (7 species, TOTAL_VARIANTS flowers, all 14
+    // signatures) so completing that track IS full completion of that part
+    // of the Journal - the last sticker doubles as proof, not a separate
+    // number to eyeball against it.
+    var MILESTONE_TRACKS = [
+      { key: 'planted', icon: '\u{1F331}', label: 'Planter', blurb: 'Seeds planted',
+        tiers: [1, 10, 30, 75], valueFn: function (st) { return st.planted; } },
+      { key: 'bloomed', icon: '\u{1F4A7}', label: 'Grower', blurb: 'Plants brought into bloom',
+        tiers: [1, 10, 30, 75], valueFn: function (st) { return st.bloomed; } },
+      { key: 'flourished', icon: '\u{2728}', label: 'Flourisher', blurb: 'Plants grown to a full cluster',
+        tiers: [1, 10, 30, 75], valueFn: function (st) { return st.flourished; } },
+      { key: 'harvested', icon: '\u{1F9FA}', label: 'Harvester', blurb: 'Flowers kept or sold',
+        tiers: [1, 15, 50, 100], valueFn: function (st) { return st.kept + st.sold; } },
+      { key: 'earned', icon: '\u{1F338}', label: 'Trader', blurb: 'Lifetime Petals earned',
+        tiers: [50, 250, 1000, 3000], valueFn: function (st) { return st.earned; } },
+      { key: 'bred', icon: '\u{1F98B}', label: 'Breeder', blurb: 'Successful crossings',
+        tiers: [1, 5, 15, 30], valueFn: function (st) { return st.bred; } },
+      { key: 'species', icon: '\u{1F4D6}', label: 'Botanist', blurb: 'Species discovered',
+        tiers: [1, 3, 5, SPECIES.length], valueFn: function () { return speciesDiscoveredCount(); } },
+      { key: 'variants', icon: '\u{1F3A8}', label: 'Colorist', blurb: 'Flowers found in the Journal',
+        tiers: [10, 30, 60, TOTAL_VARIANTS],
+        valueFn: function () { return Object.keys(state.inventory).length; } },
+      { key: 'signatures', icon: '\u{1F48E}', label: 'Alchemist', blurb: 'Signature colors found',
+        tiers: [1, 4, 8, 14], valueFn: function () { return signatureColorsDiscoveredCount(); } },
+      { key: 'extracted', icon: '\u{2697}', label: 'Extractor', blurb: 'Seeds pulled from extraction',
+        tiers: [5, 25, 75, 150], valueFn: function (st) { return st.extracted; } }
+    ];
+
+    function totalStickersEarned() {
+      var st = state.stats, n = 0;
+      MILESTONE_TRACKS.forEach(function (t) {
+        var v = t.valueFn(st);
+        t.tiers.forEach(function (need) { if (v >= need) n++; });
+      });
+      return n;
+    }
+    function totalStickersPossible() { return MILESTONE_TRACKS.length * TIER_NAMES.length; }
+
+    function openMilestones() {
+      toggleMenu();
+      // Closes every other full-screen panel, same as openHowToPlay() -
+      // see that function's own comment for why this list (rather than the
+      // shorter one on openInventory/openCrossNotes/openShop) is the
+      // complete one to copy for a screen reachable from the same menu.
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay();
+      renderMilestonesPage();
+      document.getElementById('milestones-panel').classList.add('open');
+      syncToolRail();
+    }
+    function closeMilestones() {
+      document.getElementById('milestones-panel').classList.remove('open');
+      syncToolRail();
+    }
+
+    function renderMilestonesPage() {
+      var st = state.stats;
+      var html = '<p class="journal-caption"><b>' + totalStickersEarned() + ' of ' +
+        totalStickersPossible() + '</b> stickers earned</p>';
+
+      html += MILESTONE_TRACKS.map(function (t) {
+        var v = t.valueFn(st);
+        var cells = t.tiers.map(function (need, i) {
+          var got = v >= need;
+          return '<div class="sticker-cell' + (got ? '' : ' blank') + '" title="' +
+            TIER_NAMES[i] + ' - ' + need + '">' +
+            (got ? '<span class="sticker-icon" style="background:' + TIER_COLOR_VARS[i] + '">' +
+              t.icon + '</span>' : '<span class="slot-unknown">?</span>') +
+            '<span class="slot-line"><span class="slot-label">' + TIER_NAMES[i] + '</span>' +
+            '<span class="slot-note' + (got ? ' some' : '') + '">' + need + '</span></span></div>';
+        }).join('');
+        return '<div class="sticker-track"><div class="sticker-track-head">' + t.icon + ' <b>' +
+          t.label + '</b> <span class="text-dim">- ' + t.blurb + '</span></div>' +
+          '<div class="sticker-grid">' + cells + '</div></div>';
+      }).join('');
+
+      document.getElementById('milestones-body').innerHTML = html;
     }
 
     // ---------------------------------------------------------------------

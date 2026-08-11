@@ -22,14 +22,22 @@
       --shadow-sm: 0 2px 10px rgba(60,40,20,0.14);
     }
 
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    /* user-select/-webkit-touch-callout: none everywhere - there is no text
+       anywhere in this game worth selecting, and a one-second press-and-hold
+       on a flower (see startHold) is a tool confirmation, not a text
+       selection or an iOS copy/paste long-press menu. Without this, Android
+       Chrome in particular paints its own blue selection highlight over
+       whatever's under a finger held down that long, on top of the ring
+       that's supposed to be the only thing responding to the hold. */
+    * {
+      box-sizing: border-box; -webkit-tap-highlight-color: transparent;
+      user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    }
     html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--bg); }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); }
     button { font-family: inherit; }
 
-    /* -webkit-touch-callout so a one-second press-and-hold on a flower is a
-       tool confirmation rather than an iOS long-press menu. */
-    #map { position: fixed; inset: 0; background: var(--bg); -webkit-touch-callout: none; }
+    #map { position: fixed; inset: 0; background: var(--bg); }
     .leaflet-container { background: var(--bg); }
 
     /* ================= TOP BAR ================= */
@@ -969,7 +977,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.32.0</span>
+      <span id="game-version">v1.32.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3096,7 +3104,13 @@
     function startHold(tool, target) {
       cancelHold();
       var o = target.obj;
-      var item = addFx(holdRingHtml(tool), o.lat, o.lng, 'hold-ring', 0);
+      // One hex north of the flower itself, not on top of it - a finger
+      // pressed down on the flower for a full second otherwise covers the
+      // ring it's supposed to be watching fill. (0,1) is the one HEX_NEIGHBORS
+      // direction with zero longitude delta (see hexCenter's math), i.e. the
+      // neighbor directly above on screen rather than up-and-to-a-side.
+      var above = hexCenter(o.q, o.r + 1);
+      var item = addFx(holdRingHtml(tool), above.lat, above.lng, 'hold-ring', 0);
       hold = {
         tool: tool, target: target, item: item, raf: null,
         arc: item.el.querySelector('.hold-arc'), start: performance.now()

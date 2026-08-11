@@ -97,6 +97,14 @@
     }
     #menu-dropdown button:last-child { border-bottom: none; }
     #menu-dropdown button:active { background: rgba(0,0,0,0.05); }
+    /* Crossing Notes stays out of the menu until fertilizer is unlocked -
+       see syncFertUnlockUI() in the FERTILIZER UNLOCK section. Both
+       selectors below are doubled up on #menu-dropdown/button#menu-crossnotes-btn
+       rather than the plain #menu-crossnotes-btn id alone, so they out-rank
+       (not just tie with, which would leave source order deciding) the
+       #menu-dropdown button rule above that already sets display: block. */
+    #menu-dropdown button#menu-crossnotes-btn { display: none; }
+    body.fert-unlocked #menu-dropdown button#menu-crossnotes-btn { display: block; }
     #menu-dropdown button.danger { color: #c0554a; }
 
     /* ================= BOTTOM HUD ================= */
@@ -1101,7 +1109,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.6.1</span>
+      <span id="game-version">v2.7.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1114,7 +1122,11 @@
     <button onclick="toggleMenu();openShop()">Seed Shop</button>
     <button onclick="openInventory()">Flower Journal</button>
     <button onclick="openMilestones()">Milestones</button>
-    <button onclick="openCrossNotes()">Crossing Notes</button>
+    <!-- Hidden until state.fertUnlocked - see syncFertUnlockUI() and the
+         FERTILIZER UNLOCK section. Starts hidden in the markup itself (not
+         just via a JS toggle after load) so there's no flash of a menu item
+         pointing at a screen that would otherwise still be empty. -->
+    <button id="menu-crossnotes-btn" onclick="openCrossNotes()">Crossing Notes</button>
     <button onclick="openWildInfo()">Wild Flowers</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
@@ -2053,6 +2065,15 @@
         following: true,
         seenWelcome: false,
         tutorialDone: false, // brand-new save -> the onboarding tutorial should run
+        // Fertilizer starts locked - see the FERTILIZER UNLOCK section. fertReady
+        // flips true the instant any flower of the player's own first reaches
+        // flourishing (waterPlant); fertUnlocked flips true once the player
+        // actually dismisses openFertTutorial(). Split into two flags rather
+        // than one because the moment they diverge (ready but not yet unlocked)
+        // is a real, sometimes-persisted state: the tutorial modal can be
+        // sitting there unanswered across a reload.
+        fertReady: false,
+        fertUnlocked: false,
         cheatMode: false,    // dev/testing toggle, see the shop panel - see stageReadyMs/setCheatMode
         gridV2: true,        // brand-new save starts straight on the square grid - see migrateGridKeys
         // Brand-new device only - gates the one-time primer shown before the
@@ -2116,6 +2137,16 @@
           // Any save that already exists predates the tutorial - never
           // interrupt an already-playing garden with onboarding.
           tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true,
+          // Same fallback shape as tutorialDone, and for the same reason on
+          // the missing-field branch: a save from before fertReady/fertUnlocked
+          // existed predates the whole gate, so it defaults both to true
+          // rather than clawing fertilizer access back from a player who
+          // already had it. A save that already has these fields (created
+          // under this feature) keeps its real, possibly-still-false value -
+          // this is NOT hardcoded true, or a reload mid-tutorial would
+          // silently skip it.
+          fertReady: typeof parsed.fertReady === 'boolean' ? parsed.fertReady : true,
+          fertUnlocked: typeof parsed.fertUnlocked === 'boolean' ? parsed.fertUnlocked : true,
           cheatMode: !!parsed.cheatMode,
           gridV2: true, // migrated (or already was) above - never re-run the re-key on future loads
           gpsPrimerSeen: true, // see def.gpsPrimerSeen - any pre-existing save always skips the primer
@@ -2157,6 +2188,7 @@
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
+        fertReady: state.fertReady, fertUnlocked: state.fertUnlocked,
         cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen,
         lastSeenAt: state.lastSeenAt
       }));
@@ -2309,7 +2341,20 @@
           // discoverVariant never touches held counts, only Keep does.
           discoverVariant(variantKey(p.species, colorOfPlant(p)));
         }
-        if (p.stage >= 3 && !p.reachedFlourish) { p.reachedFlourish = true; state.stats.flourished++; }
+        if (p.stage >= 3 && !p.reachedFlourish) {
+          p.reachedFlourish = true;
+          state.stats.flourished++;
+          // First flower of the player's own ever to flourish - see the
+          // FERTILIZER UNLOCK section. Deferred rather than opened here
+          // outright: this almost always lands mid-onboarding-tutorial (its
+          // own scripted plant reaching flourishing is what sends it to the
+          // harvest step below), and that banner can't share the screen with
+          // the fertilizer modal.
+          if (!state.fertReady) {
+            state.fertReady = true;
+            maybeStartFertTutorial();
+          }
+        }
         // A bred seedling opening is the payoff of the whole crossing loop, so
         // it gets its own message instead of the generic "burst into bloom".
         // This is also the right moment (not doBreed, back when the cross was
@@ -4190,8 +4235,12 @@
       // skips straight to resuming it, since they've already seen Welcome.
       // Only once both are already done does a returning player get the
       // welcome-back tour instead - it would otherwise compete with either.
+      // A fertilizer modal left unanswered (see maybeStartFertTutorial) resumes
+      // here too, ahead of the welcome-back tour, for the same reason as the
+      // tutorialDone branch above it - it would otherwise compete with it.
       if (!state.seenWelcome) openWelcome();
       else if (!state.tutorialDone) startTutorial();
+      else if (state.fertReady && !state.fertUnlocked) openFertTutorial();
       else buildAndStartWelcomeBackTour(lastSeen, goneWild);
 
       // Advance the checkpoint on every lock, regardless of which branch
@@ -5596,14 +5645,18 @@
       // day (see dailyStock), three per row, so the seventh always ends up
       // alone; rather than leave it stranded on its own row, it shares the
       // last row with the sack instead (see .stand-row-last).
-      var fert =
+      // Empty (not disabled) until state.fertUnlocked - see the FERTILIZER
+      // UNLOCK section. Before the player has ever grown a flower to
+      // flourishing there's nothing to sell them: a visible-but-disabled
+      // sack would just be a locked item nobody yet knows the reason for.
+      var fert = state.fertUnlocked ?
         '<button class="stand-fert-btn"' + (state.currency >= FERTILIZER_COST ? '' : ' disabled') +
         ' title="Fertilizer - ' + FERTILIZER_COST + ' Petals" onclick="confirmBuyFertilizer()">' +
         '<span class="stand-fert-icon">\u{1F33E}</span>' +
         '<span class="stand-fert-label">Fertilizer</span>' +
         '<span class="stand-fert-price">' + FERTILIZER_COST + ' \u{1F338}</span>' +
         '<span class="stand-fert-owned">have ' + state.fertilizer + '</span>' +
-        '</button>';
+        '</button>' : '';
 
       document.getElementById('stand-row-1').innerHTML = crates.slice(0, 3).join('');
       document.getElementById('stand-row-2').innerHTML = crates.slice(3, 6).join('');
@@ -5762,6 +5815,7 @@
       setToolHint(null);
       setSeedHint(false);
       hideTutorialBanner();
+      maybeStartFertTutorial(); // in case the tutorial plant flourished before it was skipped
     }
 
     function finishTutorial() {
@@ -5772,7 +5826,9 @@
       setSeedHint(false);
       showTutorialBanner('You\'ve got the hang of it! Plant, water, harvest, and shop for better seeds ' +
         'whenever you like. Have fun out there! \u{1F337}');
-      setTimeout(hideTutorialBanner, 6000);
+      // The fertilizer modal (if the tutorial plant flourished along the way)
+      // waits for this banner to clear rather than stacking on top of it.
+      setTimeout(function () { hideTutorialBanner(); maybeStartFertTutorial(); }, 6000);
     }
 
     // Clears the one tutorial plant's readiness wait so the next watering
@@ -5863,9 +5919,64 @@
     }
 
     // ---------------------------------------------------------------------
+    //  FERTILIZER UNLOCK (first flourish, once)
+    //  Fertilizer used to be buyable from the moment a save existed. Now it
+    //  stays out of the Shop and Crossing Notes stays out of the menu until
+    //  the player has actually grown one flower of their own all the way to
+    //  flourishing - state.fertReady, set the instant that happens (see the
+    //  reachedFlourish branch in waterPlant). The instant it does, this
+    //  either shows the explainer modal right away or - if the onboarding
+    //  tutorial banner is still up, which is the common case, since a
+    //  scripted flourish is what sends that tutorial to its own harvest step
+    //  - defers until skipTutorial/finishTutorial call back in here. Nothing
+    //  actually unlocks (state.fertUnlocked) until the player dismisses that
+    //  modal, so a save closed mid-way resumes it on the next GPS lock (see
+    //  onGpsLocked) instead of silently granting or withholding access.
+    // ---------------------------------------------------------------------
+    function maybeStartFertTutorial() {
+      if (state.fertUnlocked || !state.fertReady) return;
+      if (tutorial.active) return; // onboarding still running - it calls back in when it wraps up
+      openFertTutorial();
+    }
+
+    function openFertTutorial() {
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Fertilizer Unlocked! \u{1F33E}';
+      document.getElementById('modal-body').innerHTML =
+        '<p>Your first flower flourished into a full cluster - nice work! That opens up ' +
+        '<b>fertilizer</b>, the only way to reach the colors the Shop never stocks.</p>' +
+        '<p>Grow two flowers to <b>flourishing</b> on tiles next to each other, then buy a bag of ' +
+        'fertilizer from the Shop. Equip it from the toolbox and press and hold either flower - or open ' +
+        'its details and tap <b>Cross with a neighbour</b> - to cross it with a random flourishing ' +
+        'neighbour, never one you pick. A seedling comes up in the gap between them, and its color stays ' +
+        'a mystery until you water it into bloom.</p>' +
+        '<p>Both parents rest for ' + formatDuration(BREED_COOLDOWN_MS) + ' afterwards. Your new ' +
+        '<b>Crossing Notes</b> page in the menu will remember every pairing you try.</p>';
+      document.getElementById('modal-ok-btn').textContent = 'Got it \u{1F331}';
+      document.getElementById('modal-ok-btn').onclick = function () {
+        state.fertUnlocked = true;
+        saveState();
+        closeModal();
+        syncFertUnlockUI();
+        toast('Fertilizer is in the Shop, and Crossing Notes is in the menu \u{1F338}');
+      };
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // Reveals the two pieces of UI that were gated on state.fertUnlocked -
+    // the Shop's fertilizer sack (see renderShopRows) and the Crossing Notes
+    // menu entry. Called once at boot (in case a returning player is already
+    // unlocked) and again the moment the fertilizer modal above is dismissed.
+    function syncFertUnlockUI() {
+      document.body.classList.toggle('fert-unlocked', state.fertUnlocked);
+      if (document.getElementById('shop-panel').classList.contains('open')) renderShopRows();
+    }
+
+    // ---------------------------------------------------------------------
     //  INIT
     // ---------------------------------------------------------------------
     initToolRail();             // draw the three tool icons once
+    syncFertUnlockUI();         // show Crossing Notes/fert sack right away for an already-unlocked save
     tickPlants();               // recompute any growth/wilt accrued while closed
     renderWild();               // wild flowers persist across sessions until picked
     updateHUD();

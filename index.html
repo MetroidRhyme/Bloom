@@ -1118,7 +1118,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.4.2</span>
+      <span id="game-version">v2.5.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3651,6 +3651,13 @@
     var seedRailOpen = false;
     var seedLevel = 'species';       // 'species' while the fan shows species, 'color' once one is picked
     var seedSpecies = null;          // which species' colors are showing, once seedLevel === 'color'
+    // Where the CURRENT fan's petals fly out from, in the same dx/dy space as
+    // seedFanSlots. 0,0 (the pouch icon itself) for the species level; the
+    // tapped species petal's own resting spot for the color level, so the
+    // colors visibly emerge from the species you just picked instead of
+    // reappearing at the pouch - which, with only one species/color, looked
+    // indistinguishable from nothing having happened at all.
+    var seedFanOriginDx = 0, seedFanOriginDy = 0;
 
     // ---- What's actually in the pouch, grouped for the fan -----------------
     function ownedSeedVariantsOfSpecies(speciesKey) {
@@ -3732,12 +3739,18 @@
       var container = document.getElementById('seed-petals');
       var petals = Array.prototype.slice.call(container.children);
       var slots = seedFanSlots(petals.length);
-      petals.forEach(function (el) { el.style.transform = 'translate(0,0) scale(0.3) rotate(28deg)'; });
+      var originTransform = 'translate(' + seedFanOriginDx.toFixed(1) + 'px,' + seedFanOriginDy.toFixed(1) +
+        'px) scale(0.3) rotate(28deg)';
+      petals.forEach(function (el) { el.style.transform = originTransform; });
       container.classList.add('open');
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           petals.forEach(function (el, i) {
             el.style.transitionDelay = (i * 0.05) + 's, ' + (i * 0.05) + 's';
+            // Stashed so a tap on THIS petal (species -> color drill-in) can
+            // hand its own resting spot back in as the next fan's origin.
+            el.dataset.dx = slots[i].dx.toFixed(1);
+            el.dataset.dy = slots[i].dy.toFixed(1);
             el.style.transform = 'translate(' + slots[i].dx.toFixed(1) + 'px,' + slots[i].dy.toFixed(1) + 'px) scale(1) rotate(0deg)';
           });
         });
@@ -3775,9 +3788,14 @@
     }
 
     // ---- Open/close and selection ------------------------------------------
-    function openSeedFan(level, species) {
+    // originDx/originDy default to 0,0 (the pouch icon) - the species level
+    // always opens from there; only the species -> color drill-in passes a
+    // real origin, see onSeedPetalTap below.
+    function openSeedFan(level, species, originDx, originDy) {
       seedLevel = level;
       seedSpecies = species;
+      seedFanOriginDx = originDx || 0;
+      seedFanOriginDy = originDy || 0;
       seedRailOpen = true;
       document.getElementById('seed-toggle').classList.add('seed-rail-open');
       renderSeedPetals();
@@ -3797,7 +3815,10 @@
     // (each petal's own onclick) and the hold-and-drag release path below.
     function onSeedPetalTap(key) {
       if (seedLevel === 'species') {
-        openSeedFan('color', key);
+        var el = seedPetalEl(key);
+        var dx = el ? parseFloat(el.dataset.dx) || 0 : 0;
+        var dy = el ? parseFloat(el.dataset.dy) || 0 : 0;
+        openSeedFan('color', key, dx, dy);
         vibrate(10);
       } else {
         equipSeed(key);

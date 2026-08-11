@@ -369,7 +369,7 @@
        like a tool. An equipped seed is planted with a plain tap on empty
        ground (see plantEquippedSeedAt), and it stays equipped across many
        taps so a whole bed of the same color is a row of taps, not a picker
-       round-trip per hex.
+       round-trip per tile.
 
        Species and color counts are both open-ended (up to 7 species, up to
        14 colors each), unlike the tool rail's fixed three, so there is no
@@ -1027,7 +1027,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.34.0</span>
+      <span id="game-version">v2.0.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1166,16 +1166,16 @@
     // ---------------------------------------------------------------------
     var HOUR = 3600000;
 
-    // Hex grid cell size - same ~20m scale used by the Porter game backbone,
-    // a good balance between "walkable in a few minutes" and "not so tiny
-    // that GPS jitter causes mis-taps".
+    // Square grid cell size - same ~20m scale used by the Porter game
+    // backbone, a good balance between "walkable in a few minutes" and "not
+    // so tiny that GPS jitter causes mis-taps". (v1.x used a hex grid; v2.0
+    // switched to a square grid - see the CELL MATH section below.)
     var CELL_LAT_DEG = 20 / 111111;
-    var SQ3 = Math.sqrt(3);
     // Longitude degrees-per-meter shrink with latitude (cos(lat) factor), so
     // this is corrected once at first GPS lock and persisted - see onGpsLocked.
     var CELL_LNG_DEG = parseFloat(localStorage.getItem('bloom_cell_lng')) || CELL_LAT_DEG;
 
-    var PLANT_RANGE_HEX = 2;   // how close (in hexes) you must be to plant or water
+    var PLANT_RANGE = 2;   // how close (in tiles, 8-directional) you must be to plant or water
 
     // Full water drains to empty over 2 days, at which point the flower starts
     // *looking* wilted. That is the entire consequence: wilting is cosmetic.
@@ -1692,7 +1692,7 @@
     // then disappears 6 hours after that; unlike your own flowers, these are
     // genuinely fleeting, which is what makes going out today worth it.
     //
-    // Placement is within WILD_SPAWN_RADIUS_M, biased toward hexes the player
+    // Placement is within WILD_SPAWN_RADIUS_M, biased toward tiles the player
     // has actually stood in planting range of before (state.visited - see
     // markAccessible). There is still no road or footpath check: the raster
     // basemap carries no geometry to test against, and the third-party
@@ -1704,7 +1704,7 @@
     // ground. Some will still land somewhere you can't stand - they expire
     // on their own, and there are always others.
     var WILD_MAX = 10;               // most wild flowers on the map at one time
-    var WILD_MIN_HEX_GAP = 5;        // min hex distance from each other AND from your own plants
+    var WILD_MIN_GAP = 5;            // min tile distance from each other AND from your own plants
     // At zoom 17 a phone shows roughly 370m x 730m, so at 800m most of a crop
     // starts off-screen. That is deliberate - walking to them is the point -
     // and the Wild Flowers screen in the menu is what keeps it from reading
@@ -1830,12 +1830,77 @@
       return out;
     }
 
+    // v2.0 replaced the hex grid with a square one (see CELL MATH). Only
+    // used during the one-time migration below, never at runtime - the old
+    // hex formula recreated here just enough to turn a legacy "q,r" key
+    // back into the real lat/lng it stood for, so that ground truth can be
+    // re-run through the new square formula. Uses whatever CELL_LNG_DEG is
+    // currently loaded, which is correct: it is the same per-device value
+    // (persisted at first GPS lock) that was in effect when the old hex
+    // save was written, and this device has not moved to a different
+    // latitude between one page load and the next.
+    function legacyHexCenter(q, r) {
+      var sq3 = Math.sqrt(3);
+      return { lat: (sq3 / 2 * q + sq3 * r) * CELL_LAT_DEG, lng: (3 / 2 * q) * CELL_LNG_DEG };
+    }
+    // Every plant/wild object carries the lat/lng it actually sits at,
+    // which the grid math change does not touch - flowers do not move.
+    // This re-derives q/r (and the dictionary key both are stored/looked-up
+    // under) from that ground truth using the new square formula, so a tap
+    // on a flower's real position still finds it. Without this, every
+    // existing flower would keep its old hex-shaped q/r forever, silently
+    // mismatched against latLngToCell() everywhere else in the game -
+    // it would render exactly where it always has, but never be tappable,
+    // waterable, or harvestable again.
+    function migrateGridKeys(dict) {
+      var out = {};
+      Object.keys(dict).forEach(function (k) {
+        var e = dict[k];
+        var c = latLngToCell(e.lat, e.lng);
+        var newKey = cellKey(c.q, c.r);
+        if (!out[newKey]) { e.q = c.q; e.r = c.r; out[newKey] = e; return; }
+        // Two flowers that lived in different (smaller) hexes can round to
+        // the same square tile - vanishingly rare at this cell size, but
+        // never silently drop one: nudge it to the nearest open neighbor
+        // tile instead, moving its stored lat/lng to match so it stays
+        // exactly where it now visually sits.
+        var placed = false;
+        for (var i = 0; i < CELL_NEIGHBORS.length && !placed; i++) {
+          var nq = c.q + CELL_NEIGHBORS[i][0], nr = c.r + CELL_NEIGHBORS[i][1];
+          var nk = cellKey(nq, nr);
+          if (out[nk]) continue;
+          var nc = cellCenter(nq, nr);
+          e.q = nq; e.r = nr; e.lat = nc.lat; e.lng = nc.lng;
+          out[nk] = e;
+          placed = true;
+        }
+        // All 8 neighbors already full too - give up rather than overwrite
+        // someone else's flower. Should not happen outside a lab-dense test
+        // garden, and the flower is still safe under its old key/position.
+        if (!placed) out[k] = e;
+      });
+      return out;
+    }
+    // `visited` has no lat/lng of its own (just a key), so it goes through
+    // legacyHexCenter first to recover the real spot each old key meant.
+    function migrateVisitedGridKeys(visited) {
+      var out = {};
+      Object.keys(visited).forEach(function (k) {
+        var parts = k.split(','), q = +parts[0], r = +parts[1];
+        if (isNaN(q) || isNaN(r)) return;
+        var c = legacyHexCenter(q, r);
+        var nc = latLngToCell(c.lat, c.lng);
+        out[cellKey(nc.q, nc.r)] = 1;
+      });
+      return out;
+    }
+
     function loadState() {
       var def = {
         plants: {},
-        wild: {},            // hex key -> wild flower, scattered daily
+        wild: {},            // cell key -> wild flower, scattered daily
         lastWildDay: null,   // local YYYY-MM-DD of the last spawn
-        // hex key -> 1, every hex ever within planting range of the player.
+        // cell key -> 1, every tile ever within planting range of the player.
         // Never shrinks - once a spot has been reachable it stays a priority
         // for wild spawning even if the player never goes back. See
         // markAccessible() and pickWildSpots().
@@ -1863,7 +1928,8 @@
         following: true,
         seenWelcome: false,
         tutorialDone: false, // brand-new save -> the onboarding tutorial should run
-        cheatMode: false     // dev/testing toggle, see the shop panel - see stageReadyMs/setCheatMode
+        cheatMode: false,    // dev/testing toggle, see the shop panel - see stageReadyMs/setCheatMode
+        gridV2: true         // brand-new save starts straight on the square grid - see migrateGridKeys
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -1879,11 +1945,23 @@
         Object.keys(wild).forEach(function (k) {
           if (!wild[k].color) wild[k].color = baseColorOf(wild[k].species);
         });
+        // One-time re-key from the old hex grid to the square grid (v2.0) -
+        // see migrateGridKeys/migrateVisitedGridKeys. Gated on gridV2 rather
+        // than run unconditionally: unlike the other migrations, the
+        // rare-collision nudge above is not perfectly idempotent (it can
+        // move a flower's lat/lng by a fraction of a tile), so this must
+        // run exactly once, not silently again on every future load.
+        var visited = parsed.visited || {};
+        if (!parsed.gridV2) {
+          plants = migrateGridKeys(plants);
+          wild = migrateGridKeys(wild);
+          visited = migrateVisitedGridKeys(visited);
+        }
         return {
           plants: plants,
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
-          visited: parsed.visited || {},
+          visited: visited,
           inventory: migrateInventory(parsed.inventory),
           crosses: parsed.crosses || {},
           stats: Object.assign({}, def.stats, parsed.stats || {}),
@@ -1899,7 +1977,8 @@
           // Any save that already exists predates the tutorial - never
           // interrupt an already-playing garden with onboarding.
           tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true,
-          cheatMode: !!parsed.cheatMode
+          cheatMode: !!parsed.cheatMode,
+          gridV2: true // migrated (or already was) above - never re-run the re-key on future loads
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -1937,121 +2016,70 @@
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
-        cheatMode: state.cheatMode
+        cheatMode: state.cheatMode, gridV2: state.gridV2
       }));
     }
 
     // ---------------------------------------------------------------------
-    //  HEX MATH (flat-top axial, same shape as the Porter backbone)
+    //  CELL MATH (square grid, axis-aligned with lat/lng)
+    //  v2.0 replaced the original hex grid with this. Both q and r are still
+    //  the field names every plant/wild object is keyed and stored by; only
+    //  what they mean underneath changed (column/row on a square grid,
+    //  rather than axial hex coordinates) - see the loadState() migration
+    //  that re-derives them from each entry's own lat/lng on first load.
     // ---------------------------------------------------------------------
-    function hexRound(qf, rf) {
-      var sf = -qf - rf;
-      var q = Math.round(qf), r = Math.round(rf), s = Math.round(sf);
-      var dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
-      if (dq > dr && dq > ds) q = -r - s;
-      else if (dr > ds) r = -q - s;
-      return { q: q, r: r };
+    function latLngToCell(lat, lng) {
+      return { q: Math.round(lng / CELL_LNG_DEG), r: Math.round(lat / CELL_LAT_DEG) };
     }
-    function latLngToHex(lat, lng) {
-      var nx = lng / CELL_LNG_DEG, ny = lat / CELL_LAT_DEG;
-      return hexRound(2 / 3 * nx, -1 / 3 * nx + SQ3 / 3 * ny);
+    function cellCenter(q, r) {
+      return { lat: r * CELL_LAT_DEG, lng: q * CELL_LNG_DEG };
     }
-    function hexCenter(q, r) {
-      return { lat: (SQ3 / 2 * q + SQ3 * r) * CELL_LAT_DEG, lng: (3 / 2 * q) * CELL_LNG_DEG };
-    }
-    function hexKey(q, r) { return q + ',' + r; }
-    function hexDist(q1, r1, q2, r2) {
-      var dq = q1 - q2, dr = r1 - r2;
-      return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+    function cellKey(q, r) { return q + ',' + r; }
+    // Chebyshev (king-move) distance - matches CELL_NEIGHBORS being
+    // 8-directional, so "N tiles away" means the same thing whether the
+    // step is straight or diagonal.
+    function cellDist(q1, r1, q2, r2) {
+      return Math.max(Math.abs(q1 - q2), Math.abs(r1 - r2));
     }
 
-    // Same six directions Porter uses, paired with hexVerticesPx's edge index
-    // (edge `e`, between vertices e and e+1, borders the neighbor at HEX_NEIGHBORS[e]).
-    var HEX_NEIGHBORS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+    // Eight directions (orthogonal + diagonal) - diagonals count as adjacent
+    // for every neighbor-based mechanic (breeding partners, wild-flower
+    // spacing, plant/water/harvest range), matching how the old hex grid's
+    // adjacency felt (roughly uniform in every direction).
+    var CELL_NEIGHBORS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 
-    // Six corner points (in Leaflet layer-point space) of the hex at (q, r),
-    // used only by the grid-mesh renderer below - plant markers are placed by
-    // lat/lng center (hexCenter), not by these pixel vertices.
-    function hexVerticesPx(q, r) {
-      var verts = [];
-      for (var i = 0; i < 6; i++) {
-        var angle = Math.PI / 3 * i;
-        var lat = (SQ3 / 2 * q + SQ3 * r + Math.sin(angle)) * CELL_LAT_DEG;
-        var lng = (3 / 2 * q + Math.cos(angle)) * CELL_LNG_DEG;
-        verts.push(map.latLngToLayerPoint([lat, lng]));
-      }
-      return verts;
+    // Four corner points (in Leaflet layer-point space) of the tile at
+    // (q, r), used only by the grid-mesh renderer below - plant markers are
+    // placed by lat/lng center (cellCenter), not by these pixel vertices.
+    // Order is BL, BR, TR, TL (lat/lng south-to-north, matching the offsets
+    // below - "top" on screen is higher latitude).
+    function cellVerticesPx(q, r) {
+      return [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(function (o) {
+        return map.latLngToLayerPoint([(r + o[1]) * CELL_LAT_DEG, (q + o[0]) * CELL_LNG_DEG]);
+      });
     }
     // Cheap cull against gridRenderer's own (padded) bounds, in layer points.
-    function hexOnScreen(verts) {
+    function cellOnScreen(verts) {
       var b = gridRenderer && gridRenderer._bounds;
       if (!b) return true;
       return verts.some(function (v) {
         return v.x >= b.min.x - 4 && v.x <= b.max.x + 4 && v.y >= b.min.y - 4 && v.y <= b.max.y + 4;
       });
     }
-    // Same six corners as hexVerticesPx, but in lat/lng instead of screen
-    // pixels - used to build the range overlay below, which is a real
-    // Leaflet vector layer (so it survives pan/zoom on its own) rather than
-    // a canvas mesh redrawn per-frame.
-    function hexCornersLatLng(q, r) {
-      var pts = [];
-      for (var i = 0; i < 6; i++) {
-        var angle = Math.PI / 3 * i;
-        var lat = (SQ3 / 2 * q + SQ3 * r + Math.sin(angle)) * CELL_LAT_DEG;
-        var lng = (3 / 2 * q + Math.cos(angle)) * CELL_LNG_DEG;
-        pts.push([lat, lng]);
-      }
-      return pts;
-    }
-    // The outer boundary of every hex within hexDist <= N of (centerQ,
-    // centerR) - i.e. the exact shape of "in range", not a circle that only
-    // approximates it. Built by edge-cancellation rather than a hand-derived
-    // formula: every one of the N-cluster's hexes contributes its 6 edges,
-    // any edge shared by two hexes in the cluster cancels out (interior),
-    // and whatever's left over is walked into a single ordered ring. Works
-    // for any N with no special-casing, at the cost of leaving collinear
-    // points along each side of the big hexagon instead of 6 clean corners -
-    // harmless for rendering, and this only runs when the player crosses
-    // into a new hex, not per animation frame (see animateRangeTo).
-    function hexRingLatLngs(centerQ, centerR, N) {
-      var hexes = [];
-      for (var dq = -N; dq <= N; dq++) {
-        var rMin = Math.max(-N, -dq - N), rMax = Math.min(N, -dq + N);
-        for (var dr = rMin; dr <= rMax; dr++) hexes.push({ q: centerQ + dq, r: centerR + dr });
-      }
-      function ptKey(p) { return Math.round(p[0] * 1e7) + '_' + Math.round(p[1] * 1e7); }
-      var edgeMap = {}, edgeOrder = [];
-      hexes.forEach(function (h) {
-        var c = hexCornersLatLng(h.q, h.r);
-        for (var i = 0; i < 6; i++) {
-          var a = c[i], b = c[(i + 1) % 6];
-          var ka = ptKey(a), kb = ptKey(b);
-          var ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
-          if (edgeMap[ek]) { edgeMap[ek].count++; }
-          else { edgeMap[ek] = { count: 1, a: a, b: b }; edgeOrder.push(ek); }
-        }
-      });
-      var boundary = edgeOrder.filter(function (ek) { return edgeMap[ek].count === 1; })
-        .map(function (ek) { return edgeMap[ek]; });
-      if (!boundary.length) return [];
-      var used = new Array(boundary.length).fill(false);
-      var ring = [boundary[0].a];
-      var curPt = boundary[0].b;
-      used[0] = true;
-      for (var iter = 0; iter < boundary.length; iter++) {
-        ring.push(curPt);
-        var foundIdx = -1;
-        for (var bi = 0; bi < boundary.length; bi++) {
-          if (used[bi]) continue;
-          var e = boundary[bi];
-          if (ptKey(e.a) === ptKey(curPt)) { foundIdx = bi; curPt = e.b; break; }
-          if (ptKey(e.b) === ptKey(curPt)) { foundIdx = bi; curPt = e.a; break; }
-        }
-        if (foundIdx === -1) break;
-        used[foundIdx] = true;
-      }
-      return ring;
+    // The exact boundary of every tile within cellDist <= N of (centerQ,
+    // centerR) - since Chebyshev distance N is a (2N+1)x(2N+1) block of
+    // tiles, that boundary is just one rectangle (four corners), unlike the
+    // old hex grid's edge-cancellation walk. Used to build the range overlay
+    // below, a real Leaflet vector layer (so it survives pan/zoom on its
+    // own) rather than a canvas mesh redrawn per-frame.
+    function cellRingLatLngs(centerQ, centerR, N) {
+      var half = N + 0.5;
+      return [
+        [(centerR - half) * CELL_LAT_DEG, (centerQ - half) * CELL_LNG_DEG],
+        [(centerR - half) * CELL_LAT_DEG, (centerQ + half) * CELL_LNG_DEG],
+        [(centerR + half) * CELL_LAT_DEG, (centerQ + half) * CELL_LNG_DEG],
+        [(centerR + half) * CELL_LAT_DEG, (centerQ - half) * CELL_LNG_DEG]
+      ];
     }
 
     // ---------------------------------------------------------------------
@@ -2084,7 +2112,7 @@
     // that flower - no randomness, you get what you chose. Callers are expected
     // to have already confirmed a seed of this species is actually owned (see
     // plantEquippedSeedAt) - this only re-checks defensively, it doesn't
-    // surface its own error UI. Returns the new plant's hex key, or null if
+    // surface its own error UI. Returns the new plant's cell key, or null if
     // there was no seed to spend.
     // Takes a variant key ("tulip:red"), not a bare species - a seed is a
     // species and a color, and planting spends exactly the one chosen.
@@ -2095,8 +2123,8 @@
 
       var now = Date.now();
       var v = parseVariant(vk);
-      var c = hexCenter(q, r);
-      var key = hexKey(q, r);
+      var c = cellCenter(q, r);
+      var key = cellKey(q, r);
       state.plants[key] = {
         q: q, r: r, lat: c.lat, lng: c.lng, species: v.species, color: v.color,
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
@@ -2197,8 +2225,8 @@
     }
 
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
-    // to Keep (into your collection, no currency) or Sell (clears the hex for
-    // Petals via harvestValue). Either way the hex frees up for replanting -
+    // to Keep (into your collection, no currency) or Sell (clears the tile for
+    // Petals via harvestValue). Either way the tile frees up for replanting -
     // "harvesting" always removes the plant from the ground.
     function harvestPlant(key, sell) {
       var p = state.plants[key];
@@ -2277,34 +2305,32 @@
       };
     }
 
-    // Records every hex within planting range of (q, r) as "accessible" - a
+    // Records every tile within planting range of (q, r) as "accessible" - a
     // spot the player was actually able to stand close enough to plant at,
     // at least once. pickWildSpots draws from this pool first, so the wild
     // crop gravitates toward ground that's proven reachable instead of a
     // uniformly random disc that doesn't know about lakes, rooftops, or
     // fenced yards. Persisted forever (once reachable, always a priority),
-    // and cheap: only newly-seen hexes trigger a save, so retracing the same
+    // and cheap: only newly-seen tiles trigger a save, so retracing the same
     // streets costs nothing after the first pass.
     function markAccessible(q, r) {
       var added = false;
-      for (var dq = -PLANT_RANGE_HEX; dq <= PLANT_RANGE_HEX; dq++) {
-        var rMin = Math.max(-PLANT_RANGE_HEX, -dq - PLANT_RANGE_HEX);
-        var rMax = Math.min(PLANT_RANGE_HEX, -dq + PLANT_RANGE_HEX);
-        for (var dr = rMin; dr <= rMax; dr++) {
-          var key = hexKey(q + dq, r + dr);
+      for (var dq = -PLANT_RANGE; dq <= PLANT_RANGE; dq++) {
+        for (var dr = -PLANT_RANGE; dr <= PLANT_RANGE; dr++) {
+          var key = cellKey(q + dq, r + dr);
           if (!state.visited[key]) { state.visited[key] = 1; added = true; }
         }
       }
       if (added) saveState();
     }
 
-    // Priority + rejection sampling. First fills from state.visited - hexes
+    // Priority + rejection sampling. First fills from state.visited - tiles
     // proven reachable before, within WILD_SPAWN_RADIUS_M and shuffled so the
     // same handful near home don't always win - then, if that pool can't
     // cover `needed` (a fresh save, or a walk into brand-new territory),
     // falls back to throwing darts at the disc around the player like
     // before. Either way, a spot only survives if it's at least
-    // WILD_MIN_HEX_GAP hexes from every existing wild flower, every plant
+    // WILD_MIN_GAP tiles from every existing wild flower, every plant
     // the player owns, and every spot already chosen in this same pass.
     // Capped attempts on the fallback, so a garden so dense that nothing
     // fits simply yields fewer flowers instead of spinning.
@@ -2321,11 +2347,11 @@
       var visitedCandidates = [];
       Object.keys(state.visited).forEach(function (k) {
         var parts = k.split(','), q = +parts[0], r = +parts[1];
-        var c = hexCenter(q, r);
+        var c = cellCenter(q, r);
         if (metersBetween(origin, c) <= WILD_SPAWN_RADIUS_M) visitedCandidates.push({ q: q, r: r });
       });
       // Fisher-Yates - an unshuffled visited list would always favor the
-      // earliest-discovered hexes over ground found more recently.
+      // earliest-discovered tiles over ground found more recently.
       for (var i = visitedCandidates.length - 1; i > 0; i--) {
         var j0 = Math.floor(Math.random() * (i + 1));
         var tmp = visitedCandidates[i]; visitedCandidates[i] = visitedCandidates[j0]; visitedCandidates[j0] = tmp;
@@ -2334,7 +2360,7 @@
         var vh = visitedCandidates[vi];
         var vok = true;
         for (var vj = 0; vj < avoid.length; vj++) {
-          if (hexDist(vh.q, vh.r, avoid[vj].q, avoid[vj].r) < WILD_MIN_HEX_GAP) { vok = false; break; }
+          if (cellDist(vh.q, vh.r, avoid[vj].q, avoid[vj].r) < WILD_MIN_GAP) { vok = false; break; }
         }
         if (!vok) continue;
         chosen.push(vh);
@@ -2347,13 +2373,13 @@
         // without it everything bunches towards the player.
         var ang = Math.random() * Math.PI * 2;
         var dist = Math.sqrt(Math.random()) * WILD_SPAWN_RADIUS_M;
-        var h = latLngToHex(
+        var h = latLngToCell(
           origin.lat + (dist * Math.cos(ang)) / 111111,
           origin.lng + (dist * Math.sin(ang)) / lngScale
         );
         var ok = true;
         for (var j = 0; j < avoid.length; j++) {
-          if (hexDist(h.q, h.r, avoid[j].q, avoid[j].r) < WILD_MIN_HEX_GAP) { ok = false; break; }
+          if (cellDist(h.q, h.r, avoid[j].q, avoid[j].r) < WILD_MIN_GAP) { ok = false; break; }
         }
         if (!ok) continue;
         chosen.push(h);
@@ -2415,13 +2441,13 @@
 
       var spots = pickWildSpots(needed);
       spots.forEach(function (h) {
-        var c = hexCenter(h.q, h.r);
+        var c = cellCenter(h.q, h.r);
         var sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
         // Wild flowers only ever come in the standard colors. Everything past
         // tier 0 has to be bred, so a walk can never hand you what breeding is
         // supposed to be for.
         var col = STANDARD_COLORS[Math.floor(Math.random() * STANDARD_COLORS.length)];
-        state.wild[hexKey(h.q, h.r)] = {
+        state.wild[cellKey(h.q, h.r)] = {
           q: h.q, r: h.r, lat: c.lat, lng: c.lng, species: sp.key, color: col,
           stage: 2, spawnedAt: Date.now()
         };
@@ -2732,7 +2758,7 @@
       subdomains: 'abcd', maxZoom: 20
     }).addTo(map);
 
-    // Pane ladder (bottom -> top): tilePane 200 < gridPane 350 (hex mesh) <
+    // Pane ladder (bottom -> top): tilePane 200 < gridPane 350 (cell mesh) <
     // overlayPane 400 (range shape, Leaflet default) < markerPane 600 (plants/
     // user, Leaflet default). Much shorter than Porter's ladder since Bloom has
     // no zones or connection lines to layer in between.
@@ -2746,12 +2772,12 @@
     // to it snapping to their location again.
     map.on('dragstart', function () { state.following = false; saveState(); });
 
-    // Hex mesh is only drawn once zoomed in this close - below it the hex count
-    // in view would grow into the thousands (this is a full-viewport mesh, not
-    // a bounded zone like Porter's), so it simply fades away on a wide view
-    // rather than costing a redraw budget to render or read.
+    // Tile mesh is only drawn once zoomed in this close - below it the tile
+    // count in view would grow into the thousands (this is a full-viewport
+    // mesh, not a bounded zone like Porter's), so it simply fades away on a
+    // wide view rather than costing a redraw budget to render or read.
     var GRID_MIN_ZOOM = 17;
-    var GRID_MAX_HEXES = 3000; // safety cap in case the viewport math overshoots
+    var GRID_MAX_CELLS = 3000; // safety cap in case the viewport math overshoots
 
     var _gridRedrawPending = false;
     function scheduleGridRedraw() {
@@ -2761,9 +2787,11 @@
     }
 
     // Soft outline mesh over the current viewport so planting spots read at a
-    // glance. Every edge is shared by exactly two hexes; only drawing edge
-    // indices 0-2 of each hex (see HEX_NEIGHBORS / hexVerticesPx) still covers
-    // every edge exactly once, so there's no dedup pass and no doubled lines.
+    // glance. Every edge is shared by exactly two tiles; only drawing each
+    // tile's bottom and left edges (corners BL/BR/TR/TL from cellVerticesPx)
+    // still covers every interior edge exactly once, so there's no dedup
+    // pass and no doubled lines - the +1 padding on every side below is what
+    // pulls in each cell's own top/right neighbor to draw the far edges too.
     function renderGridMesh() {
       if (!gridRenderer._ctx || !gridRenderer._bounds) return;
       var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
@@ -2772,26 +2800,27 @@
 
       var vb = map.getBounds().pad(0.25);
       var corners = [
-        latLngToHex(vb.getSouth(), vb.getWest()), latLngToHex(vb.getNorth(), vb.getEast()),
-        latLngToHex(vb.getSouth(), vb.getEast()), latLngToHex(vb.getNorth(), vb.getWest())
+        latLngToCell(vb.getSouth(), vb.getWest()), latLngToCell(vb.getNorth(), vb.getEast()),
+        latLngToCell(vb.getSouth(), vb.getEast()), latLngToCell(vb.getNorth(), vb.getWest())
       ];
       var minQ = Math.min.apply(null, corners.map(function (c) { return c.q; })) - 1;
       var maxQ = Math.max.apply(null, corners.map(function (c) { return c.q; })) + 1;
       var minR = Math.min.apply(null, corners.map(function (c) { return c.r; })) - 1;
       var maxR = Math.max.apply(null, corners.map(function (c) { return c.r; })) + 1;
-      if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_HEXES) return;
+      if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_CELLS) return;
 
       ctx.strokeStyle = 'rgba(70,120,80,0.14)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (var q = minQ; q <= maxQ; q++) {
         for (var r = minR; r <= maxR; r++) {
-          var verts = hexVerticesPx(q, r);
-          if (!hexOnScreen(verts)) continue;
-          for (var e = 0; e < 3; e++) {
-            ctx.moveTo(verts[e].x, verts[e].y);
-            ctx.lineTo(verts[(e + 1) % 6].x, verts[(e + 1) % 6].y);
-          }
+          var verts = cellVerticesPx(q, r);
+          if (!cellOnScreen(verts)) continue;
+          // Bottom edge (0-1) and left edge (3-0).
+          ctx.moveTo(verts[0].x, verts[0].y);
+          ctx.lineTo(verts[1].x, verts[1].y);
+          ctx.moveTo(verts[3].x, verts[3].y);
+          ctx.lineTo(verts[0].x, verts[0].y);
         }
       }
       ctx.stroke();
@@ -2869,7 +2898,7 @@
     // Empty ground within range plants immediately, but only with a seed
     // already equipped from the pouch (see plantEquippedSeedAt) - a bare tap
     // never spends a seed on its own, it just points at the pouch. An
-    // occupied hex opens its panel (from any distance - browsing your garden
+    // occupied tile opens its panel (from any distance - browsing your garden
     // from afar is fine, only *acting* on a plant requires being physically
     // close).
     // With a tool in hand every map tap belongs to the tool instead - see the
@@ -2883,13 +2912,13 @@
       if (railOpen) { setRailOpen(false); return; }
       if (seedRailOpen) { closeSeedFan(); return; }
       if (activeTool) return;
-      var h = latLngToHex(e.latlng.lat, e.latlng.lng);
-      var key = hexKey(h.q, h.r);
+      var h = latLngToCell(e.latlng.lat, e.latlng.lng);
+      var key = cellKey(h.q, h.r);
       if (state.plants[key]) { openPlantPanel(key); return; }
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
-      var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
-      if (hexDist(uh.q, uh.r, h.q, h.r) > PLANT_RANGE_HEX) {
+      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+      if (cellDist(uh.q, uh.r, h.q, h.r) > PLANT_RANGE) {
         toast('Walk closer to plant a seed here \u{1F6B6}');
         return;
       }
@@ -3193,7 +3222,7 @@
     // ---- Watering animation ----------------------------------------------
     // waterPlant() is deliberately called at the END, so the flower grows once
     // the can has poured and left rather than the instant you tap. Guarded per
-    // hex so a second tap during the pour can't water the same plant twice.
+    // tile so a second tap during the pour can't water the same plant twice.
     var wateringKeys = {};
     function waterWithCan(key) {
       var p = state.plants[key];
@@ -3233,12 +3262,12 @@
     function startHold(tool, target) {
       cancelHold();
       var o = target.obj;
-      // One hex north of the flower itself, not on top of it - a finger
+      // One tile north of the flower itself, not on top of it - a finger
       // pressed down on the flower for a full second otherwise covers the
-      // ring it's supposed to be watching fill. (0,1) is the one HEX_NEIGHBORS
-      // direction with zero longitude delta (see hexCenter's math), i.e. the
-      // neighbor directly above on screen rather than up-and-to-a-side.
-      var above = hexCenter(o.q, o.r + 1);
+      // ring it's supposed to be watching fill. On a square grid, r+1 is
+      // always due north (see cellCenter's math) - no direction-hunting
+      // needed, unlike the old hex grid.
+      var above = cellCenter(o.q, o.r + 1);
       var item = addFx(holdRingHtml(tool), above.lat, above.lng, 'hold-ring', 0);
       hold = {
         tool: tool, target: target, item: item, raf: null,
@@ -3288,8 +3317,8 @@
     function toolBlockedReason(tool, target) {
       var o = target.obj;
       if (!state.userPos) return 'Waiting for GPS to lock on...';
-      var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
-      if (hexDist(uh.q, uh.r, o.q, o.r) > PLANT_RANGE_HEX) return 'Walk closer to reach this one \u{1F6B6}';
+      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+      if (cellDist(uh.q, uh.r, o.q, o.r) > PLANT_RANGE) return 'Walk closer to reach this one \u{1F6B6}';
 
       if (tool === 'water') {
         if (target.kind === 'wild') return 'Wild flowers look after themselves - pick this one instead';
@@ -3346,13 +3375,13 @@
       if (!activeTool || pointerState) return;
       if (ev.pointerType === 'mouse' && ev.button !== 0) return;
       var ll = map.mouseEventToLatLng(ev);
-      var h = latLngToHex(ll.lat, ll.lng);
-      var target = toolTargetAt(hexKey(h.q, h.r));
+      var h = latLngToCell(ll.lat, ll.lng);
+      var target = toolTargetAt(cellKey(h.q, h.r));
       pointerState = {
         id: ev.pointerId, x: ev.clientX, y: ev.clientY,
-        hex: h, target: target, moved: false, completed: false
+        cell: h, target: target, moved: false, completed: false
       };
-      // Nothing starts sweeping for a tap-action tool, an empty hex, or a
+      // Nothing starts sweeping for a tap-action tool, an empty tile, or a
       // flower this tool can't be used on - those are all resolved on release.
       if (activeTool === 'water' || !target) return;
       if (!toolBlockedReason(activeTool, target)) startHold(activeTool, target);
@@ -3379,8 +3408,8 @@
         // Empty ground. Only worth a word inside planting range, where the tap
         // was probably meant to plant something - otherwise stay quiet.
         if (state.userPos) {
-          var uh = latLngToHex(state.userPos.lat, state.userPos.lng);
-          if (hexDist(uh.q, uh.r, ps.hex.q, ps.hex.r) <= PLANT_RANGE_HEX) {
+          var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+          if (cellDist(uh.q, uh.r, ps.cell.q, ps.cell.r) <= PLANT_RANGE) {
             toast('Put the ' + TOOL_NAMES[activeTool] + ' away to plant here \u{1F331}');
           }
         }
@@ -3409,7 +3438,7 @@
     //  equipped seed plants itself with a plain tap on empty ground (see
     //  plantEquippedSeedAt, wired into the map click handler below) and
     //  stays equipped across taps, so filling a bed with one color is a row
-    //  of taps rather than a picker round-trip per hex.
+    //  of taps rather than a picker round-trip per tile.
     //
     //  Every icon carries a count badge: the packet shows the total seeds
     //  held, a species petal shows that species' total, and a color petal
@@ -3623,7 +3652,7 @@
     function onSeedPacketEquippedClick() {
       if (equippedSeed) unequipSeed();
     }
-    // Plants the equipped variant directly on an empty, in-range hex - no
+    // Plants the equipped variant directly on an empty, in-range tile - no
     // picker, since equipping the seed already was the confirm step. Stays
     // equipped afterward (like a tool does) unless that was the last one.
     function plantEquippedSeedAt(q, r) {
@@ -3699,12 +3728,12 @@
     // ---------------------------------------------------------------------
     // No player marker - only the translucent range shape marks the player,
     // so it never sits on top of (and hides) a flower planted right next to
-    // them. userHexQ/userHexR is the hex it's currently snapped to. The shape
-    // itself is the exact union of every hex within PLANT_RANGE_HEX (see
-    // hexRingLatLngs) rather than a circle standing in for it, so what's
-    // highlighted matches what actually counts as "in range" hex-for-hex.
+    // them. userCellQ/userCellR is the tile it's currently snapped to. The
+    // shape itself is the exact union of every tile within PLANT_RANGE (see
+    // cellRingLatLngs) rather than a circle standing in for it, so what's
+    // highlighted matches what actually counts as "in range" tile-for-tile.
     var rangeArea = null, viewingKey = null, viewingWild = false;
-    var userHexQ = null, userHexR = null;
+    var userCellQ = null, userCellR = null;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     if (!navigator.geolocation) {
@@ -3716,12 +3745,12 @@
       });
     }
 
-    // Eases the range shape from one hex center to the next over ~450ms
-    // instead of jumping. Only runs on an actual hex change (see
-    // onLocationUpdate), so ordinary GPS jitter within the same hex never
+    // Eases the range shape from one tile center to the next over ~450ms
+    // instead of jumping. Only runs on an actual tile change (see
+    // onLocationUpdate), so ordinary GPS jitter within the same tile never
     // moves it at all - that's the real fix for the twitchiness, this
-    // animation just makes real hex-to-hex steps read as movement rather
-    // than a teleport. fromRing/toRing are two hexRingLatLngs() outputs -
+    // animation just makes real tile-to-tile steps read as movement rather
+    // than a teleport. fromRing/toRing are two cellRingLatLngs() outputs -
     // congruent, same vertex count and order, purely translated relative to
     // each other - so a per-vertex lerp is enough; no reshaping needed.
     var _circleAnimRAF = null;
@@ -3746,27 +3775,27 @@
       var lat = pos.coords.latitude, lng = pos.coords.longitude;
       state.userPos = { lat: lat, lng: lng };
 
-      // Snap the displayed position to the current hex's center rather than
-      // following raw GPS - range checks elsewhere already work in hex
-      // distance (hexDist), not raw lat/lng, so this changes nothing about
+      // Snap the displayed position to the current tile's center rather than
+      // following raw GPS - range checks elsewhere already work in tile
+      // distance (cellDist), not raw lat/lng, so this changes nothing about
       // what counts as "in range", only how steady the shape looks.
-      var h = latLngToHex(lat, lng);
-      var c = hexCenter(h.q, h.r);
+      var h = latLngToCell(lat, lng);
+      var c = cellCenter(h.q, h.r);
 
       if (!rangeArea) {
-        userHexQ = h.q; userHexR = h.r;
+        userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
-        rangeArea = L.polygon(hexRingLatLngs(h.q, h.r, PLANT_RANGE_HEX), {
+        rangeArea = L.polygon(cellRingLatLngs(h.q, h.r, PLANT_RANGE), {
           color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
         }).addTo(map);
         map.setView([c.lat, c.lng], 17);
         onGpsLocked();
-      } else if (h.q !== userHexQ || h.r !== userHexR) {
-        var fromRing = hexRingLatLngs(userHexQ, userHexR, PLANT_RANGE_HEX);
-        userHexQ = h.q; userHexR = h.r;
+      } else if (h.q !== userCellQ || h.r !== userCellR) {
+        var fromRing = cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE);
+        userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
-        animateRangeTo(fromRing, hexRingLatLngs(h.q, h.r, PLANT_RANGE_HEX));
+        animateRangeTo(fromRing, cellRingLatLngs(h.q, h.r, PLANT_RANGE));
         if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
       if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
@@ -3785,22 +3814,22 @@
       badge.textContent = 'GPS LOCKED';
       badge.className = 'locked';
       setTimeout(function () { badge.style.display = 'none'; }, 3000);
-      // Longitude scale depends on latitude - lock it once so hexes stay
-      // visually even-sided near where the player actually is.
+      // Longitude scale depends on latitude - lock it once so tiles stay
+      // visually square near where the player actually is.
       if (!localStorage.getItem('bloom_cell_lng')) {
         CELL_LNG_DEG = CELL_LAT_DEG / Math.cos(state.userPos.lat * Math.PI / 180);
         localStorage.setItem('bloom_cell_lng', CELL_LNG_DEG);
         // rangeArea was built (in onLocationUpdate, just before this call)
         // using the uncorrected CELL_LNG_DEG - rebuild it now with the fixed
-        // value so the very first shape isn't stretched either. userHexQ/R
+        // value so the very first shape isn't stretched either. userCellQ/R
         // must be re-derived from the real lat/lng too, not just reused:
-        // they were computed under the old CELL_LNG_DEG, and pairing a hex
+        // they were computed under the old CELL_LNG_DEG, and pairing a tile
         // index from one longitude scale with corners built at another
         // scale produces a wildly wrong shape, not just a stretched one.
         if (rangeArea) {
-          var hh = latLngToHex(state.userPos.lat, state.userPos.lng);
-          userHexQ = hh.q; userHexR = hh.r;
-          rangeArea.setLatLngs(hexRingLatLngs(userHexQ, userHexR, PLANT_RANGE_HEX));
+          var hh = latLngToCell(state.userPos.lat, state.userPos.lng);
+          userCellQ = hh.q; userCellR = hh.r;
+          rangeArea.setLatLngs(cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE));
         }
       }
       // The map.setView() a moment ago in onLocationUpdate already fired
@@ -3891,8 +3920,8 @@
       breedBtn.style.display = 'none';
       breedBtn.onclick = null;
 
-      var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
-      var inRange = uh && hexDist(uh.q, uh.r, w.q, w.r) <= PLANT_RANGE_HEX;
+      var uh = state.userPos ? latLngToCell(state.userPos.lat, state.userPos.lng) : null;
+      var inRange = uh && cellDist(uh.q, uh.r, w.q, w.r) <= PLANT_RANGE;
 
       var statusEl = document.getElementById('plant-status-line');
       if (!inRange) { statusEl.textContent = 'Walk over to pick it'; statusEl.className = 'status-wilt'; }
@@ -3915,7 +3944,7 @@
 
     // Wild flowers are free, so picking one is pure upside either way - Keep
     // adds it to your tally, Sell pays the single-bloom rate. Either way the
-    // hex clears, which is also what makes room for the next daily spawn.
+    // tile clears, which is also what makes room for the next daily spawn.
     function pickWild(key, sell) {
       var w = state.wild[key];
       if (!w) return;
@@ -3989,8 +4018,8 @@
       else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
       else { statusEl.textContent = 'Thriving'; statusEl.className = 'status-good'; }
 
-      var uh = state.userPos ? latLngToHex(state.userPos.lat, state.userPos.lng) : null;
-      var inRange = uh && hexDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE_HEX;
+      var uh = state.userPos ? latLngToCell(state.userPos.lat, state.userPos.lng) : null;
+      var inRange = uh && cellDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE;
 
       // The panel is a read-out now, not a control surface - tending happens
       // with the tools on the rail. So instead of a Water button and a
@@ -4026,7 +4055,7 @@
       var neighborWaiting = false;
       if (d.stage >= MAX_STAGE && !waiting && !partners.length) {
         neighborWaiting = neighborsOf(p.q, p.r).some(function (h) {
-          var o = state.plants[hexKey(h.q, h.r)];
+          var o = state.plants[cellKey(h.q, h.r)];
           return o && recomputePlant(o, Date.now()).stage >= MAX_STAGE;
         });
       }
@@ -4067,12 +4096,12 @@
     //  BREEDING
     // ---------------------------------------------------------------------
     function neighborsOf(q, r) {
-      return HEX_NEIGHBORS.map(function (d) { return { q: q + d[0], r: r + d[1] }; });
+      return CELL_NEIGHBORS.map(function (d) { return { q: q + d[0], r: r + d[1] }; });
     }
     // Free means nothing of yours and no wild flower - a bred seedling must
     // never overwrite something already growing there.
-    function hexFree(q, r) {
-      var k = hexKey(q, r);
+    function cellFree(q, r) {
+      var k = cellKey(q, r);
       return !state.plants[k] && !state.wild[k];
     }
     function colorOfPlant(p) { return p.color || baseColorOf(p.species); }
@@ -4090,27 +4119,27 @@
     function breedPartnersFor(key) {
       var p = state.plants[key];
       if (!p || !breedReady(p)) return [];
-      return neighborsOf(p.q, p.r).map(function (h) { return hexKey(h.q, h.r); })
+      return neighborsOf(p.q, p.r).map(function (h) { return cellKey(h.q, h.r); })
         .filter(function (k) {
           var o = state.plants[k];
           return o && breedReady(o);
         });
     }
 
-    // "Between them" where possible: two adjacent hexes share exactly two
-    // neighbours, so a seedling lands in the gap the parents make. Only if
-    // both of those are taken does it fall back to any free neighbour of
-    // either parent.
+    // "Between them" where possible: two adjacent tiles share at least one
+    // common neighbour, so a seedling lands in the gap the parents make.
+    // Only if none of those are free does it fall back to any free
+    // neighbour of either parent.
     function breedSpotFor(a, b) {
       var shared = neighborsOf(a.q, a.r).filter(function (h) {
-        return hexDist(h.q, h.r, b.q, b.r) === 1 && hexFree(h.q, h.r);
+        return cellDist(h.q, h.r, b.q, b.r) === 1 && cellFree(h.q, h.r);
       });
       var pool = shared;
       if (!pool.length) {
         var seen = {};
         pool = neighborsOf(a.q, a.r).concat(neighborsOf(b.q, b.r)).filter(function (h) {
-          var k = hexKey(h.q, h.r);
-          if (seen[k] || !hexFree(h.q, h.r)) return false;
+          var k = cellKey(h.q, h.r);
+          if (seen[k] || !cellFree(h.q, h.r)) return false;
           seen[k] = 1;
           return true;
         });
@@ -4167,8 +4196,8 @@
       // its own reveal ever happens. parentColors carries what's needed to
       // record it at the actual reveal moment instead (see waterPlant).
 
-      var c = hexCenter(spot.q, spot.r);
-      var key = hexKey(spot.q, spot.r);
+      var c = cellCenter(spot.q, spot.r);
+      var key = cellKey(spot.q, spot.r);
       state.plants[key] = {
         q: spot.q, r: spot.r, lat: c.lat, lng: c.lng, species: species, color: color,
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
@@ -4360,11 +4389,11 @@
     function onRecenter() {
       state.following = true;
       saveState();
-      // Pan to the snapped hex center (where the range circle actually is),
+      // Pan to the snapped tile center (where the range circle actually is),
       // not raw GPS - otherwise recenter can land slightly off from the
       // visible circle.
-      if (userHexQ !== null) {
-        var c = hexCenter(userHexQ, userHexR);
+      if (userCellQ !== null) {
+        var c = cellCenter(userCellQ, userCellR);
         map.panTo([c.lat, c.lng], { animate: true });
       }
     }
@@ -4417,7 +4446,7 @@
       var s = state.stats;
       document.getElementById('howto-body').innerHTML =
         '<p><b>Plant</b> - tap the seed pouch (top right), pick a seed, then tap the ground within a ' +
-        'couple hexes of you to plant it. A bare tap with nothing equipped won\'t plant anything on its ' +
+        'couple tiles of you to plant it. A bare tap with nothing equipped won\'t plant anything on its ' +
         'own - it just points you back at the pouch.</p>' +
         '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
         '(sell) fly out - fertilizer joins them once you own a bag. Tap the one you want, or hold the ' +
@@ -4425,7 +4454,7 @@
         'again to put it away. Use it on as many flowers as you like first. Tapping a flower with no tool ' +
         'in hand just opens its details.</p>' +
         '<p><b>Water</b> - pick up the watering can and tap each flower you want watered. You have to be ' +
-        'within a couple hexes of it.</p>' +
+        'within a couple tiles of it.</p>' +
         '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +
         'ready, and your next watering visit moves it up a stage: seed, sprout, single bloom, full ' +
         'flourishing cluster. A green \u{1F4A7} on the map means one is ready right now. Watering early is ' +
@@ -4441,7 +4470,7 @@
         '<p><b>Signature colors</b> - past all of those, each species has <b>two colors of its own</b> ' +
         'that no other flower can wear. They shimmer and glow, and the only way to reach one is to ' +
         'cross two flowers <b>of the same species</b> deep in the Gold line.</p>' +
-        '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on hexes next to each other and buy ' +
+        '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on tiles next to each other and buy ' +
         'a bag of fertilizer. Press and hold either one with the fertilizer tool to cross it with a random ' +
         'ready neighbour, or open its details and tap <b>Cross with a neighbour</b> to pick which one ' +
         'yourself. A seedling comes up in the gap between them, and its color stays a mystery until you ' +
@@ -4843,7 +4872,7 @@
         state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made</p>';
 
       if (!Object.keys(state.crosses).length) {
-        html += '<p class="tree-hint">Grow two flowers to <b>flourishing</b> on neighbouring hexes, buy ' +
+        html += '<p class="tree-hint">Grow two flowers to <b>flourishing</b> on neighbouring tiles, buy ' +
           'a bag of fertilizer in the Shop, then tap <b>Cross with a neighbour</b> to start filling this in.</p>';
       }
 
@@ -5121,7 +5150,7 @@
       openPurchaseConfirm({
         title: 'Buy fertilizer?',
         preview: '<p>One bag of fertilizer crosses two <b>flourishing</b> flowers standing on ' +
-          'neighbouring hexes, and a seedling comes up in the gap between them.</p>' +
+          'neighbouring tiles, and a seedling comes up in the gap between them.</p>' +
           '<p>You have <b>' + state.fertilizer + '</b> bag' +
           (state.fertilizer === 1 ? '' : 's') + '.</p>',
         cost: FERTILIZER_COST,
@@ -5251,7 +5280,7 @@
       p.readyAt = Date.now();
       saveState();
       renderPlants();
-      if (viewingKey === hexKey(p.q, p.r)) renderPlantPanel(viewingKey);
+      if (viewingKey === cellKey(p.q, p.r)) renderPlantPanel(viewingKey);
       updateHUD();
     }
 

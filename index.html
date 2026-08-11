@@ -298,8 +298,14 @@
       transition: transform 0.38s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
     }
     /* Never a tap target and never occupies a spot in the 3-tool layout -
-       only #tool-petals.has-fert (state.fertilizer > 0) makes it visible. */
-    .tool-btn.fert { display: none; }
+       only #tool-petals.has-fert (state.fertilizer > 0) makes it visible.
+       Scoped to .petal specifically, NOT plain .tool-btn.fert - #tool-toggle
+       also picks up a bare "fert" class (via renderToolRail, to color it
+       while fert is the active tool) and is a .tool-btn too, so an
+       unscoped rule here hid the toggle itself the moment fertilizer was
+       actually used - the equipped tool's own icon vanishing, with no
+       button left to tap to put it away. */
+    .tool-btn.petal.fert { display: none; }
     #tool-petals.has-fert .tool-btn.fert { display: flex; }
 
     .tool-btn.petal.water { transition-delay: 0.10s, 0.10s; }
@@ -1021,7 +1027,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.33.0</span>
+      <span id="game-version">v1.33.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>

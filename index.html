@@ -120,6 +120,18 @@
     }
     #recenter-btn:active { background: rgba(0,0,0,0.06); }
 
+    /* Mirrors #recenter-btn on the bottom-left. Reuses .tool-btn (see the
+       TOOL RAIL section below) for its base circular look and the
+       equip/unequip spring-pop animation, rather than duplicating that CSS
+       here for a button that otherwise behaves nothing like the tool rail. */
+    #sprinkler-toggle {
+      position: fixed; left: 16px; bottom: 96px; z-index: 900;
+      width: 46px; height: 46px; display: none;
+    }
+    #sprinkler-toggle.show { display: flex; }
+    #sprinkler-toggle.active { color: #2f7ea6; background: rgba(74,163,214,0.18); }
+    #sprinkler-toggle:active { transform: scale(0.92); }
+
     /* ================= TUTORIAL BANNER ================= */
     /* First-run only (see the TUTORIAL section in the script). Sits below
        the toolbox (which now hugs the top-left corner, see #tool-rail) so
@@ -622,6 +634,21 @@
     .stand-fert-label { font-size: 9.5px; font-weight: 800; color: #5a3d22; text-align: center; }
     .stand-fert-price { font-size: 8.5px; font-weight: 700; color: #a06a00; }
     .stand-fert-owned { font-size: 8px; font-weight: 700; color: #8a7550; margin-top: 4px; }
+    /* Sprinkler's own tile on the counter, own row (stand-row-4, hidden
+       until sprinklerUnlocked()) - a cool blue-grey gradient rather than the
+       sack's wheat gold, so the two never get mistaken for one another at a
+       glance. Same shape/sizing as .stand-fert-btn otherwise, so the two
+       equipment items still read as one family. */
+    .stand-sprinkler-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 86px;
+      background: linear-gradient(180deg, #e4eef7, #b9cfe0); border: 2px solid #46607a;
+      border-radius: 12px; padding: 10px 6px 7px; cursor: pointer; box-shadow: var(--shadow-sm);
+    }
+    .stand-sprinkler-btn:disabled { filter: grayscale(60%); opacity: 0.5; cursor: default; box-shadow: none; }
+    .stand-sprinkler-icon { line-height: 1; }
+    .stand-sprinkler-label { font-size: 9.5px; font-weight: 800; color: #2f4759; text-align: center; }
+    .stand-sprinkler-price { font-size: 8.5px; font-weight: 700; color: #2f7ea6; }
+    .stand-sprinkler-owned { font-size: 8px; font-weight: 700; color: #5a7387; margin-top: 4px; }
     /* Purchase confirmation: what you are about to buy, drawn big enough to
        tell a Red Tulip from a Pink one before the Petals are gone. */
     .buy-preview {
@@ -1101,7 +1128,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.6.1</span>
+      <span id="game-version">v2.7.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1121,6 +1148,12 @@
   </div>
 
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
+
+  <!-- Mirrors #recenter-btn on the opposite corner. Hidden until at least one
+       sprinkler is owned unplaced (see renderSprinklerToggle) - the click
+       listener is wired up in the EQUIPMENT section of the script, same
+       reason the tool rail's own handlers are JS-bound rather than inline. -->
+  <button id="sprinkler-toggle" class="tool-btn" title="Sprinkler"></button>
 
   <!-- Icons are filled in by initToolRail() so the same artwork can be reused
        by the hold ring, the panel hints and the watering animation. Pointer
@@ -1208,6 +1241,9 @@
         <div id="stand-row-1" class="stand-row stand-row-crates"></div>
         <div id="stand-row-2" class="stand-row stand-row-crates"></div>
         <div id="stand-row-3" class="stand-row stand-row-last"></div>
+        <!-- Hidden until sprinklerUnlocked() (10 flowers kept or sold) - see
+             renderShopRows. -->
+        <div id="stand-row-4" class="stand-row stand-row-last"></div>
       </div>
     </div>
   </div>
@@ -1720,6 +1756,16 @@
     // flourishing plants would be an unlimited on-demand seed press.
     var BREED_COOLDOWN_MS = 12 * HOUR;
 
+    // ---- Sprinkler equipment -----------------------------------------------
+    // A late-game convenience, not a starter tool - it stays out of the shop
+    // (see sprinklerUnlocked/renderShopRows) until the player has actually
+    // harvested ten flowers, kept or sold, the same combined tally the
+    // Harvester milestone already tracks. Pricier than anything else on sale
+    // (25x a seed) since one placement keeps watering a whole ring of tiles
+    // forever with no further cost or visits - see tickSprinklers.
+    var SPRINKLER_COST = 500;
+    var SPRINKLER_UNLOCK_FLOWERS = 10;
+
     // Pair key is order-independent, so a cross is one entry, not two.
     function crossKey(a, b) { return a < b ? a + '+' + b : b + '+' + a; }
 
@@ -2025,6 +2071,17 @@
         plants: {},
         wild: {},            // cell key -> wild flower, scattered daily
         lastWildDay: null,   // local YYYY-MM-DD of the last spawn
+        // cell key -> { q, r, lat, lng, placedAt }, one entry per placed
+        // sprinkler - see tickSprinklers for what "placed" actually does.
+        sprinklers: {},
+        // Bought but not yet placed - the equipment toggle's own badge (see
+        // renderSprinklerToggle). Placing one moves it from here into
+        // `sprinklers` above; picking a placed one back up reverses that.
+        sprinklerInventory: 0,
+        // One-time flag so the "Sprinklers unlocked!" toast (see
+        // checkSprinklerUnlock) can only ever fire once, even though every
+        // call site that touches stats.kept/sold rechecks the threshold.
+        sprinklerUnlockAnnounced: false,
         // cell key -> 1, every tile ever within planting range of the player.
         // Never shrinks - once a spot has been reachable it stays a priority
         // for wild spawning even if the player never goes back. See
@@ -2101,6 +2158,12 @@
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
           visited: visited,
+          // Brand new with this feature - any pre-existing save simply has
+          // none placed/owned yet, same treatment as fertilizer's own
+          // backfill just below.
+          sprinklers: parsed.sprinklers || {},
+          sprinklerInventory: typeof parsed.sprinklerInventory === 'number' ? parsed.sprinklerInventory : 0,
+          sprinklerUnlockAnnounced: !!parsed.sprinklerUnlockAnnounced,
           inventory: migrateInventory(parsed.inventory),
           crosses: parsed.crosses || {},
           stats: Object.assign({}, def.stats, parsed.stats || {}),
@@ -2156,6 +2219,8 @@
         visited: state.visited,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
+        sprinklers: state.sprinklers, sprinklerInventory: state.sprinklerInventory,
+        sprinklerUnlockAnnounced: state.sprinklerUnlockAnnounced,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
         cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen,
         lastSeenAt: state.lastSeenAt
@@ -2283,16 +2348,15 @@
       return key;
     }
 
-    // Watering is always allowed in range and always refills the tank (which
-    // resets the wilt/death clock), but it only advances a stage if the plant
-    // has finished its readiness wait - that separation is what makes each
-    // stage cost its own walk back without ever making a tap feel wasted.
-    // Bloom/flourish milestones are credited here, at the moment they actually
-    // happen, rather than being swept up later by tickPlants.
-    function waterPlant(key) {
-      var p = state.plants[key];
-      if (!p) return;
-      var now = Date.now();
+    // The actual "one watering visit" mutation, shared by a manual
+    // watering-can tap (waterPlant, below) and every automatic sprinkler
+    // check (tickSprinklers) - both are the exact same event to a plant,
+    // whether a finger or a placed sprinkler triggered it. Bloom/flourish
+    // milestones are credited here, at the moment they actually happen,
+    // rather than being swept up later by tickPlants. Returns what happened
+    // so each caller can react its own way (a toast per flower for a manual
+    // tap, one batched summary toast for a whole tick of sprinklers).
+    function applyWatering(p, now) {
       var grew = p.stage < MAX_STAGE && now >= p.readyAt;
 
       p.lastWateredAt = now;
@@ -2325,6 +2389,19 @@
           }
         }
       }
+      return { grew: grew, revealed: revealed };
+    }
+
+    // Watering is always allowed in range and always refills the tank (which
+    // resets the wilt/death clock), but it only advances a stage if the plant
+    // has finished its readiness wait - that separation is what makes each
+    // stage cost its own walk back without ever making a tap feel wasted.
+    function waterPlant(key) {
+      var p = state.plants[key];
+      if (!p) return;
+      var now = Date.now();
+      var res = applyWatering(p, now);
+      var grew = res.grew, revealed = res.revealed;
 
       recomputePlant(p, now);   // refresh derived state for immediate UI feedback
       saveState();
@@ -2396,6 +2473,7 @@
       updateCurrencyPill();
       closePlantPanel();
       vibrate(20);
+      checkSprinklerUnlock();
       return sell ? harvestValue(p, d.stage) : 0; // used by the tutorial's bonus top-up
     }
 
@@ -2419,6 +2497,71 @@
       renderWild();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
+    }
+
+    // ---------------------------------------------------------------------
+    //  SPRINKLERS
+    //  Placeable equipment (see the SHOP section for how one is bought and
+    //  the EQUIPMENT section near the tool rail for how one is placed/moved)
+    //  that waters every one of its eight neighbouring tiles automatically -
+    //  the one thing in Bloom that acts on a plant without a walk-up visit.
+    // ---------------------------------------------------------------------
+    // The unlock gate for the shop's sprinkler row - ten flowers combined,
+    // kept or sold, the same lifetime tally the "Harvester" milestone
+    // already uses (see MILESTONE_DEFS). Purely a read, recomputed live
+    // rather than cached, since state.stats never shrinks.
+    function sprinklerUnlocked() {
+      return (state.stats.kept + state.stats.sold) >= SPRINKLER_UNLOCK_FLOWERS;
+    }
+    // Fires the one-time "you can buy this now" toast the moment the gate
+    // above first opens. Called from every place stats.kept/sold changes
+    // (harvestPlant, pickWild, sellHeld) rather than off a timer, so it
+    // lands right at the harvest that actually crossed the line - and the
+    // persisted flag means it can never repeat even though every call site
+    // rechecks the same threshold.
+    function checkSprinklerUnlock() {
+      if (state.sprinklerUnlockAnnounced || !sprinklerUnlocked()) return;
+      state.sprinklerUnlockAnnounced = true;
+      saveState();
+      toast('\u{1F4A6} Sprinklers unlocked! Check the Shop \u{1F338}');
+    }
+
+    // Runs alongside tickPlants (same three call sites: boot, onGpsLocked,
+    // and the 60s interval) rather than living inside it - tickPlants is
+    // deliberately a pure read (see its own comment above), and this one
+    // genuinely mutates plants, exactly the way waterPlant does, just
+    // without a finger behind it. Each adjacent plant only ever advances one
+    // stage per call, same as a real watering visit (applyWatering sets
+    // readyAt relative to *now*, not to the missed threshold), so there is
+    // no way to bank multiple stages by leaving the sprinkler running
+    // offline - it simply resumes the instant the game is open again,
+    // consistent with the rest of the growth engine's no-punishment design.
+    function tickSprinklers() {
+      if (!Object.keys(state.sprinklers).length) return;
+      var now = Date.now(), watered = 0, grew = 0;
+      Object.keys(state.sprinklers).forEach(function (skey) {
+        var s = state.sprinklers[skey];
+        CELL_NEIGHBORS.forEach(function (d) {
+          var p = state.plants[cellKey(s.q + d[0], s.r + d[1])];
+          if (!p) return;
+          var wilted = (now - p.lastWateredAt) >= WATER_DURATION_MS;
+          var ready = p.stage < MAX_STAGE && now >= p.readyAt;
+          if (!wilted && !ready) return; // already fully topped up - nothing to do here
+          var res = applyWatering(p, now);
+          watered++;
+          if (res.grew) grew++;
+        });
+      });
+      if (watered === 0) return;
+      saveState();
+      renderPlants();
+      updateHUD();
+      if (viewingKey && state.plants[viewingKey]) renderPlantPanel(viewingKey);
+      // Only the growth is worth a toast - a quiet cosmetic top-up (see
+      // WATER_DURATION_MS) would just be noise every tick a sprinkler runs.
+      if (grew > 0) {
+        toast('\u{1F4A6} Your sprinkler grew ' + grew + (grew === 1 ? ' flower' : ' flowers') + '!');
+      }
     }
 
     // ---------------------------------------------------------------------
@@ -2481,6 +2624,7 @@
       var avoid = [];
       Object.keys(state.wild).forEach(function (k) { avoid.push(state.wild[k]); });
       Object.keys(state.plants).forEach(function (k) { avoid.push(state.plants[k]); });
+      Object.keys(state.sprinklers).forEach(function (k) { avoid.push(state.sprinklers[k]); });
 
       var origin = state.userPos;
       var lngScale = 111111 * Math.cos(origin.lat * Math.PI / 180);
@@ -2900,6 +3044,19 @@
       return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, boxH / 2], className: '' });
     }
 
+    // A placed sprinkler, drawn at a fixed size (it doesn't grow or wilt) on
+    // the same round backing the flowers use, so it reads as "a thing that
+    // lives on this tile" rather than a foreign UI element dropped on the
+    // map. sprinklerIconSVG is defined in the EQUIPMENT section further
+    // down, but shared as-is with the toggle button and the shop stand.
+    function makeSprinklerIcon() {
+      var px = plantIconBase();
+      _iconBuiltPx = px;
+      var w = Math.round(px * 0.7);
+      var html = '<div style="' + discStyle('#eaf3fb', w) + '">' + sprinklerIconSVG(Math.round(w * 0.66)) + '</div>';
+      return L.divIcon({ html: html, iconSize: [w, w], iconAnchor: [w / 2, w / 2], className: '' });
+    }
+
     // ---------------------------------------------------------------------
     //  MAP
     // ---------------------------------------------------------------------
@@ -3014,11 +3171,28 @@
         if (!seen[key]) { map.removeLayer(wildMarkers[key]); delete wildMarkers[key]; }
       });
     }
+    // Sits between wild (90) and the player's own plants (100) - sprinklers
+    // are the player's too, but a tile can never hold both at once, so the
+    // exact ordering only matters for the rare visual overlap at the edges.
+    var sprinklerMarkers = {};
+    function renderSprinklers() {
+      var seen = {};
+      Object.keys(state.sprinklers).forEach(function (key) {
+        var s = state.sprinklers[key];
+        seen[key] = true;
+        var icon = makeSprinklerIcon();
+        if (sprinklerMarkers[key]) sprinklerMarkers[key].setIcon(icon);
+        else sprinklerMarkers[key] = L.marker([s.lat, s.lng], { icon: icon, interactive: false, zIndexOffset: 95 }).addTo(map);
+      });
+      Object.keys(sprinklerMarkers).forEach(function (key) {
+        if (!seen[key]) { map.removeLayer(sprinklerMarkers[key]); delete sprinklerMarkers[key]; }
+      });
+    }
 
     // Rebuild every icon at the new zoom's size once a zoom gesture settles -
     // see plantIconBase()/makePlantIcon above for why this is what actually
     // makes zooming in grow the flowers instead of them snapping back.
-    map.on('zoomend', function () { renderPlants(); renderWild(); });
+    map.on('zoomend', function () { renderPlants(); renderWild(); renderSprinklers(); });
 
     // Live in-between-frames fix for the gap 'zoomend' alone leaves: CSS-scale
     // each marker's inner content div (never the marker element itself, which
@@ -3045,6 +3219,7 @@
       }
       apply(plantMarkers);
       apply(wildMarkers);
+      apply(sprinklerMarkers);
     }
     map.on('zoom', function () {
       if (_iconRescalePending) return;
@@ -3075,10 +3250,21 @@
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      if (cellDist(uh.q, uh.r, h.q, h.r) > PLANT_RANGE) {
+      var inRange = cellDist(uh.q, uh.r, h.q, h.r) <= PLANT_RANGE;
+      // A placed sprinkler always picks up on a tap, the same "act on what's
+      // here" priority an occupied plant/wild tile already gets above -
+      // moving it is an action, though, so it still needs the same walk-up
+      // range every other action requires (unlike just opening a panel).
+      if (state.sprinklers[key]) {
+        if (!inRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
+        pickUpSprinkler(key);
+        return;
+      }
+      if (!inRange) {
         toast('Walk closer to plant a seed here \u{1F6B6}');
         return;
       }
+      if (equippedSprinkler) { placeSprinklerAt(h.q, h.r); return; }
       if (equippedSeed) { plantEquippedSeedAt(h.q, h.r); return; }
       if (totalSeedCount() === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
       toast('Tap the seed pouch to choose what to plant \u{1F331}');
@@ -3266,9 +3452,11 @@
         setToolHint(null);
         closePlantPanel();  // both are ways of acting on a flower; only one at a time
         closeShop();
-        // A tool and an equipped seed are two different "what does a tap do"
-        // modes - can't have both, so picking up a tool puts any seed away.
+        // A tool and an equipped seed (or sprinkler) are different "what
+        // does a tap do" modes - can't have more than one, so picking up a
+        // tool puts the others away.
         if (equippedSeed) unequipSeed();
+        if (equippedSprinkler) unequipSprinkler();
         vibrate(10);
       }
       renderToolRail();
@@ -3811,7 +3999,8 @@
     function equipSeed(vk) {
       closeSeedFan();
       if (!(state.seeds[vk] > 0)) return; // stale tap - already spent since the fan opened
-      if (activeTool) setActiveTool(null); // a tool and a seed are mutually exclusive modes
+      if (activeTool) setActiveTool(null); // a tool, a seed and a sprinkler are mutually exclusive modes
+      if (equippedSprinkler) unequipSprinkler();
       closePlantPanel(); closeShop();
       equippedSeed = vk;
       seedLevel = 'species'; seedSpecies = null; // reset for next time the fan opens
@@ -3901,6 +4090,121 @@
     window.addEventListener('pointermove', onSeedPointerMove);
     window.addEventListener('pointerup', onSeedPointerUp);
     window.addEventListener('pointercancel', onSeedPointerUp);
+
+    // ---------------------------------------------------------------------
+    //  EQUIPMENT (sprinkler)
+    //  One toggle button, bottom-left, mirroring the recenter button on the
+    //  bottom-right - simpler than the tool rail or seed pouch since there is
+    //  only ever one kind of equipment: no fan to open, just equip/unequip.
+    //  Only shown once at least one sprinkler is owned unplaced (see
+    //  renderSprinklerToggle), same "don't show a slot nobody can use yet"
+    //  rule the fertilizer petal already follows.
+    //
+    //  Equipping it is the same "tap empty ground to place" gesture seeds
+    //  use (see plantEquippedSeedAt/placeSprinklerAt), not the tools' "tap a
+    //  flower to act on it" mode - a sprinkler is something you plant, not
+    //  something you act with. Tapping an already-placed sprinkler on the
+    //  map (see the click handler below) always picks it up and re-equips
+    //  it immediately, so "pick it up" and "move it" are the same gesture.
+    // ---------------------------------------------------------------------
+    var equippedSprinkler = false;
+
+    // Drawn stroke-and-fill like the tool icons, reused as-is for the map
+    // marker, this toggle button, and the shop's stand icon - one artwork,
+    // three places, like the watering can icon already is.
+    function sprinklerIconSVG(px) {
+      return '<svg viewBox="0 0 32 32" width="' + px + '" height="' + px + '">' +
+        '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#8a8f98"/>' +
+        '<circle cx="16" cy="15" r="4.5" fill="#5b6b7a"/>' +
+        '<g fill="none" stroke="#6ec6ff" stroke-width="2.2" stroke-linecap="round">' +
+        '<path d="M16 11 C10 5 6 5 3 8"/>' +
+        '<path d="M16 10 C16 3 16 3 16 2"/>' +
+        '<path d="M16 11 C22 5 26 5 29 8"/>' +
+        '</g></svg>';
+    }
+
+    function renderSprinklerToggle() {
+      var btn = document.getElementById('sprinkler-toggle');
+      btn.classList.toggle('show', state.sprinklerInventory > 0 || equippedSprinkler);
+      btn.classList.toggle('active', equippedSprinkler);
+      btn.innerHTML = sprinklerIconSVG(24) + seedCountBadgeHtml(state.sprinklerInventory);
+      btn.title = equippedSprinkler ? 'Put away the sprinkler' : 'Sprinkler';
+    }
+
+    function equipSprinkler() {
+      if (!(state.sprinklerInventory > 0)) return;
+      if (activeTool) setActiveTool(null);   // a tool and equipment are mutually exclusive modes
+      if (equippedSeed) unequipSeed();
+      closePlantPanel(); closeShop();
+      equippedSprinkler = true;
+      renderSprinklerToggle();
+      popSprinklerToggle();
+      updateHUD();
+      vibrate(10);
+    }
+    function unequipSprinkler() {
+      equippedSprinkler = false;
+      renderSprinklerToggle();
+      popSprinklerToggle();
+      updateHUD();
+    }
+    function onSprinklerToggleClick() {
+      if (equippedSprinkler) { unequipSprinkler(); return; }
+      equipSprinkler();
+    }
+    // Reuses the tool rail's own spring-pop keyframe (.equip-pop) - the
+    // button already shares the .tool-btn base class, so no new CSS is
+    // needed for the animation itself.
+    function popSprinklerToggle() {
+      var btn = document.getElementById('sprinkler-toggle');
+      btn.classList.remove('equip-pop');
+      void btn.offsetWidth;
+      btn.classList.add('equip-pop');
+    }
+
+    // Places the equipped sprinkler on an empty, in-range tile - no picker,
+    // same reasoning as plantEquippedSeedAt. Stays equipped afterward if
+    // there is another one left to place, otherwise puts itself away.
+    function placeSprinklerAt(q, r) {
+      var key = cellKey(q, r);
+      if (state.plants[key] || state.wild[key] || state.sprinklers[key]) {
+        toast('Something is already there');
+        return;
+      }
+      if (!(state.sprinklerInventory > 0)) {
+        toast("You're out of sprinklers - open the Shop \u{1F338} to buy more");
+        unequipSprinkler();
+        return;
+      }
+      state.sprinklerInventory--;
+      var c = cellCenter(q, r);
+      state.sprinklers[key] = { q: q, r: r, lat: c.lat, lng: c.lng, placedAt: Date.now() };
+      saveState();
+      renderSprinklers();
+      tickSprinklers(); // an adjacent plant may already be ready/wilted - catch it up right away
+      updateHUD();
+      toast('\u{1F4A6} Sprinkler placed - it waters every flower next to it automatically');
+      vibrate(20);
+      if (!(state.sprinklerInventory > 0)) unequipSprinkler(); else renderSprinklerToggle();
+    }
+
+    // Tapping a placed sprinkler always picks it up (see the map click
+    // handler) - there is no separate panel for equipment, unlike flowers.
+    // Auto-equips on the way out so the very next tap can drop it somewhere
+    // else - "tap it and pick it back up to move it" is meant to feel like
+    // one continuous gesture, not two unrelated ones.
+    function pickUpSprinkler(key) {
+      var s = state.sprinklers[key];
+      if (!s) return;
+      delete state.sprinklers[key];
+      state.sprinklerInventory++;
+      saveState();
+      renderSprinklers();
+      equipSprinkler(); // also vibrates - the one buzz covers both "picked up" and "equipped"
+      toast('Picked up the sprinkler \u{1F4A6} - tap a spot to move it');
+    }
+
+    document.getElementById('sprinkler-toggle').addEventListener('click', onSprinklerToggleClick);
 
     // ---------------------------------------------------------------------
     //  GPS
@@ -4181,6 +4485,7 @@
       var goneWild = collectGoneWild(Date.now());
 
       tickPlants();
+      tickSprinklers(); // catches up any adjacent plant that came ready/wilted while closed
       // Needs a real fix before it can ask "what paths are near here?", so it
       // hangs off the lock rather than off init. No-ops if today already ran.
       maybeSpawnWild();
@@ -4320,6 +4625,7 @@
       updateCurrencyPill();
       closePlantPanel();
       vibrate(20);
+      checkSprinklerUnlock();
     }
 
     function renderPlantPanel(key) {
@@ -4641,6 +4947,7 @@
       // action that could touch state.seeds, so it's the natural hook
       // rather than chasing every buySeed/extractHeld/plantSeedAt call site.
       renderSeedToggle();
+      renderSprinklerToggle(); // same reasoning - its badge needs to track state.sprinklerInventory
       // A tool in hand takes over the status line entirely: while you're in a
       // mode, what that mode does is the only thing worth saying.
       if (activeTool) {
@@ -4650,6 +4957,11 @@
       if (equippedSeed) {
         document.getElementById('hud-status-line').innerHTML =
           'Tap empty ground in range to plant a ' + variantName(equippedSeed) + ' \u{1F331}';
+        return;
+      }
+      if (equippedSprinkler) {
+        document.getElementById('hud-status-line').innerHTML =
+          'Tap empty ground in range to place the sprinkler \u{1F4A6}';
         return;
       }
       var keys = Object.keys(state.plants);
@@ -4860,6 +5172,11 @@
         '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds, one swatch per standard color, ' +
         'and fertilizer. Every seed costs the same and every flower sells for the same, so pick by looks, ' +
         'not by value.</p>' +
+        '<p><b>Sprinkler</b> \u{1F4A6} - keep or sell ' + SPRINKLER_UNLOCK_FLOWERS + ' flowers and it ' +
+        'unlocks in the Shop for ' + SPRINKLER_COST + ' Petals. Once bought, tap the sprinkler button ' +
+        '(bottom left) and tap empty ground to place it - it waters every flower on the eight tiles ' +
+        'around it automatically from then on, no walk-up visit needed. Tap a placed one any time to pick ' +
+        'it back up and move it.</p>' +
         '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, up to ten wild blooms are scattered ' +
         'around you, marked with a soft glow. They cost nothing - just walk over and pick one. Unlike your ' +
         'own flowers they don\'t last: a wild bloom wilts after 12 hours and is gone 6 hours later, so ' +
@@ -4923,6 +5240,7 @@
         (isCluster ? ' cluster' : ' bloom') + (qty === 1 ? '' : 's') + ' for ' + total + ' \u{1F338}');
       vibrate(20);
       renderJournalPage(parseVariant(vk).species);
+      checkSprinklerUnlock();
     }
 
     // Pull held flowers apart for seeds of that same species. Rolled per
@@ -5608,6 +5926,33 @@
       document.getElementById('stand-row-1').innerHTML = crates.slice(0, 3).join('');
       document.getElementById('stand-row-2').innerHTML = crates.slice(3, 6).join('');
       document.getElementById('stand-row-3').innerHTML = crates.slice(6, 7).join('') + fert;
+
+      // The sprinkler gets its own row, hidden entirely until unlocked -
+      // unlike fertilizer (always for sale), this one is a locked teaser
+      // beforehand so a player working toward it can see what's coming and
+      // how close they are, the same transparency toolBlockedReason already
+      // gives every other "not yet" moment in the game.
+      var row4 = document.getElementById('stand-row-4');
+      if (!sprinklerUnlocked()) {
+        var need = Math.max(0, SPRINKLER_UNLOCK_FLOWERS - (state.stats.kept + state.stats.sold));
+        row4.innerHTML =
+          '<button class="stand-sprinkler-btn" disabled title="Keep or sell ' + SPRINKLER_UNLOCK_FLOWERS +
+          ' flowers to unlock">' +
+          '<span class="stand-sprinkler-icon">' + sprinklerIconSVG(26) + '</span>' +
+          '<span class="stand-sprinkler-label">Sprinkler</span>' +
+          '<span class="stand-sprinkler-price">Locked</span>' +
+          '<span class="stand-sprinkler-owned">' + need + ' more flower' + (need === 1 ? '' : 's') +
+          '</span></button>';
+      } else {
+        row4.innerHTML =
+          '<button class="stand-sprinkler-btn"' + (state.currency >= SPRINKLER_COST ? '' : ' disabled') +
+          ' title="Sprinkler - ' + SPRINKLER_COST + ' Petals" onclick="confirmBuySprinkler()">' +
+          '<span class="stand-sprinkler-icon">' + sprinklerIconSVG(26) + '</span>' +
+          '<span class="stand-sprinkler-label">Sprinkler</span>' +
+          '<span class="stand-sprinkler-price">' + SPRINKLER_COST + ' \u{1F338}</span>' +
+          '<span class="stand-sprinkler-owned">have ' + state.sprinklerInventory + '</span>' +
+          '</button>';
+      }
     }
 
     // Nothing in the shop spends Petals on a single tap. The buy controls are
@@ -5688,6 +6033,34 @@
       updateCurrencyPill();
       syncFertTool(); // first bag ever bought - the toolbox petal can show up now
       toast('Bought a bag of fertilizer \u{1F331}');
+      vibrate(15);
+    }
+
+    function confirmBuySprinkler() {
+      if (!sprinklerUnlocked()) return;
+      openPurchaseConfirm({
+        title: 'Buy a sprinkler?',
+        preview: '<p>Place it on an empty tile and it automatically waters every flower on the eight ' +
+          'tiles around it - no walk-up visit needed. Tap a placed sprinkler any time to pick it back up ' +
+          'and move it somewhere else.</p>' +
+          '<p>You have <b>' + state.sprinklerInventory + '</b> unplaced.</p>',
+        cost: SPRINKLER_COST,
+        okText: 'Buy it \u{1F4A6}',
+        onOk: buySprinkler
+      });
+    }
+
+    function buySprinkler() {
+      if (!sprinklerUnlocked()) return;
+      if (state.currency < SPRINKLER_COST) return;
+      state.currency -= SPRINKLER_COST;
+      if (state.cheatMode) state.currency = CHEAT_CURRENCY; // never actually runs down
+      state.sprinklerInventory++;
+      saveState();
+      renderShopRows();
+      updateCurrencyPill();
+      updateHUD(); // the equipment toggle can show up now, same as syncFertTool above
+      toast('Bought a sprinkler \u{1F4A6}');
       vibrate(15);
     }
 
@@ -5867,10 +6240,12 @@
     // ---------------------------------------------------------------------
     initToolRail();             // draw the three tool icons once
     tickPlants();               // recompute any growth/wilt accrued while closed
+    tickSprinklers();           // catch up anything sprinklers should have watered while closed
     renderWild();               // wild flowers persist across sessions until picked
+    renderSprinklers();         // placed sprinklers persist across sessions until picked back up
     updateHUD();
     updateCurrencyPill();
-    setInterval(tickPlants, 60000);
+    setInterval(function () { tickPlants(); tickSprinklers(); }, 60000);
   </script>
 </body>
 </html>

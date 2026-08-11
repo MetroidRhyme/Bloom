@@ -622,10 +622,16 @@
     .stand-item-owned { font-size: 8px; font-weight: 700; color: #8a7550; }
     /* Fertilizer's own sack, styled apart from the seed crates but no
        longer set off with a divider line - it now just sits beside the
-       seventh flower on their shared, centered row. */
+       seventh flower on their shared, centered row. The gradient is a
+       bright wheat gold (not the muted khaki this used to be) precisely so
+       it has somewhere to fall to: at the old tone, :disabled's grayscale+
+       dim was barely different from the resting state, so an affordable,
+       fully-clickable sack read as grayed-out/locked at a glance - the same
+       contrast the seed crates already had between their cream resting
+       state and their washed-out disabled one. */
     .stand-fert-btn {
       display: flex; flex-direction: column; align-items: center; gap: 3px; width: 86px;
-      background: linear-gradient(180deg, #e8cfa0, #c9a565); border: 2px solid #6b4423;
+      background: linear-gradient(180deg, #ffe9b3, #f0c674); border: 2px solid #6b4423;
       border-radius: 12px; padding: 10px 6px 7px; cursor: pointer; box-shadow: var(--shadow-sm);
     }
     .stand-fert-btn:disabled { filter: grayscale(60%); opacity: 0.5; cursor: default; box-shadow: none; }
@@ -1118,7 +1124,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.5.0</span>
+      <span id="game-version">v2.5.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>

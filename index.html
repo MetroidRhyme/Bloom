@@ -383,8 +383,17 @@
        notes' plain swatch grid (.color-grid) does, since every found cell
        here is a little taped-down photo rather than a dot - it needs the
        extra room for the tape to overhang without crowding its neighbors. */
-    .scrapbook-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+    /* .color-grid.scrapbook-grid (not just .scrapbook-grid) - .color-grid
+       is defined later in the stylesheet for the crossing notes' grid, and
+       at equal specificity the later rule wins the cascade regardless of
+       this comment's position, silently overriding grid-template-columns
+       back to auto-fill. The compound selector outranks it outright. */
+    .color-grid.scrapbook-grid {
+      /* Fixed 4 columns rather than auto-fill - a species' full palette is
+         16 colors (14 shared plus its own two signatures), so 4x4 is the
+         natural shape for a full page and stays consistent across phone
+         widths instead of reflowing to 5 columns on a wider screen. */
+      display: grid; grid-template-columns: repeat(4, 1fr);
       /* Tall row-gap, not the crossing notes' tight 7px - each card's tape
          pokes up above its own top edge, and needs real clearance from the
          row above it or it visually overlaps that row's cards. */
@@ -604,7 +613,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.24.2</span>
+      <span id="game-version">v1.24.3</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>

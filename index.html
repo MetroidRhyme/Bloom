@@ -125,18 +125,27 @@
        the toolbox (which now hugs the top-left corner, see #tool-rail) so
        the two never overlap - it used to be the other way around, with the
        toolbox pushed down to clear this banner instead. */
-    #tutorial-banner {
+    /* #gps-denied-banner shares this box exactly - the two never show at
+       once (GPS locking is a precondition for the tutorial ever starting,
+       so if the denial banner is up the tutorial can't have begun), so one
+       shared position avoids fighting over the same screen real estate. */
+    #tutorial-banner, #gps-denied-banner {
       position: fixed; left: 12px; right: 12px; top: calc(var(--hud-top-h) + 74px); z-index: 950;
       background: linear-gradient(135deg, #fff6e0, #ffffff);
       border: 2px solid var(--amber); border-radius: 16px; box-shadow: var(--shadow);
       padding: 12px 16px; text-align: center; display: none;
     }
-    #tutorial-banner.open { display: block; }
-    #tutorial-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
+    #tutorial-banner.open, #gps-denied-banner.open { display: block; }
+    #tutorial-text, #gps-denied-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
     #tutorial-skip-link {
       display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700;
       color: var(--text-dim); text-decoration: underline; cursor: pointer;
     }
+    #gps-retry-btn {
+      margin-top: 8px; padding: 8px 20px; border: none; border-radius: 999px;
+      background: var(--green); color: #fff; font-size: 13px; font-weight: 800; cursor: pointer;
+    }
+    #gps-retry-btn:active { background: var(--green-dark); }
 
     /* ================= PLANT PANEL ================= */
     #plant-panel {
@@ -1027,7 +1036,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.0.0</span>
+      <span id="game-version">v2.1.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1079,6 +1088,13 @@
   <div id="tutorial-banner">
     <div id="tutorial-text">&nbsp;</div>
     <span id="tutorial-skip-link" onclick="skipTutorial()">Skip tutorial</span>
+  </div>
+
+  <!-- Shown only while the browser reports location permission as denied -
+       see onLocationError/retryLocation. -->
+  <div id="gps-denied-banner">
+    <div id="gps-denied-text">Bloom needs your location to know which flowers are near you.</div>
+    <button id="gps-retry-btn" onclick="retryLocation()">Try Again</button>
   </div>
 
   <div id="hud-bottom">
@@ -1929,7 +1945,13 @@
         seenWelcome: false,
         tutorialDone: false, // brand-new save -> the onboarding tutorial should run
         cheatMode: false,    // dev/testing toggle, see the shop panel - see stageReadyMs/setCheatMode
-        gridV2: true         // brand-new save starts straight on the square grid - see migrateGridKeys
+        gridV2: true,        // brand-new save starts straight on the square grid - see migrateGridKeys
+        // Brand-new device only - gates the one-time primer shown before the
+        // browser's native geolocation prompt (see openGpsPrimer). false
+        // here; every *existing* save below hardcodes this true, since an
+        // existing player's OS permission decision was already made long
+        // ago and re-explaining it now would be pure friction for no benefit.
+        gpsPrimerSeen: false
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -1978,7 +2000,8 @@
           // interrupt an already-playing garden with onboarding.
           tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true,
           cheatMode: !!parsed.cheatMode,
-          gridV2: true // migrated (or already was) above - never re-run the re-key on future loads
+          gridV2: true, // migrated (or already was) above - never re-run the re-key on future loads
+          gpsPrimerSeen: true // see def.gpsPrimerSeen - any pre-existing save always skips the primer
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -2016,7 +2039,7 @@
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
-        cheatMode: state.cheatMode, gridV2: state.gridV2
+        cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen
       }));
     }
 
@@ -3736,13 +3759,27 @@
     var userCellQ = null, userCellR = null;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    if (!navigator.geolocation) {
-      document.getElementById('gps-status').textContent = 'NO GPS';
-      document.getElementById('hud-status-line').textContent = 'Geolocation is not supported on this device.';
-    } else {
+    // The actual permission request - split out so both the normal startup
+    // path and the primer's "Allow Location" button (see openGpsPrimer) and
+    // retryLocation() can all trigger it the same way.
+    function requestLocation() {
       navigator.geolocation.watchPosition(onLocationUpdate, onLocationError, {
         enableHighAccuracy: true, maximumAge: 3000, timeout: 15000
       });
+    }
+
+    if (!navigator.geolocation) {
+      document.getElementById('gps-status').textContent = 'NO GPS';
+      document.getElementById('hud-status-line').textContent = 'Geolocation is not supported on this device.';
+    } else if (!state.gpsPrimerSeen) {
+      // Brand-new device: explain why Bloom wants location before the
+      // browser's own permission dialog fires, rather than surprising a
+      // total stranger with a native prompt they have no context for.
+      // Existing saves always come back from loadState() with
+      // gpsPrimerSeen already true, so returning players never see this.
+      openGpsPrimer();
+    } else {
+      requestLocation();
     }
 
     // Eases the range shape from one tile center to the next over ~450ms
@@ -3772,6 +3809,7 @@
     }
 
     function onLocationUpdate(pos) {
+      document.getElementById('gps-denied-banner').classList.remove('open'); // any fix clears a prior denial
       var lat = pos.coords.latitude, lng = pos.coords.longitude;
       state.userPos = { lat: lat, lng: lng };
 
@@ -3807,6 +3845,23 @@
       var badge = document.getElementById('gps-status');
       badge.textContent = 'NO GPS'; badge.className = 'err';
       document.getElementById('hud-status-line').textContent = msgs[err.code] || err.message;
+      // code 1 = permission denied is the one case with no automatic
+      // recovery - codes 2/3 (position unavailable / timeout) resolve on
+      // their own as watchPosition keeps retrying, so only 1 needs a way
+      // back in. See retryLocation()/onLocationUpdate for how this clears.
+      if (err.code === 1) document.getElementById('gps-denied-banner').classList.add('open');
+    }
+
+    // "Try Again" on the denial banner. This only actually helps if the
+    // player changed the permission in their browser/OS settings first -
+    // re-requesting after a hard denial with nothing changed just denies
+    // again - but it's a real recovery path for the common case (accidental
+    // "Don't Allow", or granting it after the fact) instead of a dead end.
+    function retryLocation() {
+      document.getElementById('gps-denied-banner').classList.remove('open');
+      var badge = document.getElementById('gps-status');
+      badge.textContent = 'LOCATING...'; badge.className = 'pending'; badge.style.display = '';
+      requestLocation();
     }
 
     function onGpsLocked() {
@@ -4409,6 +4464,35 @@
       if (!confirm('Erase your save completely - garden, seeds, Petals, and all progress? This cannot be undone.')) return;
       localStorage.removeItem(STORAGE_KEY);
       location.reload();
+    }
+
+    // Shown once, before requestLocation() ever runs on a brand-new device -
+    // see the gpsPrimerSeen gate above. Its only job is to give the native
+    // permission dialog some context before it appears, since a bare OS
+    // prompt with zero explanation is exactly the kind of thing a stranger
+    // reflexively taps "Don't Allow" on.
+    function openGpsPrimer() {
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Before we start';
+      document.getElementById('modal-body').innerHTML =
+        '<p>Bloom grows flowers where you actually walk, so it needs to know which tile you\'re ' +
+        'standing on. That\'s the only thing your location is used for - it stays on this device and ' +
+        'is never sent anywhere.</p>' +
+        '<p>Your browser is about to ask permission. Allow it to start planting.</p>';
+      document.getElementById('modal-ok-btn').textContent = 'Allow Location';
+      document.getElementById('modal-ok-btn').onclick = function () {
+        state.gpsPrimerSeen = true; saveState();
+        requestLocation();
+        // Welcome doesn't need a GPS fix to read, and a fix can take a few
+        // seconds - show it right away rather than leaving a brand-new
+        // player staring at a blank map while it resolves. openWelcome()
+        // reuses this same overlay (resetModalChrome + swap content), so
+        // this never actually closes and reopens - no flicker. If somehow
+        // seenWelcome is already true here (shouldn't happen for a save
+        // that still needed the primer), just drop back to the map.
+        if (!state.seenWelcome) openWelcome(); else closeModal();
+      };
+      document.getElementById('modal-overlay').classList.add('open');
     }
 
     function openWelcome() {

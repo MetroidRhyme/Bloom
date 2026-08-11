@@ -125,19 +125,22 @@
        the toolbox (which now hugs the top-left corner, see #tool-rail) so
        the two never overlap - it used to be the other way around, with the
        toolbox pushed down to clear this banner instead. */
-    /* #gps-denied-banner shares this box exactly - the two never show at
-       once (GPS locking is a precondition for the tutorial ever starting,
-       so if the denial banner is up the tutorial can't have begun), so one
-       shared position avoids fighting over the same screen real estate. */
-    #tutorial-banner, #gps-denied-banner {
+    /* #gps-denied-banner and #wb-tour-banner share this box exactly - the
+       three never show at once (GPS locking is a precondition for the
+       tutorial ever starting, so if the denial banner is up the tutorial
+       can't have begun; the welcome-back tour only ever starts once
+       onboarding AND the tutorial are both already done, and only after a
+       real fix, which rules out both other banners), so one shared
+       position avoids fighting over the same screen real estate. */
+    #tutorial-banner, #gps-denied-banner, #wb-tour-banner {
       position: fixed; left: 12px; right: 12px; top: calc(var(--hud-top-h) + 74px); z-index: 950;
       background: linear-gradient(135deg, #fff6e0, #ffffff);
       border: 2px solid var(--amber); border-radius: 16px; box-shadow: var(--shadow);
       padding: 12px 16px; text-align: center; display: none;
     }
-    #tutorial-banner.open, #gps-denied-banner.open { display: block; }
-    #tutorial-text, #gps-denied-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
-    #tutorial-skip-link {
+    #tutorial-banner.open, #gps-denied-banner.open, #wb-tour-banner.open { display: block; }
+    #tutorial-text, #gps-denied-text, #wb-tour-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
+    #tutorial-skip-link, #wb-tour-skip-link {
       display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700;
       color: var(--text-dim); text-decoration: underline; cursor: pointer;
     }
@@ -146,6 +149,31 @@
       background: var(--green); color: #fff; font-size: 13px; font-weight: 800; cursor: pointer;
     }
     #gps-retry-btn:active { background: var(--green-dark); }
+    #wb-tour-progress {
+      font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 2px;
+    }
+    /* The pulsing ring dropped at each tour stop (see advanceWelcomeBackTour)
+       - an expanding, fading circle rather than anything painted onto the
+       plant's own marker, since that marker gets rebuilt independently on
+       zoom/tick and fighting that rebuild for a transient effect isn't
+       worth it. Colored per stop type, echoing the same map-badge colors
+       used everywhere else (green = ready, blue = wilted). */
+    .wb-tour-ping {
+      width: 100%; height: 100%; border-radius: 50%; box-sizing: border-box;
+      background: rgba(76,175,109,0.25); border: 3px solid var(--green);
+      animation: wbTourPing 1.1s ease-out infinite;
+    }
+    .wb-tour-ping.wilted { background: rgba(74,163,255,0.25); border-color: var(--blue); }
+    .wb-tour-ping.wildNew { background: rgba(240,169,58,0.28); border-color: var(--amber); }
+    .wb-tour-ping.wildGone { background: rgba(138,132,120,0.22); border-color: var(--text-dim); }
+    @keyframes wbTourPing {
+      0% { transform: scale(0.55); opacity: 0.9; }
+      70% { transform: scale(1.5); opacity: 0.15; }
+      100% { transform: scale(0.55); opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .wb-tour-ping { animation: none; opacity: 0.55; }
+    }
 
     /* ================= PLANT PANEL ================= */
     #plant-panel {
@@ -1090,7 +1118,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.2.0</span>
+      <span id="game-version">v2.3.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1150,6 +1178,17 @@
   <div id="gps-denied-banner">
     <div id="gps-denied-text">Bloom needs your location to know which flowers are near you.</div>
     <button id="gps-retry-btn" onclick="retryLocation()">Try Again</button>
+  </div>
+
+  <!-- The welcome-back tour - see startWelcomeBackTourIfAny. Shares this
+       same slot with the two banners above; the three can never be open at
+       once (this only ever starts once onboarding and the tutorial are
+       both already done, and only after a real GPS fix, which rules out
+       both). -->
+  <div id="wb-tour-banner">
+    <div id="wb-tour-progress">&nbsp;</div>
+    <div id="wb-tour-text">&nbsp;</div>
+    <span id="wb-tour-skip-link" onclick="skipWelcomeBackTour()">Skip</span>
   </div>
 
   <div id="hud-bottom">
@@ -2016,7 +2055,15 @@
         // here; every *existing* save below hardcodes this true, since an
         // existing player's OS permission decision was already made long
         // ago and re-explaining it now would be pure friction for no benefit.
-        gpsPrimerSeen: false
+        gpsPrimerSeen: false,
+        // When the player was last actually in the game - the checkpoint
+        // the welcome-back tour diffs against (see startWelcomeBackTourIfAny,
+        // set at the end of every onGpsLocked()). null means "no checkpoint
+        // yet" - both a brand-new save and an existing save that predates
+        // this feature land here, and both correctly get no tour on the
+        // very next load (nothing to compare against), only from the visit
+        // after that once a real checkpoint exists.
+        lastSeenAt: null
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -2066,7 +2113,8 @@
           tutorialDone: typeof parsed.tutorialDone === 'boolean' ? parsed.tutorialDone : true,
           cheatMode: !!parsed.cheatMode,
           gridV2: true, // migrated (or already was) above - never re-run the re-key on future loads
-          gpsPrimerSeen: true // see def.gpsPrimerSeen - any pre-existing save always skips the primer
+          gpsPrimerSeen: true, // see def.gpsPrimerSeen - any pre-existing save always skips the primer
+          lastSeenAt: typeof parsed.lastSeenAt === 'number' ? parsed.lastSeenAt : null
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -2104,7 +2152,8 @@
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
-        cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen
+        cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen,
+        lastSeenAt: state.lastSeenAt
       }));
     }
 
@@ -2858,7 +2907,12 @@
     // Persist immediately: tickPlants no longer saves (it has nothing to save),
     // so without this a player who drags the map and closes the tab comes back
     // to it snapping to their location again.
-    map.on('dragstart', function () { state.following = false; saveState(); });
+    map.on('dragstart', function () {
+      state.following = false; saveState();
+      // A manual drag is the player reaching for control of the camera -
+      // don't fight it by flying to the next tour stop out from under them.
+      if (wbTour.active) skipWelcomeBackTour();
+    });
 
     // Tile mesh is only drawn once zoomed in this close - below it the tile
     // count in view would grow into the thousands (this is a full-viewport
@@ -3824,6 +3878,127 @@
     var userCellQ = null, userCellR = null;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    // -----------------------------------------------------------------------
+    //  WELCOME-BACK TOUR
+    //  A short, skippable camera tour that runs once per session, only once
+    //  onboarding and the tutorial are both already done (see onGpsLocked),
+    //  hopping to whatever changed while the game was closed instead of
+    //  leaving the player to notice it themselves scrolling around the map.
+    //  Every stop is derived from timestamps the plant/wild objects already
+    //  carry (readyAt, lastWateredAt, spawnedAt) compared against
+    //  state.lastSeenAt - nothing new is tracked per plant, only the one
+    //  session-level checkpoint. Purely a presentation layer: it never
+    //  changes game state itself (aside from advancing the checkpoint), so
+    //  skipping it early costs nothing and loses no information - the plant
+    //  or wild flower it would have shown you is still sitting on the map
+    //  exactly where it was.
+    // -----------------------------------------------------------------------
+    var wbTour = { active: false, stops: [], index: -1, timer: null, marker: null };
+    var WB_TOUR_MAX_STOPS = 6;   // caps a long absence at a highlight reel, not a slog
+    var WB_TOUR_DWELL_MS = 1600; // "a quick 1 or 2 second focus on each thing"
+
+    // Wild flowers that finished vanishing while the game was closed. Has to
+    // be captured before tickPlants() sweeps them out of state.wild - by the
+    // time buildWelcomeBackTour would otherwise look, they're already gone
+    // and unrecoverable, since nothing else remembers a wild flower once
+    // it's swept.
+    function collectGoneWild(now) {
+      return Object.keys(state.wild)
+        .filter(function (key) { return wildDerived(state.wild[key], now).gone; })
+        .map(function (key) { return state.wild[key]; });
+    }
+
+    // lastSeen is the checkpoint from BEFORE this session (captured in
+    // onGpsLocked before state.lastSeenAt is advanced to now); goneWild is
+    // collectGoneWild()'s pre-sweep snapshot. Returns nothing - starts the
+    // tour itself if there is anything worth showing.
+    function buildAndStartWelcomeBackTour(lastSeen, goneWild) {
+      if (!lastSeen) return; // no prior checkpoint yet - nothing to diff against
+      var now = Date.now();
+      var stops = [];
+
+      Object.keys(state.plants).forEach(function (key) {
+        var p = state.plants[key];
+        var d = recomputePlant(p, now);
+        var vk = variantKey(p.species, colorOfPlant(p));
+        // Readiness outranks wilt everywhere else in the UI (map badge, HUD,
+        // panel) - one stop per plant here too, rather than two competing
+        // messages about the same flower.
+        if (d.ready && p.readyAt > lastSeen) {
+          stops.push({ type: 'ready', lat: p.lat, lng: p.lng,
+            text: variantName(vk) + ' is ready to water \u{1F4A7}' });
+        } else if (d.wilted && (p.lastWateredAt + WATER_DURATION_MS) > lastSeen) {
+          stops.push({ type: 'wilted', lat: p.lat, lng: p.lng,
+            text: variantName(vk) + ' is looking a little wilted' });
+        }
+      });
+
+      Object.keys(state.wild).forEach(function (key) {
+        var w = state.wild[key];
+        if (w.spawnedAt > lastSeen) {
+          stops.push({ type: 'wildNew', lat: w.lat, lng: w.lng,
+            text: 'A wild ' + variantName(variantKey(w.species, w.color)) + ' appeared nearby \u{1F33C}' });
+        }
+      });
+      goneWild.forEach(function (w) {
+        stops.push({ type: 'wildGone', lat: w.lat, lng: w.lng,
+          text: 'A wild ' + variantName(variantKey(w.species, w.color)) + ' slipped away' });
+      });
+
+      if (!stops.length) return;
+
+      // Lead with the good news - ready plants and fresh wild flowers first,
+      // the merely cosmetic/informational stops last.
+      var order = { ready: 0, wildNew: 1, wilted: 2, wildGone: 3 };
+      stops.sort(function (a, b) { return order[a.type] - order[b.type]; });
+      if (stops.length > WB_TOUR_MAX_STOPS) stops = stops.slice(0, WB_TOUR_MAX_STOPS);
+
+      wbTour.active = true;
+      wbTour.stops = stops;
+      wbTour.index = -1;
+      document.getElementById('wb-tour-banner').classList.add('open');
+      advanceWelcomeBackTour();
+    }
+
+    function advanceWelcomeBackTour() {
+      if (wbTour.marker) { map.removeLayer(wbTour.marker); wbTour.marker = null; }
+      wbTour.index++;
+      if (wbTour.index >= wbTour.stops.length) { endWelcomeBackTour(); return; }
+      var stop = wbTour.stops[wbTour.index];
+
+      document.getElementById('wb-tour-progress').textContent =
+        (wbTour.index + 1) + ' of ' + wbTour.stops.length;
+      document.getElementById('wb-tour-text').textContent = stop.text;
+
+      if (reduceMotion) map.setView([stop.lat, stop.lng], PLANT_ICON_REF_ZOOM);
+      else map.flyTo([stop.lat, stop.lng], PLANT_ICON_REF_ZOOM, { duration: 0.7 });
+
+      wbTour.marker = L.marker([stop.lat, stop.lng], {
+        icon: L.divIcon({ html: '<div class="wb-tour-ping ' + stop.type + '"></div>',
+          iconSize: [46, 46], iconAnchor: [23, 23], className: '' }),
+        interactive: false, zIndexOffset: 500
+      }).addTo(map);
+
+      wbTour.timer = setTimeout(advanceWelcomeBackTour, WB_TOUR_DWELL_MS);
+    }
+
+    function endWelcomeBackTour() {
+      clearTimeout(wbTour.timer);
+      if (wbTour.marker) { map.removeLayer(wbTour.marker); wbTour.marker = null; }
+      wbTour.active = false;
+      document.getElementById('wb-tour-banner').classList.remove('open');
+      // Return to the player's own position regardless of state.following -
+      // the tour deliberately overrode the camera to get here, so it should
+      // deliberately hand it back, the same way it took it.
+      if (userCellQ !== null && userCellR !== null) {
+        var back = cellCenter(userCellQ, userCellR);
+        if (reduceMotion) map.setView([back.lat, back.lng], PLANT_ICON_REF_ZOOM);
+        else map.flyTo([back.lat, back.lng], PLANT_ICON_REF_ZOOM, { duration: 0.7 });
+      }
+    }
+
+    function skipWelcomeBackTour() { endWelcomeBackTour(); }
+
     // The actual permission request - split out so both the normal startup
     // path and the primer's "Allow Location" button (see openGpsPrimer) and
     // retryLocation() can all trigger it the same way.
@@ -3899,7 +4074,10 @@
         userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
         animateRangeTo(fromRing, cellRingLatLngs(h.q, h.r, PLANT_RANGE));
-        if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
+        // Suppressed mid-tour - the welcome-back tour is deliberately
+        // showing the player somewhere else on the map for a moment, and an
+        // ordinary GPS-follow pan firing underneath it would fight that.
+        if (state.following && !wbTour.active) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
       if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
       updateHUD();
@@ -3957,6 +4135,14 @@
       // above - redraw once more now so the very first mesh isn't stretched.
       scheduleGridRedraw();
       vibrate(30);
+
+      // Both captured before tickPlants()/maybeSpawnWild() run below: the
+      // checkpoint (lastSeen) is about to be overwritten for next time, and
+      // collectGoneWild() has to run before tickPlants() sweeps its answer
+      // away. See buildAndStartWelcomeBackTour().
+      var lastSeen = state.lastSeenAt;
+      var goneWild = collectGoneWild(Date.now());
+
       tickPlants();
       // Needs a real fix before it can ask "what paths are near here?", so it
       // hangs off the lock rather than off init. No-ops if today already ran.
@@ -3965,8 +4151,17 @@
       // once they dismiss it (see openWelcome). Returning to a save where the
       // tutorial was started but never finished/skipped (app closed mid-way)
       // skips straight to resuming it, since they've already seen Welcome.
+      // Only once both are already done does a returning player get the
+      // welcome-back tour instead - it would otherwise compete with either.
       if (!state.seenWelcome) openWelcome();
       else if (!state.tutorialDone) startTutorial();
+      else buildAndStartWelcomeBackTour(lastSeen, goneWild);
+
+      // Advance the checkpoint on every lock, regardless of which branch
+      // above ran - a brand-new save's very first lock needs this too, or
+      // it never gets a real checkpoint to diff against on visit two.
+      state.lastSeenAt = Date.now();
+      saveState();
     }
 
     // ---------------------------------------------------------------------

@@ -503,31 +503,48 @@
     .tree-caption { font-size: 11.5px; font-weight: 700; color: var(--text-dim); text-align: center; margin: 0 0 6px; }
     .tree-hint { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0 0 6px; }
     /* The tree canvas has its own horizontal scroll, independent of the
-       page's vertical one - the six-wide middle row doesn't fit a phone at
-       a legible card size, and panning just that row (not the tabs/caption
-       above it) is the natural way to see the rest of it. Bled to the
-       panel's own edges (negative margin) rather than staying inset, so
-       there is real room before a scroll is even needed. */
+       page's vertical one, as a fallback for the six-wide middle row on
+       narrow phones - panning just that row (not the tabs/caption above
+       it) is the natural way to see the rest of it. Bled to the panel's
+       own edges (negative margin) rather than staying inset, so there is
+       real room before a scroll is even needed. Cards are picture-only and
+       small (see below) specifically so this scroll is rarely needed at
+       all, rather than being the normal way to read the tree. */
     #tree-scroll {
       overflow-x: auto; -webkit-overflow-scrolling: touch;
       margin: 0 -22px 0 -30px; padding: 6px 22px 10px 30px;
     }
-    #tree-wrap { position: relative; min-width: 520px; }
+    /* Six 44px cards plus five 8px gaps - fits inside a 360px-and-up phone
+       with no horizontal scroll at all; only genuinely narrow phones need
+       to pan the tree. */
+    #tree-wrap { position: relative; min-width: 310px; }
     .tree-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     .tree-edge { stroke: rgba(90,61,34,0.55); stroke-width: 2; fill: none; stroke-linecap: round; }
-    /* Generous row gap for the same reason the journal's grid needed one -
-       a card's tape pokes up above its own top edge, and the lines
-       converging on each card need somewhere to curve through too. */
+    /* Smaller row gap than a first pass needed - picture-only cards (see
+       below) are shorter AND wear smaller tape, so there is less to clear
+       between one row's cards and the tape poking above the row below it. */
     .tree-row {
       position: relative; z-index: 1; width: 100%;
-      display: flex; justify-content: center; gap: 10px; margin: 0 0 46px;
+      display: flex; justify-content: center; gap: 8px; margin: 0 0 24px;
     }
     .tree-row:last-child { margin-bottom: 4px; }
-    /* Fixed width rather than the journal grid's stretch-to-fill - rows
-       here hold different counts (4, 6, 3, 1, 2), so every card needs to
-       stay the same size for the tree to read as one consistent diagram
-       instead of five differently-scaled ones. */
-    .tree-row .color-cell.slot { width: 76px; flex: 0 0 auto; }
+    /* Picture only, no name/count underneath (see crossNodeCard) - "to save
+       space" per request, so the card shrinks to just wrap a small flower
+       icon rather than the journal's full name+count layout. Fixed width
+       rather than the journal grid's stretch-to-fill either way: rows here
+       hold different counts (4, 6, 3, 1, 2), so every card needs to stay
+       the same size for the tree to read as one diagram, not five
+       differently-scaled ones. */
+    .tree-row .color-cell.slot { width: 44px; padding: 7px 5px; flex: 0 0 auto; }
+    .tree-row .slot-unknown { width: 26px; height: 26px; font-size: 13px; }
+    /* Tape scaled down to match - the journal's full-size tape (26x14,
+       poking 7px proud) would swallow a 44px card whole. */
+    .tree-row .color-cell.slot:not(.blank)::before,
+    .tree-row .color-cell.slot:not(.blank)::after {
+      top: -4px; width: 16px; height: 9px;
+    }
+    .tree-row .color-cell.slot:not(.blank)::before { left: -3px; }
+    .tree-row .color-cell.slot:not(.blank)::after { right: -3px; }
 
     /* ================= MODAL ================= */
     #modal-overlay {
@@ -679,7 +696,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v1.26.0</span>
+      <span id="game-version">v1.26.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3382,6 +3399,10 @@
     // them" read as the same object as everything else in the game.
     // showCount is off for the root row - nothing crosses into a standard,
     // so a count there would only ever read "0".
+    // Picture only, to save space - no name or count underneath (compare
+    // the journal's cards, which show both). The name and how many times
+    // it's been bred move into the title tooltip instead of disappearing
+    // outright, so a long-press/hover still gives the detail back.
     function crossNodeCard(colorId, speciesKey, showCount) {
       var c = colorFor(colorId);
       var discovered = crossResultDiscovered(colorId);
@@ -3390,15 +3411,14 @@
       // just borrows whichever species' page is open, so switching tabs
       // reflavors the whole tree instead of only its bottom row.
       var on = speciesFor(c.species || speciesKey);
-      var label = discovered ? c.name : '?';
-      var n = showCount && discovered ? crossResultCount(colorId) : 0;
+      var n = showCount ? crossResultCount(colorId) : 0;
+      var title = discovered ?
+        (c.name + (showCount ? ' - crossed ' + n + ' time' + (n === 1 ? '' : 's') : '')) :
+        'Not found yet';
       var cls = 'color-cell slot' + (discovered ? '' : ' blank');
-      return '<div class="' + cls + '" data-color="' + colorId + '" title="' +
-        (discovered ? label : 'Not found yet') + '">' +
-        (discovered ? speciesChip(on, colorId, 30) : '<span class="slot-unknown">?</span>') +
-        '<span class="slot-line"><span class="slot-label">' + label + '</span>' +
-        (showCount && discovered ? '<span class="slot-note some">' + n + '</span>' : '') +
-        '</span></div>';
+      return '<div class="' + cls + '" data-color="' + colorId + '" title="' + title + '">' +
+        (discovered ? speciesChip(on, colorId, 28) : '<span class="slot-unknown">?</span>') +
+        '</div>';
     }
 
     function openCrossPage(speciesKey) { renderCrossTree(speciesKey); }

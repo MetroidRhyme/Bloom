@@ -285,15 +285,6 @@
       transition: transform 0.12s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
     }
     #tool-toggle:active { transform: scale(0.92); }
-    /* Small green badge on the resting toolbox hints there is more inside;
-       it steps aside the instant the fan is open, since that is now obvious. */
-    .tool-btn.toolbox { position: relative; }
-    .tool-btn.toolbox::after {
-      content: ''; position: absolute; right: 2px; bottom: 2px; width: 8px; height: 8px;
-      border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--panel-bg);
-      transition: opacity 0.15s ease, transform 0.15s ease;
-    }
-    .tool-btn.toolbox.rail-open::after { opacity: 0; transform: scale(0.4); }
 
     /* Each tool keeps its own accent when equipped, so a glance at the
        toolbox says which mode you are in without reading the HUD line - the
@@ -422,14 +413,6 @@
     #seed-toggle { position: absolute; right: 0; top: 0; z-index: 2; }
     #seed-toggle:active { transform: scale(0.92); }
     #seed-petals { position: absolute; right: 0; top: 0; width: 0; height: 0; pointer-events: none; }
-
-    .tool-btn.seed-packet { position: relative; }
-    .tool-btn.seed-packet::after {
-      content: ''; position: absolute; left: 2px; bottom: 2px; width: 8px; height: 8px;
-      border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--panel-bg);
-      transition: opacity 0.15s ease, transform 0.15s ease;
-    }
-    .tool-btn.seed-packet.seed-rail-open::after { opacity: 0; transform: scale(0.4); }
 
     .seed-petal {
       position: absolute; right: 0; top: 0; width: 40px; height: 40px;
@@ -1118,7 +1101,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.6.0</span>
+      <span id="game-version">v2.6.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3298,7 +3281,6 @@
     function setRailOpen(open) {
       railOpen = open;
       document.getElementById('tool-petals').classList.toggle('open', open);
-      document.getElementById('tool-toggle').classList.toggle('rail-open', open);
       clearRailHover();
     }
     function clearRailHover() {
@@ -3801,7 +3783,6 @@
       seedFanOriginDx = originDx || 0;
       seedFanOriginDy = originDy || 0;
       seedRailOpen = true;
-      document.getElementById('seed-toggle').classList.add('seed-rail-open');
       renderSeedPetals();
     }
     function closeSeedFan() {
@@ -3811,7 +3792,6 @@
       });
       container.classList.remove('open');
       seedRailOpen = false;
-      document.getElementById('seed-toggle').classList.remove('seed-rail-open');
       clearSeedRailHover();
     }
     // A species petal drills into its colors without equipping or closing;

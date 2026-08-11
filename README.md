@@ -65,7 +65,7 @@ A color you've found on one species is named on every page, so once you've bred 
 
 ### Cross-breeding
 
-Grow two flowers to **flourishing** on neighbouring hexes, buy a bag of **fertilizer** (20 Petals, same as a seed), and tap **Cross with a neighbour**. A seedling comes up in the gap between them, and its color stays a mystery until you water it into bloom.
+Grow two flowers to **flourishing** on neighbouring tiles, buy a bag of **fertilizer** (20 Petals, same as a seed), and either press-and-hold one with the fertilizer tool or tap **Cross with a neighbour** from its panel. Either way it crosses with a **random** flourishing neighbour - never one you pick - so a flower touching two or three flourishing neighbours at once is a coin flip you don't control, and where you plant relative to your other flowers is part of the strategy. A seedling comes up in the gap between the two parents, and its color stays a mystery until you water it into bloom.
 
 Crossing two of the four standards is **deterministic** - four colors, six pairs, six new colors, the same result every time:
 

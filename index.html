@@ -987,9 +987,6 @@
     #modal-title { font-size: 20px; font-weight: 800; margin-bottom: 12px; }
     #modal-body { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 18px; text-align: left; }
     #modal-body p { margin: 0 0 10px; }
-    /* Up to seven owned species can be listed, so this scrolls rather than
-       pushing the modal's buttons off-screen. */
-    .seed-pick-list { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow-y: auto; }
 
     /* Journal blocks. */
     .inv-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -1060,13 +1057,10 @@
 
     /* Crossing notes moved to its own full-screen panel (#notes-panel,
        breeding tree) - .cross-list/.cross-row/etc are gone with the old
-       list rendering that used them. */
-    .seed-pick-btn {
-      display: flex; align-items: center; justify-content: space-between; width: 100%;
-      padding: 13px 16px; border: 2px solid; border-radius: 14px; background: #fff;
-      font-size: 14.5px; font-weight: 800; cursor: pointer;
-    }
-    .seed-pick-btn span:last-child { color: var(--text-dim); font-weight: 700; }
+       list rendering that used them. .seed-pick-list/.seed-pick-btn (the
+       "Cross with which one?" partner picker) are gone too, now that a
+       cross's partner is always a random draw rather than a choice - see
+       openBreedPicker. */
     #modal-body p:last-child { margin-bottom: 0; }
     #modal-ok-btn {
       display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
@@ -1124,7 +1118,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.5.2</span>
+      <span id="game-version">v2.6.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3115,7 +3109,11 @@
     //  and syncFertTool below) - press-and-hold a flourishing flower with it
     //  out and it crosses with a random ready neighbour, the same worker
     //  (doBreed) the plant panel's "Cross with a neighbour" button already
-    //  uses, just without picking which neighbour first. Equipping any tool
+    //  uses. Neither entry point ever lets you pick which neighbour - it is
+    //  always a uniform random draw among the ready ones (see
+    //  breedPartnersFor/openBreedPicker), so where you plant relative to
+    //  your other flourishing flowers is the only lever over the outcome.
+    //  Equipping any tool
     //  is a MODE - you tap every flower you want it applied to and then
     //  unequip it to put it away - which is what turns watering a whole bed
     //  into a row of taps rather than open-panel/tap-Water/close per flower.
@@ -3530,11 +3528,11 @@
         // toolBlockedReason already guarantees at least one ready neighbour
         // by this point (checked before the hold even starts, and again
         // here can't have changed mid-hold in a single-player game) - a
-        // random pick among them, instead of the plant panel's "which one"
-        // picker (openBreedPicker), is the whole point of the tool: one
-        // press-and-hold to cross, no extra decision first. doBreed does
+        // uniform random pick among them, same as the plant panel's own
+        // "Cross with a neighbour" button (see openBreedPicker) - which
+        // neighbour is never a choice, from either entry point. doBreed does
         // its own full re-validation and is the same worker the panel's
-        // "Cross with a neighbour" button already uses.
+        // button already uses.
         var partners = breedPartnersFor(target.key);
         var partnerKey = partners[Math.floor(Math.random() * partners.length)];
         doBreed(target.key, partnerKey);
@@ -4637,27 +4635,20 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    // With one partner this goes straight to the confirm; with several it asks
-    // which, because which neighbour you cross with is the entire decision.
+    // Which neighbour a cross lands on is never a choice, from the panel any
+    // more than from the fertilizer tool's press-and-hold (see
+    // applyToolAction) - both draw a uniform random partner from the same
+    // breedPartnersFor() list. That randomness is deliberate: it is what
+    // makes WHERE you plant relative to your other flourishing flowers
+    // matter, rather than planting anywhere and cherry-picking the pairing
+    // afterwards. Used to open a "Cross with which one?" picker when there
+    // were several candidates; that picker is gone along with the choice it
+    // offered.
     function openBreedPicker(key) {
       var partners = breedPartnersFor(key);
       if (!partners.length) return;
-      if (partners.length === 1) { openBreedConfirm(key, partners[0]); return; }
-
-      resetModalChrome();
-      document.getElementById('modal-title').textContent = 'Cross with which one?';
-      document.getElementById('modal-body').innerHTML = '<div class="seed-pick-list">' +
-        partners.map(function (pk) {
-          var o = state.plants[pk];
-          var vk = variantKey(o.species, colorOfPlant(o));
-          var c = colorFor(colorOfPlant(o));
-          return '<button class="seed-pick-btn" style="border-color:' + c.line +
-            '" onclick="openBreedConfirm(\'' + key + '\',\'' + pk + '\')">' +
-            '<span style="color:' + c.ink + '">' + variantChip(vk) + ' ' + variantName(vk) +
-            '</span></button>';
-        }).join('') + '</div>';
-      document.getElementById('modal-ok-btn').style.display = 'none';
-      document.getElementById('modal-overlay').classList.add('open');
+      var partnerKey = partners[Math.floor(Math.random() * partners.length)];
+      openBreedConfirm(key, partnerKey);
     }
 
     // ---------------------------------------------------------------------
@@ -4877,14 +4868,15 @@
         'that no other flower can wear. They shimmer and glow, and the only way to reach one is to ' +
         'cross two flowers <b>of the same species</b> deep in the Gold line.</p>' +
         '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on tiles next to each other and buy ' +
-        'a bag of fertilizer. Press and hold either one with the fertilizer tool to cross it with a random ' +
-        'ready neighbour, or open its details and tap <b>Cross with a neighbour</b> to pick which one ' +
-        'yourself. A seedling comes up in the gap between them, and its color stays a mystery until you ' +
-        'water it into bloom. Crossing two of the four ' +
-        'standards always gives the same result - six pairs, six new colors - and those in turn cross ' +
-        'into the rarer ones. Both parents rest for ' + formatDuration(BREED_COOLDOWN_MS) +
-        ' afterwards, and they stay right where they are. Your Crossing Notes in the menu remember every ' +
-        'pairing you\'ve tried.</p>' +
+        'a bag of fertilizer. Press and hold either one with the fertilizer tool, or open its details and ' +
+        'tap <b>Cross with a neighbour</b> - either way crosses it with a <b>random</b> flourishing ' +
+        'neighbour, never one you pick. A flower with two or three flourishing neighbours could cross ' +
+        'with any of them, so where you plant relative to your other flowers is worth thinking about. A ' +
+        'seedling comes up in the gap between them, and its color stays a mystery until you water it into ' +
+        'bloom. Crossing two of the four standards always gives the same result - six pairs, six new ' +
+        'colors - and those in turn cross into the rarer ones. Both parents rest for ' +
+        formatDuration(BREED_COOLDOWN_MS) + ' afterwards, and they stay right where they are. Your ' +
+        'Crossing Notes in the menu remember every pairing you\'ve tried.</p>' +
         '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds, one swatch per standard color, ' +
         'and fertilizer. Every seed costs the same and every flower sells for the same, so pick by looks, ' +
         'not by value.</p>' +
@@ -5402,8 +5394,9 @@
       if (!Object.keys(state.crosses).length) {
         html += '<p class="tree-hint">Grow two flowers to <b>flourishing</b> on neighbouring tiles and buy ' +
           'a bag of fertilizer in the Shop. Then equip the fertilizer tool from the toolbox and press and ' +
-          'hold either one to cross it with a ready neighbour, or open its details and tap <b>Cross with a ' +
-          'neighbour</b> to pick which one yourself - either way starts filling this in.</p>';
+          'hold either one, or open its details and tap <b>Cross with a neighbour</b> - either way crosses ' +
+          'it with a <b>random</b> flourishing neighbour, so which flowers you plant next to each other is ' +
+          'part of the plan. That starts filling this in.</p>';
       }
 
       var rows = [

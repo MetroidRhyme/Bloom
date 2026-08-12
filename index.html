@@ -709,14 +709,20 @@
       padding: 0 22px 0 30px;
     }
     /* Padded well clear of the spine on the left, and generously on the
-       right/bottom - overflow-y:auto here also makes overflow-x auto (per
-       spec, pairing a non-visible axis with 'visible' resolves both), so
-       anything that pokes past this box's own edge (a card's tape, its
-       drop shadow) gets clipped by the scroll container. The padding is
-       the buffer that keeps the tape on the first and last columns clear
-       of that edge. */
+       right/bottom - the padding is the buffer that keeps a card's tape
+       (or drop shadow) on the first and last columns clear of this box's
+       own edge. overflow-x is set explicitly to hidden rather than left
+       to default: pairing overflow-y:auto with an unset overflow-x
+       resolves the unset axis to 'auto' too (per spec), which was
+       quietly turning this into a genuinely draggable/scrollable
+       horizontal axis - nothing in either grid is ever wider than the
+       box, so that axis had no real content to justify it, only the
+       side-to-side wiggle a trackpad's diagonal scroll picks up on any
+       scrollable axis. 'hidden' still clips the tape/shadow overflow the
+       padding doesn't catch, same as 'auto' did - it just never offers a
+       scrollbar or lets a gesture drag it. */
     #journal-body, #milestones-body {
-      flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
       padding: 4px 22px 18px 30px;
     }
 
@@ -1141,7 +1147,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.11.1</span>
+      <span id="game-version">v2.11.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3613,7 +3619,7 @@
     // is nothing to tend in any of them. One check called wherever a
     // full-screen panel opens or closes, rather than a display toggle
     // duplicated across six functions.
-    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'notes-panel', 'howto-panel'];
+    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'milestones-panel', 'notes-panel', 'howto-panel'];
     function fullscreenPanelOpen() {
       return FULLSCREEN_PANELS.some(function (id) {
         return document.getElementById(id).classList.contains('open');

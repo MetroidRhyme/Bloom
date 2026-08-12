@@ -107,8 +107,18 @@
     body.fert-unlocked #menu-dropdown button#menu-crossnotes-btn { display: block; }
     /* Same gate, same reasoning, for the Greenhouse - see
        syncGreenhouseUnlockUI() in the GREENHOUSE section. */
-    #menu-dropdown button#menu-greenhouse-btn { display: none; }
+    #menu-dropdown button#menu-greenhouse-btn { display: none; position: relative; }
     body.greenhouse-unlocked #menu-dropdown button#menu-greenhouse-btn { display: block; }
+    /* How many pots are ready to grow or wilted right now (see
+       greenhouseReadyCount) - same filled-pill language as the seed pouch's
+       own count badge, just blue for "water" rather than green for
+       "seeds", and only shown at all once there's actually something to
+       come back for. */
+    #menu-greenhouse-btn .menu-item-badge {
+      position: absolute; top: 50%; right: 14px; transform: translateY(-50%);
+      min-width: 18px; padding: 0 5px; border-radius: 9px; background: #3f8fdb; color: #fff;
+      font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
+    }
     #menu-dropdown button.danger { color: #c0554a; }
 
     /* ================= BOTTOM HUD ================= */
@@ -699,7 +709,7 @@
     #greenhouse-panel {
       position: fixed; inset: 0; z-index: 1100;
       background: #fdfbf5;
-      padding: calc(14px + env(safe-area-inset-top, 0px)) 18px calc(16px + env(safe-area-inset-bottom, 0px));
+      padding: calc(14px + env(safe-area-inset-top, 0px)) 0 env(safe-area-inset-bottom, 0px);
       display: flex; flex-direction: column; align-items: center;
       transform: translateY(105%);
       transition: transform 0.28s ease;
@@ -716,20 +726,19 @@
     }
     /* Safety net only, same reasoning as #stand-counter - sized to fit a
        phone screen with nothing to scroll in the common case; this is what
-       catches an unusually short one instead. */
+       catches an unusually short one instead. Edge to edge (no max-width,
+       no side padding above) rather than a bordered card floating in the
+       panel - the scene/shelves ARE the screen here, not an inset within
+       it. */
     #greenhouse-scroll {
-      flex: 1 1 auto; min-height: 0; width: 100%; max-width: 460px;
-      overflow-y: auto; -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto; min-height: 0; width: 100%;
+      overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
       display: flex; flex-direction: column; align-items: center;
     }
-    #greenhouse-scene, #greenhouse-shelves {
-      width: 100%; position: relative; border-radius: 14px; overflow: hidden;
-    }
+    #greenhouse-scene, #greenhouse-shelves { width: 100%; position: relative; }
     #greenhouse-scene {
-      height: 200px; margin-bottom: 3px;
+      height: 220px; margin-bottom: 3px; overflow: hidden;
       background: linear-gradient(180deg, #cfe8ec 0%, #e7f2df 45%, #e9dcc0 100%);
-      border: 1px solid rgba(60,40,20,0.14); border-bottom: none;
-      border-radius: 14px 14px 0 0;
     }
     .gh-roof-glare {
       position: absolute; inset: 0; opacity: 0.55;
@@ -738,34 +747,76 @@
         repeating-linear-gradient(65deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 90px);
       mix-blend-mode: soft-light;
     }
-    /* Small, faded, non-interactive flower heads for depth - the real
-       flower-head art (flowerHeadInner), not a separate simplified sprite,
-       just tiny and translucent so it never competes with the real pots in
-       front. */
-    .gh-row { position: absolute; left: 0; right: 0; display: flex; justify-content: space-evenly; }
+    /* A warm sun up in the glasshouse sky - replaced the earlier scattered
+       background flowers, which read as unowned "extra plants" rather than
+       scenery. Static (no wind in here, and no motion on the sun either) -
+       steady daylight, not another moving thing to track. See
+       greenhouseSunHtml() in the GREENHOUSE section of the script. */
+    .gh-sun-wrap { position: absolute; top: 10px; right: 14px; width: 100px; height: 100px; }
     #greenhouse-shelves {
       background: linear-gradient(180deg, #2c3520 0%, #241d15 100%);
-      border: 1px solid rgba(60,40,20,0.14); border-top: none;
-      border-radius: 0 0 14px 14px; box-shadow: var(--shadow-sm);
-      padding-top: 2px;
+      box-shadow: var(--shadow-sm);
+      /* Bottom padding is deliberately kept here (unlike each .gh-shelf
+         below) - it's the "floor" the last row's pots rest on, since
+         there's no further plank beneath them to touch. It also gives the
+         last row's broken-pot price tags (see .pot-price-tag) somewhere to
+         hang without being clipped by this container's own overflow. */
+      padding: 2px 0 28px;
     }
-    .gh-shelf { position: relative; padding: 0 8px 12px; }
+    /* No bottom padding - a shelf's own pots sit flush against the NEXT
+       shelf's plank (rendered immediately after in the DOM), the same way
+       a real pot rests directly on the board below it rather than floating
+       above it. */
+    .gh-shelf { position: relative; padding: 0 8px 0; }
     .gh-plank {
       height: 9px; margin: 0 -8px 7px; background: #8a6042;
       box-shadow: 0 3px 5px rgba(0,0,0,0.35), inset 0 -2px 0 rgba(0,0,0,0.2), inset 0 2px 0 rgba(255,255,255,0.12);
     }
     .gh-pots { display: flex; justify-content: space-between; gap: 5px; }
     .pot-slot {
-      position: relative; width: 25%; height: 68px; flex-shrink: 0;
+      position: relative; width: 25%; flex-shrink: 0;
       display: flex; align-items: flex-end; justify-content: center; cursor: pointer;
     }
     .pot-slot.unaffordable { opacity: 0.55; }
-    .pot-icon { filter: drop-shadow(0 3px 3px rgba(0,0,0,0.4)); }
+    /* scaleY (not a uniform scale) stretches the art slightly taller than
+       its own natural proportions without widening it - anchored to the
+       bottom edge so that edge (the one touching the shelf below, per
+       .gh-shelf's own comment) never moves as it stretches. */
+    /* Split in two so the water badge below can anchor to the icon's own
+       (unstretched) box - .pot-icon-art carries the scaleY stretch, not
+       .pot-icon itself, or an absolutely-positioned badge nested inside a
+       transformed ancestor would get stretched right along with it. */
+    .pot-icon { position: relative; }
+    .pot-icon-art {
+      display: block; width: 100%; height: 100%;
+      filter: drop-shadow(0 3px 3px rgba(0,0,0,0.4));
+      transform: scaleY(1.08); transform-origin: bottom center;
+    }
+    /* Pushed well clear of the (now shelf-touching, much bigger) pot above
+       it, onto the plank/floor the pot is resting on, rather than
+       overlapping the pot's own base the way a tag sitting right at the
+       pot's bottom edge would. */
     .pot-price-tag {
-      position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+      position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%);
       background: #fff; border: 1px solid rgba(60,40,20,0.14); border-radius: 999px;
       font-size: 9px; font-weight: 700; padding: 2px 5px; color: #a24a2c;
       white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    /* Sits next to the flower for anything ready to grow or wilted (see
+       potSlotHtml) - a direct one-tap water, no detail view needed first.
+       stopPropagation in its onclick is what keeps that tap from also
+       falling through to the pot-slot underneath and opening the detail
+       view on top of it. Anchored to .pot-icon (see its own comment) so it
+       tracks THIS pot's own art regardless of how much taller a neighbour
+       in the same row happens to be - top:28% lands roughly where a
+       bloom/cluster head sits in the shared viewBox every stage is drawn
+       against. */
+    .pot-water-badge {
+      position: absolute; top: 28%; right: -6px; z-index: 2;
+      width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff;
+      background: linear-gradient(180deg, #6ec6ff, #3f8fdb); color: #fff;
+      font-size: 12px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.35); padding: 0; line-height: 1;
     }
     /* A tappable row of owned seeds inside the modal - the empty-pot picker.
        Same taped-card family feel as .stand-item (a swatch you tap to
@@ -1304,7 +1355,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.16.0</span>
+      <span id="game-version">v2.17.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1574,6 +1625,16 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.17.0', changes: [
+        'Greenhouse pots are bigger and sit flush on their shelves, and a ' +
+          'broken pot is no longer hidden behind its own price tag.',
+        'A sun now shines over the greenhouse in place of the earlier ' +
+          'background flowers.',
+        'Any potted flower ready to grow or wilted now shows a water-drop ' +
+          'right next to it - tap it to water on the spot, no need to open ' +
+          'the pot first. The Greenhouse menu item also shows how many pots ' +
+          'are waiting on you.'
+      ] },
       { version: 'v2.16.0', changes: [
         'New: the Greenhouse. Grow and harvest 100 flowers and it unlocks in ' +
           'the Shop for 1000 Petals, once - twelve pots under glass, three ready ' +
@@ -3014,6 +3075,11 @@
       // kept fresh above - a pot left wilting or ready while the panel sits
       // open should still update without needing to back out and reopen it.
       if (document.getElementById('greenhouse-panel').classList.contains('open')) renderGreenhouse();
+      // Independent of whether the panel is open - the menu badge (see
+      // updateGreenhouseMenuBadge) has to stay current even while the
+      // player is off in the Shop or Journal, not just while looking at
+      // the shelves themselves.
+      else updateGreenhouseMenuBadge();
     }
 
     // ---------------------------------------------------------------------
@@ -7619,6 +7685,7 @@
     // bought it) and again the moment buyGreenhouse succeeds.
     function syncGreenhouseUnlockUI() {
       document.body.classList.toggle('greenhouse-unlocked', state.greenhouseUnlocked);
+      updateGreenhouseMenuBadge();
     }
 
     function openGreenhouse() {
@@ -7643,33 +7710,45 @@
     function brokenVariantFor(slotIndex) { return (slotIndex - GREENHOUSE_STARTER_POTS) % 3; }
     function fixCostFor(slotIndex) { return GREENHOUSE_FIX_COSTS[slotIndex - GREENHOUSE_STARTER_POTS]; }
 
-    // Small, faded, non-interactive flower heads behind the shelves - the
-    // real flower-head art (flowerHeadInner), not a separate simplified
-    // sprite, just tiny and translucent so it never competes with the real
-    // pots in front. Purely decorative, same as the outdoor map's distant
-    // scenery - nothing here is a plant you own.
-    function greenhouseBackgroundHtml() {
-      var rows = [
-        { top: 14, count: 6, scale: 18, opacity: 0.30 },
-        { top: 40, count: 5, scale: 24, opacity: 0.42 }
-      ];
-      return rows.map(function (r) {
-        var cells = [];
-        for (var i = 0; i < r.count; i++) {
-          var sp = SPECIES[(i * 3 + r.top) % SPECIES.length];
-          var col = colorFor(sp.base);
-          cells.push('<span style="display:inline-block;width:' + r.scale + 'px;height:' + r.scale + 'px">' +
-            '<svg viewBox="0 0 100 100" width="' + r.scale + '" height="' + r.scale + '">' +
-            fancyDefs(col) + flowerHeadInner(sp, col) + '</svg></span>');
-        }
-        return '<div class="gh-row" style="top:' + r.top + 'px;opacity:' + r.opacity + '">' +
-          cells.join('') + '</div>';
-      }).join('');
-    }
+    // A warm sun with radiating beams - the glasshouse's own light source,
+    // replacing the earlier scattered background flowers (those read as
+    // extra unowned plants rather than scenery). Static, no motion, drawn
+    // once and reused - it never changes, so there's nothing here worth
+    // rebuilding per render the way the pots below are.
+    var GREENHOUSE_SUN_HTML = (function () {
+      var beams = '', beamCount = 10;
+      for (var i = 0; i < beamCount; i++) {
+        var angle = (360 / beamCount) * i;
+        beams += '<rect x="47.5" y="6" width="5" height="26" rx="2.5" fill="url(#ghBeamFade)" ' +
+          'transform="rotate(' + angle.toFixed(1) + ' 50 50)"/>';
+      }
+      return '<svg viewBox="0 0 100 100" width="100" height="100">' +
+        '<defs>' +
+        '<radialGradient id="ghSunGlow" cx="50%" cy="50%" r="50%">' +
+        '<stop offset="0%" stop-color="#fff6d0" stop-opacity="0.85"/>' +
+        '<stop offset="55%" stop-color="#ffd45e" stop-opacity="0.3"/>' +
+        '<stop offset="100%" stop-color="#ffd45e" stop-opacity="0"/></radialGradient>' +
+        '<linearGradient id="ghBeamFade" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0%" stop-color="#ffd45e" stop-opacity="0.75"/>' +
+        '<stop offset="100%" stop-color="#ffd45e" stop-opacity="0"/></linearGradient>' +
+        '<radialGradient id="ghSunCore" cx="36%" cy="32%" r="70%">' +
+        '<stop offset="0%" stop-color="#fff6d0"/>' +
+        '<stop offset="55%" stop-color="#ffd45e"/>' +
+        '<stop offset="100%" stop-color="#f5b93a"/></radialGradient>' +
+        '</defs>' +
+        '<circle cx="50" cy="50" r="48" fill="url(#ghSunGlow)"/>' +
+        beams +
+        '<circle cx="50" cy="50" r="19" fill="url(#ghSunCore)" stroke="#e8a91c" stroke-width="1.4"/>' +
+        '</svg>';
+    })();
 
     // One slot's whole tile: a broken pot with its fix price, an empty
     // usable pot, or whatever's actually growing in it - see onPotTap for
-    // what tapping each of the three does.
+    // what tapping each of the three does. A pot that's ready to grow or
+    // wilted also gets a water-drop badge next to it (see .pot-water-badge)
+    // for a one-tap water that never opens the detail view at all -
+    // quickWaterPot stops the tap from also falling through to onPotTap
+    // underneath it.
     function potSlotHtml(slotIndex, px) {
       var pot = state.greenhouse.pots[slotIndex];
       if (!pot.fixed) {
@@ -7678,7 +7757,7 @@
         var cls = 'pot-slot' + (state.currency >= cost ? '' : ' unaffordable');
         return '<div class="' + cls + '" onclick="onPotTap(' + slotIndex + ')">' +
           '<div class="pot-icon" style="width:' + vBroken.w + 'px;height:' + vBroken.h + 'px">' +
-          vBroken.html + '</div>' +
+          '<div class="pot-icon-art">' + vBroken.html + '</div></div>' +
           '<div class="pot-price-tag">Fix - ' + cost + ' \u{1F338}</div></div>';
       }
       if (!pot.plant) {
@@ -7687,21 +7766,31 @@
         var vEmpty = buildPottedVisual(SPECIES[0], colorFor(SPECIES[0].base), 0, px);
         return '<div class="pot-slot" onclick="onPotTap(' + slotIndex + ')">' +
           '<div class="pot-icon" style="width:' + vEmpty.w + 'px;height:' + vEmpty.h + 'px">' +
-          vEmpty.html + '</div></div>';
+          '<div class="pot-icon-art">' + vEmpty.html + '</div></div></div>';
       }
       var p = pot.plant;
       var d = recomputePlant(p, Date.now());
       var vPlant = buildPottedVisual(speciesFor(p.species), paletteOf(p), d.stage, px);
-      var iconHtml = d.wilted ? '<div style="filter:grayscale(55%) opacity(0.7)">' + vPlant.html + '</div>' : vPlant.html;
+      // Wilted layers grayscale+fade onto the same filter the CSS class
+      // already sets (drop-shadow) rather than an extra wrapper div -
+      // inline style only overrides the one property it names, so the
+      // class's transform:scaleY (see .pot-icon-art) still applies.
+      var artStyle = d.wilted
+        ? ' style="filter:drop-shadow(0 3px 3px rgba(0,0,0,0.4)) grayscale(55%) opacity(0.7)"' : '';
+      var waterBadge = (d.ready || d.wilted)
+        ? '<button class="pot-water-badge" onclick="event.stopPropagation(); quickWaterPot(' + slotIndex +
+          ')" title="Water">\u{1F4A7}</button>'
+        : '';
       return '<div class="pot-slot" onclick="onPotTap(' + slotIndex + ')">' +
         '<div class="pot-icon" style="width:' + vPlant.w + 'px;height:' + vPlant.h + 'px">' +
-        iconHtml + '</div></div>';
+        '<div class="pot-icon-art"' + artStyle + '>' + vPlant.html + '</div>' + waterBadge + '</div></div>';
     }
 
     function renderGreenhouse() {
-      document.getElementById('greenhouse-rows').innerHTML = greenhouseBackgroundHtml();
+      document.getElementById('greenhouse-rows').innerHTML =
+        '<div class="gh-sun-wrap">' + GREENHOUSE_SUN_HTML + '</div>';
 
-      var potPx = 56;
+      var potPx = 112;
       var html = '';
       for (var shelf = 0; shelf < 3; shelf++) {
         html += '<div class="gh-shelf"><div class="gh-plank"></div><div class="gh-pots">';
@@ -7711,6 +7800,42 @@
         html += '</div></div>';
       }
       document.getElementById('greenhouse-shelves').innerHTML = html;
+      updateGreenhouseMenuBadge();
+    }
+
+    // How many potted plants would actually respond to a watering can right
+    // now - ready to advance a stage, or wilted (both, same as the map's
+    // own green droplet badge covers implicitly, since in practice a plant
+    // wilted long enough has almost always long since become ready too -
+    // see recomputePlant). Drives both the menu's count badge and (per
+    // pot) the water-drop badge in potSlotHtml.
+    function greenhouseReadyCount() {
+      if (!state.greenhouseUnlocked) return 0;
+      var now = Date.now(), n = 0;
+      state.greenhouse.pots.forEach(function (pot) {
+        if (!pot.plant) return;
+        var d = recomputePlant(pot.plant, now);
+        if (d.ready || d.wilted) n++;
+      });
+      return n;
+    }
+    // The Greenhouse menu row's own count badge - same filled-pill idea as
+    // the seed pouch's (see seedCountBadgeHtml), just for "pots waiting on
+    // you" instead of "seeds in your pouch". Called wherever the count
+    // could have changed: after any render of the greenhouse itself, every
+    // tickPlants pass, and once at boot.
+    function updateGreenhouseMenuBadge() {
+      var btn = document.getElementById('menu-greenhouse-btn');
+      if (!btn) return;
+      var n = greenhouseReadyCount();
+      var existing = btn.querySelector('.menu-item-badge');
+      if (existing) existing.remove();
+      if (n > 0) {
+        var badge = document.createElement('span');
+        badge.className = 'menu-item-badge';
+        badge.textContent = n;
+        btn.appendChild(badge);
+      }
     }
 
     // Every seed you own, any species, sorted the same way a journal page
@@ -7847,13 +7972,13 @@
       document.getElementById('modal-overlay').classList.add('open');
     }
 
-    // Water re-renders the detail in place (rather than closing) so the new
-    // stage/status shows immediately - unlike a harvest, watering isn't a
-    // terminal action, there's usually more to do with the same pot right
-    // after.
-    function waterPottedPlant(slotIndex) {
+    // The actual watering mutation, shared by both entry points below - the
+    // detail view's Water button and the one-tap water-drop badge right on
+    // the shelf (see potSlotHtml). Returns what applyWatering returned, so
+    // each caller can react its own way.
+    function doWaterPot(slotIndex) {
       var pot = state.greenhouse.pots[slotIndex];
-      if (!pot || !pot.plant) return;
+      if (!pot || !pot.plant) return null;
       var p = pot.plant;
       var now = Date.now();
       var res = applyWatering(p, now);
@@ -7866,7 +7991,22 @@
         toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
       }
       vibrate(res.grew ? 30 : 15);
+      return res;
+    }
+    // From the detail view's Water button - re-renders the detail in place
+    // (rather than closing) so the new stage/status shows immediately,
+    // since unlike a harvest, watering isn't a terminal action and there's
+    // usually more to do with the same pot right after.
+    function waterPottedPlant(slotIndex) {
+      if (!doWaterPot(slotIndex)) return;
       openPotDetail(slotIndex);
+    }
+    // From the water-drop badge right on the shelf - a single tap, no
+    // detail view involved at all. Stays on the shelf screen; the badge
+    // itself disappears on the next render once the pot's no longer ready
+    // or wilted.
+    function quickWaterPot(slotIndex) {
+      doWaterPot(slotIndex);
     }
 
     // Mirrors harvestPlant's extract/sell split verbatim (see its own

@@ -3323,19 +3323,20 @@
 
     // A sprout, capped with a closed bud rather than just two bare leaves -
     // the stem is stretched a little taller (was 64, now 56) to make room
-    // for it. The bud is two nested almond shapes: an outer green sepal
-    // casing (same green family as the leaves), and a smaller inner sliver
-    // tinted with color.deep - the same muted "inner petal row" shade the
-    // real petals use once open (see flowerHeadInner) - so the sprout reads
-    // as a preview of the species' own color folded shut, not a second leaf.
-    function sproutMarkup(color) {
+    // for it. The bud is two nested almond shapes, both green (a lighter
+    // outer sepal casing, a darker inner crease for a bit of shape) -
+    // deliberately carries no hint of the species' actual petal color, so
+    // what it's about to bloom into stays a surprise until it actually
+    // opens at stage 2. No longer takes a color argument, since it no
+    // longer uses one.
+    function sproutMarkup() {
       return '<path d="M50 92 C49 80 51 66 50 56" stroke="#4e8b3f" stroke-width="4" fill="none" stroke-linecap="round"/>' +
         '<ellipse cx="39" cy="78" rx="9" ry="5.5" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.6" transform="rotate(-28 39 78)"/>' +
         '<ellipse cx="61" cy="83" rx="8" ry="5" fill="#66b04d" stroke="#4e8b3f" stroke-width="1.6" transform="rotate(24 61 83)"/>' +
         '<path d="M50 38 C58 44 58 52 50 58 C42 52 42 44 50 38 Z" fill="#5ea648" stroke="' +
         shadeHex('#5ea648', 0.72) + '" stroke-width="1.4"/>' +
-        '<path d="M50 41 C55 45 55 51 50 55 C45 51 45 45 50 41 Z" fill="' + color.deep +
-        '" stroke="' + color.edge + '" stroke-width="1"/>';
+        '<path d="M50 41 C55 45 55 51 50 55 C45 51 45 45 50 41 Z" fill="#3f6b3a" stroke="' +
+        shadeHex('#3f6b3a', 0.75) + '" stroke-width="1"/>';
     }
 
     var BLOOM_STEM_MARKUP =
@@ -3431,7 +3432,7 @@
     function buildNewVisual(species, color, stage, px) {
       var defs = '<defs>' + HEAD_FX_DEFS + headClipDefs(species) + '</defs>' + fancyDefs(color);
       var body = GROUND_MARKUP;
-      if (stage === 1) body += sproutMarkup(color);
+      if (stage === 1) body += sproutMarkup();
       else if (stage === 2) body += BLOOM_STEM_MARKUP + headGroup(species, color, 50, 40);
       else if (stage === 3) {
         var left = { cx: 33, cy: 55, scale: SIDE_SCALE_L };
@@ -3540,12 +3541,17 @@
           'border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;' +
           'font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,0.35)">\u{1F4A7}</div></div>';
       }
-      // The plant is rooted in the soil clump near the bottom of the tall
-      // (100x112) canvas, not at its vertical center - anchoring there
-      // (rather than dead center) is what lines the actual planted grid
-      // coordinate up with the ground instead of the middle of the whole
-      // stem+head art, letting the stem/head extend upward above the tile.
-      return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h * (97 / 112)], className: '' });
+      // Anchored at local y=61 (of the 112-tall canvas) - a waist-height
+      // point on the stem, not the ground itself. Anchoring at the ground
+      // (local y=97, the mound's own position - what this used to do) left
+      // the ground sitting well above the tile's own bottom edge with the
+      // stem/head overflowing nearly a full tile-height above it. Pinning a
+      // point further up the stem to the tile's center instead pushes
+      // everything below it - the ground - down to sit right at the tile's
+      // bottom edge, and pulls the overflow above the tile down to a much
+      // smaller amount, so the planting reads as sitting IN its tile rather
+      // than floating above it.
+      return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h * (61 / 112)], className: '' });
     }
 
     // Same bloom artwork as a planted flower, wrapped in a pulsing halo so a
@@ -3570,10 +3576,9 @@
         '<div class="wild-glow" style="position:absolute;inset:0;border-radius:50%;background:' +
         'radial-gradient(circle,rgba(255,255,255,0.9),rgba(255,236,150,0.5) 52%,rgba(255,236,150,0) 72%)"></div>' +
         '<div style="position:relative">' + v.html + '</div></div>';
-      // Same ground-point anchor as makePlantIcon, offset by this icon's own
-      // padding: the plant's soil clump sits at pad + v.h*(97/112) down from
-      // the padded box's top edge.
-      return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, pad + v.h * (97 / 112)], className: '' });
+      // Same waist-height anchor as makePlantIcon (see its comment), offset
+      // by this icon's own padding.
+      return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, pad + v.h * (61 / 112)], className: '' });
     }
 
     // A placed sprinkler, drawn at a fixed size (it doesn't grow or wilt) on

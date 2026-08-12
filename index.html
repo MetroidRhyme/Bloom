@@ -850,8 +850,8 @@
     .slot-label { font-style: italic; }
     /* No pill, no circle - just green ink in a handwriting-style font, as
        if the count were jotted onto the card by hand rather than printed.
-       Muted when the color was found but none are on hand right now (kept,
-       held 0); full green and bolder once you actually have some. */
+       Muted when the color was seen blooming but never actually harvested
+       (grown 0); full green and bolder once you've grown at least one. */
     .slot-note {
       font-family: 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive, sans-serif;
       font-size: 13px; color: rgba(61,143,87,0.6); display: inline-block; transform: rotate(-6deg);
@@ -1017,18 +1017,15 @@
     #modal-body { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 18px; text-align: left; }
     #modal-body p { margin: 0 0 10px; }
 
-    /* Journal blocks. */
+    /* Journal blocks. Read-only now - Extract/Sell both happen in the field,
+       so a picked spot just states how many times it's been grown rather
+       than offering an action row. */
     .inv-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-    .inv-stack-title { font-size: 13.5px; font-weight: 800; margin-top: 12px; }
-    /* Two per row on a phone; Sell and Extract sit side by side so the choice
-       between them is visible rather than sequential. */
-    .inv-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
-    .inv-btn {
-      flex: 1 1 44%; padding: 11px 8px; border-radius: 12px; font-size: 12.5px;
-      font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); border: none;
+    .inv-grown-count { font-size: 13px; color: var(--text-dim); margin-top: 6px; }
+    .inv-grown-count b {
+      font-family: 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive, sans-serif;
+      font-size: 16px; font-weight: 700; color: var(--green-dark);
     }
-    .inv-btn.sell { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; }
-    .inv-btn.extract { background: #fff; color: var(--green-dark); border: 2px solid var(--green); }
 
     /* Every color of one species, undiscovered ones dimmed - the collection's
        real goal, so a gap reads as "still to breed". Auto-fill rather than a
@@ -1076,13 +1073,12 @@
       font-family: 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive, sans-serif;
       font-size: 14px; font-weight: 700; color: var(--green-dark);
     }
-    /* One bordered block per color held, so a Red and a Purple of the same
+    /* One bordered block per color grown, so a Red and a Purple of the same
        species never look like one interchangeable pile. */
     .inv-variant {
       border: 2px solid; border-radius: 14px; padding: 10px 13px 12px; margin-bottom: 10px;
     }
     .inv-variant-name { font-size: 14px; font-weight: 800; }
-    .inv-variant .inv-stack-title:first-of-type { margin-top: 8px; }
 
     /* Crossing notes moved to its own full-screen panel (#notes-panel,
        breeding tree) - .cross-list/.cross-row/etc are gone with the old
@@ -1184,7 +1180,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.14.0</span>
+      <span id="game-version">v2.15.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1225,7 +1221,7 @@
     <button id="tool-toggle" class="tool-btn toolbox" title="Tools" onclick="onToolboxEquippedClick()"></button>
     <div id="tool-petals">
       <button id="tool-water" class="tool-btn petal water" onclick="selectTool('water')" title="Watering can"></button>
-      <button id="tool-shear" class="tool-btn petal shear" onclick="selectTool('shear')" title="Shears - collect"></button>
+      <button id="tool-shear" class="tool-btn petal shear" onclick="selectTool('shear')" title="Shears - extract seeds"></button>
       <button id="tool-sell" class="tool-btn petal sell" onclick="selectTool('sell')" title="Sell"></button>
       <!-- Only shown once you own a bag - see .tool-btn.fert/#tool-petals.has-fert
            and syncFertTool(). -->
@@ -1305,8 +1301,8 @@
         <div id="stand-row-1" class="stand-row stand-row-crates"></div>
         <div id="stand-row-2" class="stand-row stand-row-crates"></div>
         <div id="stand-row-3" class="stand-row stand-row-last"></div>
-        <!-- Hidden until sprinklerUnlocked() (10 flowers kept or sold) - see
-             renderShopRows. -->
+        <!-- Hidden until sprinklerUnlocked() (10 flowers extracted or sold) -
+             see renderShopRows. -->
         <div id="stand-row-4" class="stand-row stand-row-last"></div>
       </div>
     </div>
@@ -1428,6 +1424,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.15.0', changes: [
+        'Shears now extract seeds straight from a flower instead of collecting ' +
+          'it into your Journal - press and hold a fully-grown flower to pull its ' +
+          'seeds on the spot, for free, no extra trip required.',
+        'The Flower Journal no longer holds flowers to sell or extract later - it ' +
+          'now tracks how many times you\'ve grown each flower and color, like a ' +
+          'running tally of everything you\'ve ever raised.'
+      ] },
       { version: 'v2.14.0', changes: [
         'Grass and flowers now sway in a gentle breeze that visibly travels ' +
           'across the map, instead of standing perfectly still.',
@@ -1849,7 +1853,7 @@
     // SELL_SINGLE sits just under SEED_COST on purpose so cashing out at the
     // single-bloom stage is never clearly "correct" - SELL_CLUSTER is the real
     // payoff, rewarding the extra watering visit without punishing anyone who
-    // harvests early or just wants to Keep a flower instead of selling it.
+    // harvests early or just wants seeds instead of Petals.
     var SEED_COST = 20;
     var SELL_SINGLE = 16;
     var SELL_CLUSTER = 40;
@@ -1860,18 +1864,19 @@
     var CHEAT_CURRENCY = 999999;
     function harvestValue(p, stage) { return stage >= MAX_STAGE ? SELL_CLUSTER : SELL_SINGLE; }
 
-    // Seeds recovered by pulling a held flower apart, as [count, probability].
-    // A cluster is several blooms' worth, so it gives back more.
+    // Seeds recovered by shearing a flower apart on the spot, as
+    // [count, probability]. A cluster is several blooms' worth, so it gives
+    // back more.
     //
     // Balance note: Petals buy nothing but seeds, so selling and extracting are
     // the same currency one step apart. At these odds extraction is worth ~1.5x
     // selling for a bloom (1.2 seeds = 24 Petals of seed, vs 16) and ~1.35x for
     // a cluster (2.7 seeds = 54, vs 40). What keeps Sell alive is that
-    // extraction only ever returns the species you pulled apart - you cannot
-    // extract a flower you have never held - so Petals remain the only route to
-    // a species you are missing. Extraction multiplies what you have; the shop
-    // is how you diversify. Raise SELL_SINGLE/SELL_CLUSTER toward 24/54 if the
-    // two should instead be near-equal in raw value.
+    // extraction only ever returns the exact variant you just sheared - you
+    // cannot extract a flower you have never grown - so Petals remain the only
+    // route to a species you are missing. Extraction multiplies what you have;
+    // the shop is how you diversify. Raise SELL_SINGLE/SELL_CLUSTER toward
+    // 24/54 if the two should instead be near-equal in raw value.
     var SEED_YIELD_SINGLE  = [[1, 0.80], [2, 0.20]];             // EV 1.2
     var SEED_YIELD_CLUSTER = [[2, 0.50], [3, 0.30], [4, 0.20]];  // EV 2.7
     // Generic weighted pick over [[value, probability], ...]. Used for seed
@@ -1905,7 +1910,7 @@
     // ---- Sprinkler equipment -----------------------------------------------
     // A late-game convenience, not a starter tool - it stays out of the shop
     // (see sprinklerUnlocked/renderShopRows) until the player has actually
-    // harvested ten flowers, kept or sold, the same combined tally the
+    // harvested ten flowers, extracted or sold, the same lifetime tally the
     // Harvester milestone already tracks. Pricier than anything else on sale
     // (25x a seed) since one placement keeps watering a whole ring of tiles
     // forever with no further cost or visits - see tickSprinklers. Each one
@@ -2119,35 +2124,54 @@
     }
 
     // v1.12 recorded a kept flower as a bare { count, firstAt } with no record
-    // of whether it was a single bloom or a cluster. Extraction pays out by
-    // stage, so those totals are credited to `single` - wild picks are always
-    // single blooms and so were most early keeps, and crediting clusters the
-    // player may not have earned would hand out seeds they never worked for.
+    // of whether it was a single bloom or a cluster.
     //
-    // v1.15 re-keys the collection from species to species:color. Pre-color
-    // keeps become their species' base color - the same standard the shop
-    // stocks - so an old collection reads as "found the common one", never as
-    // credit for a cross that was never bred. Merging is additive and keeps
-    // the earliest firstAt, so nothing is lost if both keys somehow exist.
-    function migrateInventory(inv) {
+    // v1.15 re-keyed the collection from species to species:color, and split
+    // that bare count into { single, cluster, firstAt } so extraction (paid
+    // out by stage) had something to go on.
+    //
+    // v2.x (this feature) collapses single/cluster back into one lifetime
+    // { count, firstAt } - Keep/Sell/Extract used to be three separate
+    // decisions (collect now, decide sell-or-extract later from the Journal);
+    // now extraction happens the instant a flower is sheared, so there is
+    // nothing left to hold in reserve, and the Journal's count means "grown",
+    // not "on hand". Anything still sitting kept-but-unconverted in an
+    // existing save is extracted for its seeds right here, once, at the same
+    // odds the old Journal's own Extract action always used (SEED_YIELD_*
+    // below) - the update should not quietly take seeds away from anyone
+    // mid-collection. grantSeeds, if given, is filled in with
+    // vk -> seeds gained so the caller can credit them.
+    function migrateInventory(inv, grantSeeds) {
       if (!inv) return {};
       var out = {};
       Object.keys(inv).forEach(function (k) {
         var e = inv[k];
-        if (typeof e.count === 'number' && typeof e.single !== 'number') {
-          e.single = e.count;
-          delete e.count;
-        }
-        if (typeof e.single !== 'number') e.single = 0;
-        if (typeof e.cluster !== 'number') e.cluster = 0;
-        if (!e.firstAt) e.firstAt = Date.now();
-
         var vk = k.indexOf(':') >= 0 ? k : variantKey(k, baseColorOf(k));
+        var firstAt = e.firstAt || Date.now();
+        var count;
+
+        if (typeof e.single === 'number' || typeof e.cluster === 'number') {
+          // Pre-v2.x shape: a held-but-not-yet-resolved stack. Fold it into
+          // the lifetime count and pay out the seeds it would have given.
+          var single = e.single || 0;
+          var cluster = e.cluster || 0;
+          count = single + cluster;
+          if (grantSeeds && (single > 0 || cluster > 0)) {
+            var gained = 0;
+            for (var i = 0; i < single; i++) gained += rollWeighted(SEED_YIELD_SINGLE);
+            for (var j = 0; j < cluster; j++) gained += rollWeighted(SEED_YIELD_CLUSTER);
+            grantSeeds[vk] = (grantSeeds[vk] || 0) + gained;
+          }
+        } else {
+          // Already the current shape (or the bare pre-v1.15 one, which
+          // means the same thing here) - nothing to convert or grant.
+          count = e.count || 0;
+        }
+
         var prev = out[vk];
-        if (!prev) { out[vk] = e; return; }
-        prev.single += e.single;
-        prev.cluster += e.cluster;
-        prev.firstAt = Math.min(prev.firstAt, e.firstAt);
+        if (!prev) { out[vk] = { count: count, firstAt: firstAt }; return; }
+        prev.count += count;
+        prev.firstAt = Math.min(prev.firstAt, firstAt);
       });
       return out;
     }
@@ -2231,7 +2255,7 @@
         sprinklerInventory: 0,
         // One-time flag so the "Sprinklers unlocked!" toast (see
         // checkSprinklerUnlock) can only ever fire once, even though every
-        // call site that touches stats.kept/sold rechecks the threshold.
+        // call site that touches stats.grown rechecks the threshold.
         sprinklerUnlockAnnounced: false,
         // cell key -> 1, every tile ever within planting range of the player.
         // Never shrinks - once a spot has been reachable it stays a priority
@@ -2250,23 +2274,25 @@
         // stale set from a previous day is never trusted just because
         // nothing has touched it since the rollover.
         todayAccessibleDay: null,
-        // species key -> { single, cluster, firstAt }: the flowers you chose to
-        // Keep, split by what they were when picked, since a cluster extracts
-        // into more seeds than a single bloom. An entry is never deleted once
-        // created - a species you've emptied still reads as discovered, so the
-        // collection stays a record of what you've found, not just what's in
-        // hand right now.
+        // variant key -> { count, firstAt }: every flower you have ever grown,
+        // by exact species+color, whether you extracted its seeds or sold it -
+        // the Journal's whole reason to exist (see recordGrown). An entry is
+        // never deleted once created - a variant you've never harvested a
+        // second of still reads as discovered, so the collection stays a
+        // record of what you've found, not just what you're mid-growing.
         inventory: {},
         // Crossings you have actually performed: pair key -> { colorId: count }.
         // This is the player's own notebook, not the recipe table - the Notes
         // screen only ever shows results you have seen yourself.
         crosses: {},
         // No `lost` counter - plants cannot die, so nothing is ever lost.
-        // extracted is the lifetime seed count extraction has paid out;
-        // extractedFlowers is how many blooms/clusters were pulled apart to
-        // get them - the same relationship sold/earned already has.
-        stats: { planted: 0, bloomed: 0, flourished: 0, kept: 0, sold: 0, earned: 0,
-                 extracted: 0, extractedFlowers: 0, bred: 0 },
+        // grown is the lifetime harvest tally (extracted or sold, owned or
+        // wild - see recordGrown) that gates the sprinkler and the Harvester
+        // milestone; extracted is the lifetime seed count extraction has paid
+        // out; extractedFlowers is how many blooms/clusters were sheared for
+        // them - the same relationship sold/earned already has.
+        stats: { planted: 0, bloomed: 0, flourished: 0, sold: 0, earned: 0,
+                 extracted: 0, extractedFlowers: 0, bred: 0, grown: 0 },
         seeds: starterSeeds(),
         fertilizer: 0,
         currency: 0,
@@ -2336,7 +2362,37 @@
           wild = migrateGridKeys(wild);
           visited = migrateVisitedGridKeys(visited);
         }
+        // Filled in by migrateInventory below (evaluated first, since
+        // `inventory` is assigned before `seeds` in the object literal) with
+        // any one-time seed grant owed for pre-v2.x held-but-unconverted
+        // flowers - folded into the seeds bag just below.
+        var grantSeeds = {};
+        var migratedInventory = migrateInventory(parsed.inventory, grantSeeds);
+        var migratedSeeds = migrateSeeds(parsed.seeds);
+        Object.keys(grantSeeds).forEach(function (vk) {
+          migratedSeeds[vk] = (migratedSeeds[vk] || 0) + grantSeeds[vk];
+        });
+        // Pre-existing saves predate the "grown" tally (this feature) -
+        // backfill it from the old kept+sold total so nobody's Harvester
+        // milestone or sprinkler-unlock progress silently resets.
+        var parsedStats = parsed.stats || {};
+        var migratedStats = Object.assign({}, def.stats, parsedStats);
+        var neededGrownBackfill = typeof parsedStats.grown !== 'number';
+        if (neededGrownBackfill) {
+          migratedStats.grown = (parsedStats.kept || 0) + (parsedStats.sold || 0);
+        }
+        // Both migrations above are one-time and, unlike the older reshape-
+        // only migrations in this function, NOT safe to silently redo on
+        // every future load: the seed grant rolls fresh random amounts each
+        // time it runs, and re-deriving `grown` from a stats blob that never
+        // gets the field written back would just recompute the same
+        // snapshot forever rather than letting it grow. A transient
+        // (never-persisted) flag on the returned object tells the caller,
+        // right after this function returns, to save immediately - see
+        // just below `var state = loadState()`.
+        var needsResave = neededGrownBackfill || Object.keys(grantSeeds).length > 0;
         return {
+          _needsResave: needsResave,
           plants: plants,
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
@@ -2352,14 +2408,16 @@
           sprinklers: parsed.sprinklers || {},
           sprinklerInventory: typeof parsed.sprinklerInventory === 'number' ? parsed.sprinklerInventory : 0,
           sprinklerUnlockAnnounced: !!parsed.sprinklerUnlockAnnounced,
-          inventory: migrateInventory(parsed.inventory),
+          inventory: migratedInventory,
           crosses: parsed.crosses || {},
-          stats: Object.assign({}, def.stats, parsed.stats || {}),
+          stats: migratedStats,
           // A save that predates seeds/currency (v1.1.x) gets starter seeds
           // bootstrapped in rather than being left unable to plant anything -
           // the old free-plant mechanic this replaces never cost seeds. A
           // v1.2-v1.7 save gets its tier counts converted to species counts.
-          seeds: migrateSeeds(parsed.seeds),
+          // Any grantSeeds owed by migratedInventory above is already folded
+          // in.
+          seeds: migratedSeeds,
           fertilizer: typeof parsed.fertilizer === 'number' ? parsed.fertilizer : 0,
           currency: typeof parsed.currency === 'number' ? parsed.currency : 0,
           following: parsed.following !== false,
@@ -2396,6 +2454,17 @@
 
     var state = loadState();
     state.userPos = null; // runtime-only, never persisted
+
+    // See loadState's own comment on _needsResave: a fresh v2.15 seed grant
+    // or grown-tally backfill has to hit localStorage right away, or a
+    // reload before the player's next action would re-derive both from the
+    // still-old blob and roll a different (or double) grant. saveState()
+    // only ever writes the fields it explicitly lists (see below), so this
+    // transient flag itself never actually gets persisted.
+    if (state._needsResave) {
+      delete state._needsResave;
+      saveState();
+    }
 
     // One-time catch-up for anything already blooming the moment
     // journal-on-bloom discovery shipped (see discoverVariant/waterPlant) -
@@ -2575,9 +2644,9 @@
           p.reachedBloom = true;
           state.stats.bloomed++;
           // Discovered the moment it's actually seen in bloom, not only if
-          // it's later Kept or sold - growing it is the whole point, so the
-          // journal shouldn't require a second decision on top of that.
-          // discoverVariant never touches held counts, only Keep does.
+          // it's later extracted or sold - growing it is the whole point, so
+          // the journal shouldn't require a second decision on top of that.
+          // discoverVariant never touches the grown tally, only a harvest does.
           discoverVariant(variantKey(p.species, colorOfPlant(p)));
         }
         if (p.stage >= 3 && !p.reachedFlourish) {
@@ -2645,49 +2714,59 @@
       tutorialOnWater(key);
     }
 
-    // Records a kept flower against its species. A Keep used to only bump a
-    // running total, so the flower vanished off the map leaving no trace of
-    // what it had been - this is what makes Keep a real choice rather than a
-    // discard, and what the collection screen lists.
-    function addToInventory(vk, isCluster) {
+    // Records a harvest against its species+color's lifetime tally - the
+    // Journal's whole reason to exist now that Keep is gone (see
+    // harvestPlant/pickWild). Every harvest counts, extracted or sold, owned
+    // plant or wild pick: the point is how many of this exact flower you have
+    // ever grown, not what you did with it afterward. Never resets and never
+    // shrinks, same "nothing here can be lost" guarantee as the rest of the
+    // save.
+    function recordGrown(vk) {
       var e = state.inventory[vk];
-      if (!e) e = state.inventory[vk] = { single: 0, cluster: 0, firstAt: Date.now() };
-      if (isCluster) e.cluster++; else e.single++;
+      if (!e) e = state.inventory[vk] = { count: 0, firstAt: Date.now() };
+      e.count++;
+      state.stats.grown++;
     }
 
-    // Marks a variant as discovered without crediting any held count - called
+    // Marks a variant as discovered without crediting a grown count - called
     // when one of your own plants blooms for the first time (see
-    // waterPlant), so the journal remembers everything you've ever grown,
-    // not just what you chose to Keep. Never overwrites an existing entry
-    // (and so never disturbs an earlier real Keep/pick's firstAt or counts) -
-    // it only creates one if this variant has truly never been seen before.
+    // applyWatering), so the journal remembers everything you've ever grown,
+    // not just what you've harvested. Never overwrites an existing entry (and
+    // so never disturbs an earlier real firstAt or count) - it only creates
+    // one if this variant has truly never been seen before.
     function discoverVariant(vk) {
       if (state.inventory[vk]) return;
-      state.inventory[vk] = { single: 0, cluster: 0, firstAt: Date.now() };
+      state.inventory[vk] = { count: 0, firstAt: Date.now() };
     }
 
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
-    // to Keep (into your collection, no currency) or Sell (clears the tile for
-    // Petals via harvestValue). Either way the tile frees up for replanting -
-    // "harvesting" always removes the plant from the ground.
-    function harvestPlant(key, sell) {
+    // to Extract (seeds of this exact variant, right now) or Sell (clears the
+    // tile for Petals via harvestValue). Either way the tile frees up for
+    // replanting and this variant's lifetime grown tally goes up by one (see
+    // recordGrown) - "harvesting" always removes the plant from the ground.
+    function harvestPlant(key, mode) {
       var p = state.plants[key];
       if (!p) return;
       var d = recomputePlant(p, Date.now());
+      var isCluster = d.stage >= MAX_STAGE;
       var vk = variantKey(p.species, p.color || baseColorOf(p.species));
-      var label = variantName(vk) + (d.stage >= 3 ? ' cluster' : '');
+      var label = variantName(vk) + (isCluster ? ' cluster' : '');
       delete state.plants[key];
+      recordGrown(vk);
 
-      if (sell) {
-        var val = harvestValue(p, d.stage);
-        state.currency += val;
+      var value = 0;
+      if (mode === 'sell') {
+        value = harvestValue(p, d.stage);
+        state.currency += value;
         state.stats.sold++;
-        state.stats.earned += val;
-        toast('Sold your ' + label + ' for ' + val + ' \u{1F338}');
+        state.stats.earned += value;
+        toast('Sold your ' + label + ' for ' + value + ' \u{1F338}');
       } else {
-        state.stats.kept++;
-        addToInventory(vk, d.stage >= MAX_STAGE);
-        toast('Kept your ' + label + ' \u{1F33C} - it\'s in your collection');
+        var gained = rollWeighted(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
+        state.seeds[vk] = (state.seeds[vk] || 0) + gained;
+        state.stats.extracted += gained;
+        state.stats.extractedFlowers++;
+        toast('\u{1F331} Got ' + gained + ' seed' + (gained === 1 ? '' : 's') + ' from your ' + label);
       }
 
       saveState();
@@ -2697,7 +2776,7 @@
       closePlantPanel();
       vibrate(20);
       checkSprinklerUnlock();
-      return sell ? harvestValue(p, d.stage) : 0; // used by the tutorial's bonus top-up
+      return value; // used by the tutorial's bonus top-up
     }
 
     // Runs on load and every minute purely to refresh derived state, so the
@@ -2729,12 +2808,12 @@
     //  that waters every one of its eight neighbouring tiles automatically -
     //  the one thing in Bloom that acts on a plant without a walk-up visit.
     // ---------------------------------------------------------------------
-    // The unlock gate for the shop's sprinkler row - ten flowers combined,
-    // kept or sold, the same lifetime tally the "Harvester" milestone
+    // The unlock gate for the shop's sprinkler row - ten flowers grown,
+    // extracted or sold, the same lifetime tally the "Harvester" milestone
     // already uses (see MILESTONE_DEFS). Purely a read, recomputed live
     // rather than cached, since state.stats never shrinks.
     function sprinklerUnlocked() {
-      return (state.stats.kept + state.stats.sold) >= SPRINKLER_UNLOCK_FLOWERS;
+      return state.stats.grown >= SPRINKLER_UNLOCK_FLOWERS;
     }
     // Every sprinkler you have ever bought, whether it's currently placed or
     // still sitting unplaced in the equipment toggle - nothing ever destroys
@@ -2751,11 +2830,11 @@
       return SPRINKLER_COST + SPRINKLER_COST_STEP * sprinklerOwnedCount();
     }
     // Fires the one-time "you can buy this now" toast the moment the gate
-    // above first opens. Called from every place stats.kept/sold changes
-    // (harvestPlant, pickWild, sellHeld) rather than off a timer, so it
-    // lands right at the harvest that actually crossed the line - and the
-    // persisted flag means it can never repeat even though every call site
-    // rechecks the same threshold.
+    // above first opens. Called from every place stats.grown changes
+    // (harvestPlant, pickWild) rather than off a timer, so it lands right at
+    // the harvest that actually crossed the line - and the persisted flag
+    // means it can never repeat even though every call site rechecks the
+    // same threshold.
     function checkSprinklerUnlock() {
       if (state.sprinklerUnlockAnnounced || !sprinklerUnlocked()) return;
       state.sprinklerUnlockAnnounced = true;
@@ -4007,7 +4086,7 @@
     // ---------------------------------------------------------------------
     //  TOOLS
     //  Three tools live behind a toolbox icon at the top-left: the watering
-    //  can, the shears (collect into your journal) and $ (sell). A fourth,
+    //  can, the shears (extract seeds on the spot) and $ (sell). A fourth,
     //  fertilizer, joins them once a bag is actually owned (see .tool-btn.fert
     //  and syncFertTool below) - press-and-hold a flourishing flower with it
     //  out and it crosses with a random ready neighbour, the same worker
@@ -4022,7 +4101,7 @@
     //  into a row of taps rather than open-panel/tap-Water/close per flower.
     //
     //  Watering is a plain tap, because it is the routine action and it can't
-    //  cost you anything. Collecting, selling and fertilizing take a
+    //  cost you anything. Extracting, selling and fertilizing take a
     //  one-second press and hold with a filling ring, because all three take
     //  something off the board for good (a flower, or a fertilizer bag plus
     //  both parents' next 12h) and there is no undo.
@@ -4033,14 +4112,14 @@
     //  down to it. Whichever one gets equipped replaces the toolbox icon in
     //  place; tapping it again unequips and the toolbox comes back.
     // ---------------------------------------------------------------------
-    var HOLD_MS = 1000;      // press-and-hold to confirm a collect or a sale
+    var HOLD_MS = 1000;      // press-and-hold to confirm an extraction or a sale
     var HOLD_MOVE_PX = 14;   // finger travel that turns a hold back into a pan
     var WATER_ANIM_MS = 1150; // matches the can-pour keyframes; growth lands after
 
     var TOOL_NAMES = { water: 'watering can', shear: 'shears', sell: '$', fert: 'fertilizer' };
     var TOOL_HUD = {
       water: '\u{1F4A7} Watering can out &bull; tap each flower to water it',
-      shear: 'Shears out &bull; press and hold a flower to collect it',
+      shear: 'Shears out &bull; press and hold a flower to extract its seeds',
       sell: 'Selling &bull; press and hold a flower to sell it',
       fert: '\u{1F33E} Fertilizer out &bull; press and hold a flourishing flower to cross it with a neighbour'
     };
@@ -4446,9 +4525,9 @@
         doBreed(target.key, partnerKey);
         return;
       }
-      var sell = tool === 'sell';
-      if (target.kind === 'wild') pickWild(target.key, sell);
-      else onHarvestClick(target.key, sell);  // via onHarvestClick so the tutorial still sees it
+      var mode = tool === 'sell' ? 'sell' : 'extract';
+      if (target.kind === 'wild') pickWild(target.key, mode);
+      else onHarvestClick(target.key, mode);  // via onHarvestClick so the tutorial still sees it
     }
 
     // ---- Pointer plumbing --------------------------------------------------
@@ -4706,9 +4785,9 @@
           if (tool === 'water') {
             waterWithCan(target.key);
           } else {
-            var sell = tool === 'sell';
-            if (target.kind === 'wild') pickWild(target.key, sell);
-            else onHarvestClick(target.key, sell);
+            var mode = tool === 'sell' ? 'sell' : 'extract';
+            if (target.kind === 'wild') pickWild(target.key, mode);
+            else onHarvestClick(target.key, mode);
           }
           acted++;
         }
@@ -5629,7 +5708,7 @@
       else { statusEl.textContent = 'Ready to pick - it\'s yours if you want it'; statusEl.className = 'status-good'; }
 
       document.getElementById('panel-hint').innerHTML = tileInRange
-        ? hintTool('shear') + ' to pick it, or ' + hintTool('sell') + ' to sell it for ' +
+        ? hintTool('shear') + ' to extract 1-2 seeds, or ' + hintTool('sell') + ' to sell it for ' +
           SELL_SINGLE + ' \u{1F338}'
         : 'Walk over to pick it.';
     }
@@ -5642,24 +5721,30 @@
         '</span>' + label + '</span>';
     }
 
-    // Wild flowers are free, so picking one is pure upside either way - Keep
-    // adds it to your tally, Sell pays the single-bloom rate. Either way the
-    // tile clears, which is also what makes room for the next daily spawn.
-    function pickWild(key, sell) {
+    // Wild flowers are free, so picking one is pure upside either way -
+    // Extract pulls 1-2 seeds of exactly this variant for free, Sell pays the
+    // single-bloom rate. Either way the tile clears, which is also what makes
+    // room for the next daily spawn, and this variant's lifetime grown tally
+    // (see recordGrown) goes up by one regardless of which you pick.
+    function pickWild(key, mode) {
       var w = state.wild[key];
       if (!w) return;
       var vk = variantKey(w.species, w.color || baseColorOf(w.species));
       delete state.wild[key];
+      recordGrown(vk);
 
-      if (sell) {
+      if (mode === 'sell') {
         state.currency += SELL_SINGLE;
         state.stats.sold++;
         state.stats.earned += SELL_SINGLE;
         toast('Sold a wild ' + variantName(vk) + ' for ' + SELL_SINGLE + ' \u{1F338}');
       } else {
-        state.stats.kept++;
-        addToInventory(vk, false); // wild blooms are always single-stage
-        toast('Picked a wild ' + variantName(vk) + ' \u{1F33C} - it\'s in your collection');
+        var gained = rollWeighted(SEED_YIELD_SINGLE); // wild blooms are always single-stage
+        state.seeds[vk] = (state.seeds[vk] || 0) + gained;
+        state.stats.extracted += gained;
+        state.stats.extractedFlowers++;
+        toast('\u{1F331} Got ' + gained + ' seed' + (gained === 1 ? '' : 's') + ' from a wild ' +
+          variantName(vk));
       }
 
       saveState();
@@ -5716,14 +5801,14 @@
       var statusEl = document.getElementById('plant-status-line');
       if (d.ready) { statusEl.textContent = 'Ready to grow - give it a drink!'; statusEl.className = 'status-good'; }
       else if (d.wilted) { statusEl.textContent = 'Looking wilted - a drink will perk it back up'; statusEl.className = 'status-wilt'; }
-      else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
+      else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - extract its seeds or sell it'; statusEl.className = 'status-good'; }
       else { statusEl.textContent = 'Thriving'; statusEl.className = 'status-good'; }
 
       var tileInRange = inRange(p.q, p.r);
 
       // The panel is a read-out now, not a control surface - tending happens
-      // with the tools on the rail. So instead of a Water button and a
-      // Keep/Sell row, it names whichever tools would do something to this
+      // with the tools on the rail. So instead of a Water button and an
+      // Extract/Sell row, it names whichever tools would do something to this
       // flower right now, and says nothing where nothing applies. Watering is
       // only worth mentioning when it would advance a stage or clear a wilt;
       // a mid-wait plant has no action to take at all.
@@ -5732,7 +5817,8 @@
         hints.push(hintTool('water') + ' to ' + (d.ready ? 'water and grow it' : 'perk it back up'));
       }
       if (d.stage >= 2) {
-        hints.push(hintTool('shear') + ' to collect, or ' + hintTool('sell') + ' to sell for ' +
+        var yieldText = d.stage >= MAX_STAGE ? '2-4 seeds' : '1-2 seeds';
+        hints.push(hintTool('shear') + ' to extract ' + yieldText + ', or ' + hintTool('sell') + ' to sell for ' +
           harvestValue(p, d.stage) + ' \u{1F338}');
       }
       document.getElementById('panel-hint').innerHTML =
@@ -5790,9 +5876,9 @@
 
     // Thin wrapper so the tutorial (see TUTORIAL section) can observe a real
     // harvest without renderPlantPanel needing to know it exists.
-    function onHarvestClick(key, sell) {
-      var value = harvestPlant(key, sell);
-      tutorialOnHarvest(key, sell, value);
+    function onHarvestClick(key, mode) {
+      var value = harvestPlant(key, mode);
+      tutorialOnHarvest(key, mode, value);
     }
 
     // ---------------------------------------------------------------------
@@ -5994,7 +6080,7 @@
       // to stay current after every state change, not just while its fan is
       // open - updateHUD is already the one function called after every
       // action that could touch state.seeds, so it's the natural hook
-      // rather than chasing every buySeed/extractHeld/plantSeedAt call site.
+      // rather than chasing every buySeed/harvestPlant/plantSeedAt call site.
       renderSeedToggle();
       renderSprinklerToggle(); // same reasoning - its badge needs to track state.sprinklerInventory
       // A tool in hand takes over the status line entirely: while you're in a
@@ -6156,12 +6242,13 @@
         '<p>Watering is what makes it grow. About every 90 minutes a plant is ready for a drink, and each ' +
         'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
         'back, three stages.</p>' +
-        '<p>Your tools live in the toolbox, top left: the watering can, the shears for collecting, and $ ' +
-        'for selling. Tap it and the three drop down the left edge - tap the one you want, or hold the ' +
-        'toolbox down and drag straight to it. Use it on as many flowers as you like, then tap it again ' +
-        'to put it away.</p>' +
-        '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on more ' +
-        'seeds. Every flower costs and sells for the same, so plant whichever ones you like the look of.</p>' +
+        '<p>Your tools live in the toolbox, top left: the watering can, the shears for extracting seeds, ' +
+        'and $ for selling. Tap it and the three drop down the left edge - tap the one you want, or hold ' +
+        'the toolbox down and drag straight to it. Use it on as many flowers as you like, then tap it ' +
+        'again to put it away.</p>' +
+        '<p>Once it\'s fully grown, shear it for free seeds of that exact flower, or sell it to the shop ' +
+        'for Petals \u{1F338} to spend on new ones. Every flower costs and sells for the same, so plant ' +
+        'whichever ones you like the look of.</p>' +
         '<p>Nothing here can be lost. Go a couple of days without watering and a flower just looks a bit ' +
         'wilted until your next visit - it never dies, and it never stops being ready to grow. No score, ' +
         'no clock, no rush.</p>';
@@ -6186,8 +6273,8 @@
         'the right edge. Tap one and its colors fly out to the left of that row - tap a color to equip ' +
         'it, then tap the ground within a couple tiles of you to plant it. A bare tap with nothing ' +
         'equipped won\'t plant anything on its own - it just points you back at the pouch.</p>' +
-        '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
-        '(sell) drop down the left edge - fertilizer joins them once you own a bag. Tap the one you want, ' +
+        '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (extract seeds) ' +
+        'and $ (sell) drop down the left edge - fertilizer joins them once you own a bag. Tap the one you want, ' +
         'or hold the toolbox down and drag straight down to it and let go. It replaces the toolbox while ' +
         'equipped - tap it again to put it away. Use it on as many flowers as you like first. Tapping a ' +
         'flower with no tool in hand just opens its details.</p>' +
@@ -6198,10 +6285,10 @@
         'flourishing cluster. A green \u{1F4A7} on the map means one is ready right now. Watering early is ' +
         'never wasted - it still tops up the tank and holds off wilting.</p>' +
         '<p><b>Harvest</b> - once a flower is in bloom or flourishing, walk up to it and use the shears ' +
-        'to keep it or $ to sell it for Petals \u{1F338} - clusters sell for much more than a single ' +
-        'bloom. Both take a one-second press and hold, since neither can be undone. Kept flowers go into ' +
-        'your Flower Journal in the menu, which has a page per species and tracks all ' + TOTAL_VARIANTS +
-        ' flowers.</p>' +
+        'to extract its seeds for free or $ to sell it for Petals \u{1F338} - clusters give more seeds ' +
+        'and sell for much more than a single bloom. Both take a one-second press and hold, since neither ' +
+        'can be undone. Every flower you\'ve ever grown - extracted or sold - is tallied in your Flower ' +
+        'Journal in the menu, which has a page per species and tracks all ' + TOTAL_VARIANTS + ' flowers.</p>' +
         '<p><b>Whole beds at once</b> - with the watering can, shears, $, or a seed in hand, press down ' +
         'on a tile and drag before letting go: the tile you started on and wherever your finger ends up ' +
         'become two corners of a selection - straight across makes a line, on an angle makes a square. ' +
@@ -6231,7 +6318,7 @@
         '<p><b>Shop</b> - tap your Petals total (top right) to buy seeds, one swatch per standard color, ' +
         'and fertilizer. Every seed costs the same and every flower sells for the same, so pick by looks, ' +
         'not by value.</p>' +
-        '<p><b>Sprinkler</b> \u{1F4A6} - keep or sell ' + SPRINKLER_UNLOCK_FLOWERS + ' flowers and it ' +
+        '<p><b>Sprinkler</b> \u{1F4A6} - grow and harvest ' + SPRINKLER_UNLOCK_FLOWERS + ' flowers and it ' +
         'unlocks in the Shop, starting at ' + SPRINKLER_COST + ' Petals - each one you buy costs ' +
         SPRINKLER_COST_STEP + ' more than the last. Once bought, tap the sprinkler button (bottom left) ' +
         'and tap empty ground to place it - it waters every flower on the eight tiles around it ' +
@@ -6248,7 +6335,7 @@
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +
         '<p style="color:var(--text-dim)">So far: ' + s.planted + ' planted &bull; ' +
         s.bloomed + ' bloomed &bull; ' + s.flourished + ' flourished &bull; ' + s.sold + ' sold for ' +
-        s.earned + ' Petals &bull; ' + s.kept + ' kept</p>';
+        s.earned + ' Petals &bull; ' + s.extractedFlowers + ' extracted for seeds</p>';
       document.getElementById('howto-panel').classList.add('open');
       syncToolRail();
     }
@@ -6257,21 +6344,24 @@
       syncToolRail();
     }
 
-    function heldOf(vk, isCluster) {
+    // How many times this exact variant has ever been grown - extracted or
+    // sold, owned plant or wild pick (see recordGrown). 0 for a variant
+    // that's only ever been seen blooming, never actually harvested.
+    function grownCountOf(vk) {
       var e = state.inventory[vk];
-      if (!e) return 0;
-      return (isCluster ? e.cluster : e.single) || 0;
+      return (e && e.count) || 0;
     }
-    function heldTotalOf(vk) { return heldOf(vk, false) + heldOf(vk, true); }
-    // Every variant of one species that has ever been kept, rarest last.
+    // Every variant of one species that has ever been discovered, rarest last.
     function discoveredColorsOf(speciesKey) {
       return sortVariants(Object.keys(state.inventory).filter(function (vk) {
         return parseVariant(vk).species === speciesKey;
       }));
     }
-    function heldOfSpecies(speciesKey) {
+    // Total times any color of this species has been grown, summed across
+    // every discovered variant - what the bookmark badge shows.
+    function grownCountOfSpecies(speciesKey) {
       return discoveredColorsOf(speciesKey).reduce(function (n, vk) {
-        return n + heldTotalOf(vk);
+        return n + grownCountOf(vk);
       }, 0);
     }
     // Not SPECIES * COLORS any more: a signature color counts once, on the one
@@ -6280,68 +6370,8 @@
       return n + colorsForSpecies(s.key).length;
     }, 0);
 
-    // Sell held flowers straight from the collection at the same rate as
-    // harvesting them in the field would have paid.
-    function sellHeld(vk, isCluster, qty) {
-      var e = state.inventory[vk];
-      if (!e) return;
-      qty = Math.min(qty, heldOf(vk, isCluster));
-      if (qty <= 0) return;
-
-      var total = (isCluster ? SELL_CLUSTER : SELL_SINGLE) * qty;
-      if (isCluster) e.cluster -= qty; else e.single -= qty;
-      state.currency += total;
-      state.stats.sold += qty;
-      state.stats.earned += total;
-
-      saveState();
-      updateCurrencyPill();
-      toast('Sold ' + qty + ' ' + variantName(vk) +
-        (isCluster ? ' cluster' : ' bloom') + (qty === 1 ? '' : 's') + ' for ' + total + ' \u{1F338}');
-      vibrate(20);
-      renderJournalPage(parseVariant(vk).species);
-      checkSprinklerUnlock();
-    }
-
-    // Pull held flowers apart for seeds of that same species. Rolled per
-    // flower rather than once for the batch, so extracting five at once has
-    // the same spread as extracting one five times.
-    function extractHeld(vk, isCluster, qty) {
-      var e = state.inventory[vk];
-      if (!e) return;
-      qty = Math.min(qty, heldOf(vk, isCluster));
-      if (qty <= 0) return;
-
-      var gained = 0;
-      for (var i = 0; i < qty; i++) {
-        gained += rollWeighted(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
-      }
-      if (isCluster) e.cluster -= qty; else e.single -= qty;
-      // Extraction returns the exact variant it consumed, color included. That
-      // is what makes a bred color self-sustaining once you have one, and why
-      // the shop (standards only) still matters for anything you lack.
-      state.seeds[vk] = (state.seeds[vk] || 0) + gained;
-      state.stats.extracted += gained;
-      state.stats.extractedFlowers += qty;
-
-      saveState();
-      toast('\u{1F331} Got ' + gained + ' ' + variantName(vk) + ' seed' +
-        (gained === 1 ? '' : 's') + ' from ' + qty + ' ' + (isCluster ? 'cluster' : 'bloom') +
-        (qty === 1 ? '' : 's'));
-      vibrate(25);
-      renderJournalPage(parseVariant(vk).species);
-    }
-
-    // The variants of one species you are actually holding right now, as
-    // opposed to discoveredColorsOf(), which is everything ever kept.
-    function heldVariantsOf(speciesKey) {
-      return discoveredColorsOf(speciesKey).filter(function (vk) {
-        return heldTotalOf(vk) > 0;
-      });
-    }
-
-    // Every flower you've chosen to Keep, kept as a journal: one page per
-    // species, with a spot for each of the fourteen colors and a row of
+    // A tally of every flower you've ever grown, kept as a journal: one page
+    // per species, with a spot for each of the fourteen colors and a row of
     // bookmarks along the top to switch between them. All seven bookmarks and
     // all fourteen spots are always drawn, so a gap reads as "still to breed"
     // rather than as a list that happens to be short.
@@ -6356,7 +6386,7 @@
     // than always on Sunflower, which may well be blank.
     function defaultJournalSpecies() {
       for (var i = 0; i < SPECIES.length; i++) {
-        if (heldOfSpecies(SPECIES[i].key) > 0) return SPECIES[i].key;
+        if (grownCountOfSpecies(SPECIES[i].key) > 0) return SPECIES[i].key;
       }
       for (var j = 0; j < SPECIES.length; j++) {
         if (discoveredColorsOf(SPECIES[j].key).length) return SPECIES[j].key;
@@ -6379,52 +6409,27 @@
     }
 
     // The bookmark strip: the species' flower, in the rarest color of it you
-    // own, with a superscript count of how many you're holding.
+    // own, with a superscript count of how many you've grown across every
+    // color of it.
     function journalTabsHtml(activeKey) {
       return '<div class="journal-tabs">' + SPECIES.map(function (s) {
         var found = discoveredColorsOf(s.key);
-        var held = heldOfSpecies(s.key);
+        var grown = grownCountOfSpecies(s.key);
         var color = found.length ? parseVariant(found[found.length - 1]).color : s.base;
         return '<button class="journal-tab' + (s.key === activeKey ? ' active' : '') +
           (found.length ? '' : ' blank') + '" title="' + s.name +
           '" onclick="openJournalPage(\'' + s.key + '\')">' +
-          (held > 0 ? '<span class="journal-tab-count">' + held + '</span>' : '') +
+          (grown > 0 ? '<span class="journal-tab-count">' + grown + '</span>' : '') +
           speciesChip(s, color, 26) + '</button>';
       }).join('') + '</div>';
     }
 
-    // One stack (blooms or clusters) and its actions. Offers "1" and "all N"
-    // rather than a quantity stepper - it covers "one or more" without adding
-    // a fiddly control to a bottom-sheet-sized modal.
-    function inventoryStackHtml(vk, isCluster) {
-      var n = heldOf(vk, isCluster);
-      if (n <= 0) return '';
-      var label = isCluster ? 'Cluster' : 'Bloom';
-      var each = isCluster ? SELL_CLUSTER : SELL_SINGLE;
-      var yieldText = isCluster ? '2-4 seeds' : '1-2 seeds';
-      var args = '\'' + vk + '\',' + (isCluster ? 'true' : 'false') + ',';
-
-      var html = '<div class="inv-stack-title">' + label + 's &times; ' + n +
-        ' <span style="font-weight:600;color:var(--text-dim)">(' + each + ' \u{1F338} or ' +
-        yieldText + ' each)</span></div><div class="inv-actions">';
-      html += '<button class="inv-btn sell" onclick="sellHeld(' + args + '1)">Sell 1 &bull; ' +
-        each + ' \u{1F338}</button>';
-      html += '<button class="inv-btn extract" onclick="extractHeld(' + args + '1)">Extract 1</button>';
-      if (n > 1) {
-        html += '<button class="inv-btn sell" onclick="sellHeld(' + args + n + ')">Sell all ' + n +
-          ' &bull; ' + (each * n) + ' \u{1F338}</button>';
-        html += '<button class="inv-btn extract" onclick="extractHeld(' + args + n + ')">Extract all ' +
-          n + '</button>';
-      }
-      return html + '</div>';
-    }
-
     // Opening a page picks the spot for you when there is only one thing on
-    // it to act on - with a single color held, making you tap it first would
-    // be a step with no decision in it.
+    // it to show - with a single color discovered, making you tap it first
+    // would be a step with no decision in it.
     function openJournalPage(speciesKey) {
-      var held = heldVariantsOf(speciesKey);
-      journalPick = held.length === 1 ? held[0] : null;
+      var found = discoveredColorsOf(speciesKey);
+      journalPick = found.length === 1 ? found[0] : null;
       renderJournalPage(speciesKey);
     }
     function pickJournalSpot(vk) {
@@ -6446,11 +6451,10 @@
       document.getElementById('journal-heading').innerHTML =
         speciesChip(s, headColor, 22) + ' ' + s.name;
 
-      // Resolved before the grid is drawn: selling the last of a color has to
-      // drop the selection with it, or the page keeps highlighting a spot that
-      // is now empty and has no actions left under it.
-      if (journalPick && (parseVariant(journalPick).species !== speciesKey ||
-          heldTotalOf(journalPick) <= 0)) {
+      // Resolved before the grid is drawn: a spot with nothing behind it any
+      // more (should the species change under it) can't stay highlighted
+      // with no detail left to show.
+      if (journalPick && parseVariant(journalPick).species !== speciesKey) {
         journalPick = null;
       }
 
@@ -6463,50 +6467,52 @@
         TOTAL_VARIANTS + '</b> flowers found</p>';
 
       // A spot for every color, always. An empty spot is the point of the
-      // page: it is what you have left to breed. The badge is the count you
-      // are holding right now, which is a different thing from having found
-      // it - a color you found and then sold keeps its spot filled in.
+      // page: it is what you have left to breed. The badge is how many
+      // you've grown, which is a different thing from having found it - a
+      // color you found while it was blooming but never harvested still
+      // keeps its spot filled in, just with a badge of 0.
       html += '<div class="color-grid scrapbook-grid">' + palette.map(function (c) {
         var vk = variantKey(speciesKey, c.id);
-        var kept = !!state.inventory[vk];
-        var n = heldTotalOf(vk);
-        // The four standards are unlocked on every page by default, kept
-        // or not - they're sold in the Shop for any species already, so
-        // there was never really a mystery to preserve there. Everything
-        // past a standard still has to be bred and kept to reveal its
-        // name, tracked per species (not globally - finding White on a
-        // Sunflower used to reveal the name "White" on every other
-        // species' still-empty spot too).
-        var unlocked = kept || STANDARD_COLORS.indexOf(c.id) >= 0;
+        var discovered = !!state.inventory[vk];
+        var n = grownCountOf(vk);
+        // The four standards are unlocked on every page by default,
+        // discovered or not - they're sold in the Shop for any species
+        // already, so there was never really a mystery to preserve there.
+        // Everything past a standard still has to be bred and grown to
+        // reveal its name, tracked per species (not globally - finding
+        // White on a Sunflower used to reveal the name "White" on every
+        // other species' still-empty spot too).
+        var unlocked = discovered || STANDARD_COLORS.indexOf(c.id) >= 0;
         var label = unlocked ? c.name : '?';
         var cls = 'color-cell slot' + (unlocked ? '' : ' blank') + (n > 0 ? ' held' : '') +
           (vk === journalPick ? ' picked' : '');
         return '<div class="' + cls + '" title="' + (unlocked ? label : 'Not found yet') + '"' +
-          (n > 0 ? ' onclick="pickJournalSpot(\'' + vk + '\')"' : '') + '>' +
+          (discovered ? ' onclick="pickJournalSpot(\'' + vk + '\')"' : '') + '>' +
           (unlocked ? speciesChip(s, c.id, 30) : '<span class="slot-unknown">?</span>') +
           '<span class="slot-line"><span class="slot-label">' + label + '</span>' +
           (unlocked ? '<span class="slot-note' + (n > 0 ? ' some' : '') + '">' + n + '</span>' : '') +
           '</span></div>';
       }).join('') + '</div>';
 
-      // The picked spot's actions, in one block under the album rather than a
-      // stack of every color at once - a full page of held colors used to run
-      // well past the bottom of a phone.
-      var heldCount = heldVariantsOf(speciesKey).length;
+      // The picked spot's detail, in one block under the album rather than a
+      // stack of every color at once - a full page of found colors used to
+      // run well past the bottom of a phone.
       if (journalPick) {
         var c = colorFor(parseVariant(journalPick).color);
+        var entry = state.inventory[journalPick];
+        var count = entry.count || 0;
         var seeds = state.seeds[journalPick] || 0;
         html += '<div class="inv-variant" style="border-color:' + c.line + '">' +
           '<div class="inv-variant-name" style="color:' + c.ink + '">' + variantChip(journalPick, 20) +
           ' ' + variantName(journalPick) + '</div>' +
-          inventoryStackHtml(journalPick, false) + inventoryStackHtml(journalPick, true) +
-          '<div class="inv-meta">' + seeds + ' seed' + (seeds === 1 ? '' : 's') +
-          ' in your pouch &bull; first kept ' + formatAgo(state.inventory[journalPick].firstAt) +
-          ' &bull; selling pays Petals, extracting gives back seeds of ' +
-          'this exact color</div></div>';
-      } else if (heldCount > 0) {
-        html += '<p class="journal-hint">Tap a spot with a number on it to sell those flowers ' +
-          'or pull them apart for seeds.</p>';
+          '<div class="inv-grown-count">Grown <b>' + count + '</b> time' + (count === 1 ? '' : 's') +
+          '</div>' +
+          '<div class="inv-meta">' +
+          (count > 0 ? 'First grown ' + formatAgo(entry.firstAt) : 'Seen blooming, not harvested yet') +
+          (seeds > 0 ? ' &bull; ' + seeds + ' seed' + (seeds === 1 ? '' : 's') + ' in your pouch' : '') +
+          '</div></div>';
+      } else if (found.length > 0) {
+        html += '<p class="journal-hint">Tap a flower you\'ve grown to see the count.</p>';
       }
 
       // The lifetime tally lived on the contents page; it belongs somewhere,
@@ -6515,7 +6521,7 @@
       var st = state.stats;
       function statNum(n) { return '<span class="stat-num">' + n + '</span>'; }
       html += '<div class="journal-stats">' +
-        '<p>Kept ' + statNum(st.kept) + ' all time</p>' +
+        '<p>Grown ' + statNum(st.grown) + ' all time</p>' +
         '<p>Sold ' + statNum(st.sold) + ' for ' + statNum(st.earned) + ' Petals</p>' +
         '<p>Extracted ' + statNum(st.extractedFlowers) + ' for ' + statNum(st.extracted) +
         ' seeds</p></div>';
@@ -6576,8 +6582,8 @@
         tiers: [1, 10, 30, 75], valueFn: function (st) { return st.bloomed; } },
       { key: 'flourished', icon: '\u{2728}', label: 'Flourisher', blurb: 'Plants grown to a full cluster',
         tiers: [1, 10, 30, 75], valueFn: function (st) { return st.flourished; } },
-      { key: 'harvested', icon: '\u{1F9FA}', label: 'Harvester', blurb: 'Flowers kept or sold',
-        tiers: [1, 15, 50, 100], valueFn: function (st) { return st.kept + st.sold; } },
+      { key: 'harvested', icon: '\u{1F9FA}', label: 'Harvester', blurb: 'Flowers extracted or sold',
+        tiers: [1, 15, 50, 100], valueFn: function (st) { return st.grown; } },
       { key: 'earned', icon: '\u{1F338}', label: 'Trader', blurb: 'Lifetime Petals earned',
         tiers: [50, 250, 1000, 3000], valueFn: function (st) { return st.earned; } },
       { key: 'bred', icon: '\u{1F98B}', label: 'Breeder', blurb: 'Successful crossings',
@@ -6998,9 +7004,9 @@
       // gives every other "not yet" moment in the game.
       var row4 = document.getElementById('stand-row-4');
       if (!sprinklerUnlocked()) {
-        var need = Math.max(0, SPRINKLER_UNLOCK_FLOWERS - (state.stats.kept + state.stats.sold));
+        var need = Math.max(0, SPRINKLER_UNLOCK_FLOWERS - state.stats.grown);
         row4.innerHTML =
-          '<button class="stand-sprinkler-btn" disabled title="Keep or sell ' + SPRINKLER_UNLOCK_FLOWERS +
+          '<button class="stand-sprinkler-btn" disabled title="Grow and harvest ' + SPRINKLER_UNLOCK_FLOWERS +
           ' flowers to unlock">' +
           '<span class="stand-sprinkler-icon">' + sprinklerIconSVG(26) + '</span>' +
           '<span class="stand-sprinkler-label">Sprinkler</span>' +
@@ -7288,27 +7294,28 @@
     }
 
     // Deliberately accepts a harvest at ANY step, not just the scripted one.
-    // The Keep/Sell row is genuinely available from "In Bloom" onward, so a
-    // player who harvests a stage early would otherwise leave the tutorial
+    // The Extract/Sell row is genuinely available from "In Bloom" onward, so
+    // a player who harvests a stage early would otherwise leave the tutorial
     // pointing at a plant that no longer exists, with no way to advance it
     // short of Skip. Any pending settle timer sees the plant is gone and bows
     // out on its own, so the step move to 'shop' below can't be clobbered.
-    function tutorialOnHarvest(key, sell, value) {
+    function tutorialOnHarvest(key, mode, value) {
       if (!tutorial.active || key !== tutorial.plantKey) return;
-      // A bonus (on top of any sale) guarantees a first seed is affordable
-      // either way - Keep is never presented as the "wrong" choice, this just
-      // makes sure the shop step isn't a wall for it. Tied to SEED_COST rather
-      // than a literal so it cannot silently stop covering a seed if the price
-      // is ever retuned; Keep pays nothing, so this bonus is the whole budget.
+      // A bonus (on top of any sale/extraction) guarantees a first seed is
+      // affordable either way - Extract is never presented as the "wrong"
+      // choice, this just makes sure the shop step isn't a wall for it. Tied
+      // to SEED_COST rather than a literal so it cannot silently stop
+      // covering a seed if the price is ever retuned; Extract pays no
+      // Petals on its own, so this bonus is the whole budget for that path.
       var bonus = SEED_COST;
       state.currency += bonus;
       saveState();
       updateCurrencyPill();
       tutorial.step = 'shop';
       setToolHint(null);
-      var msg = sell
+      var msg = mode === 'sell'
         ? 'Nice sale! Plus a first-harvest bonus of +' + bonus + ' \u{1F338}.'
-        : 'Kept for your collection! Here\'s a first-harvest bonus of +' + bonus + ' \u{1F338} to get you started.';
+        : 'Seeds extracted! Here\'s a first-harvest bonus of +' + bonus + ' \u{1F338} to get you started too.';
       showTutorialBanner(msg + ' Open the Shop (top right) and buy your next seed \u{1F337}');
     }
 

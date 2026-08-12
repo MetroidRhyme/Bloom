@@ -1149,7 +1149,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.10.0</span>
+      <span id="game-version">v2.10.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3905,7 +3905,7 @@
         if (Date.now() < (o.breedReadyAt || 0)) {
           return 'Still resting from its last cross - ready in ' + formatDuration(breedWaitMs(o));
         }
-        if (!breedPartnersFor(target.key).length) return 'No flourishing neighbour ready to cross with';
+        if (!breedPartnersFor(target.key).length) return 'No flourishing neighbour of the same species ready to cross with';
         return null;
       }
       // Shears and $ both need something worth taking. Wild flowers always are.
@@ -5222,9 +5222,12 @@
       var partners = (d.stage >= MAX_STAGE && !waiting) ? breedPartnersFor(key) : [];
       var neighborWaiting = false;
       if (d.stage >= MAX_STAGE && !waiting && !partners.length) {
+        // Same species only, same as breedPartnersFor - a flourishing
+        // neighbour of a different species is not "resting", it's simply
+        // never going to be a partner, and saying otherwise would be wrong.
         neighborWaiting = neighborsOf(p.q, p.r).some(function (h) {
           var o = state.plants[cellKey(h.q, h.r)];
-          return o && recomputePlant(o, Date.now()).stage >= MAX_STAGE;
+          return o && o.species === p.species && recomputePlant(o, Date.now()).stage >= MAX_STAGE;
         });
       }
 
@@ -5284,13 +5287,19 @@
     function breedWaitMs(p) { return Math.max(0, (p.breedReadyAt || 0) - Date.now()); }
 
     // Adjacent plants of yours that could cross with this one right now.
+    // Same species only - crossing across species used to be the norm (the
+    // color roll and the species coin-flip didn't care), but that let any
+    // two flourishing neighbours pair up regardless of shape. Restricting to
+    // matching species here is the single choke point both entry points
+    // (the plant panel's button and the fert tool) share, so neither needs
+    // its own copy of the rule.
     function breedPartnersFor(key) {
       var p = state.plants[key];
       if (!p || !breedReady(p)) return [];
       return neighborsOf(p.q, p.r).map(function (h) { return cellKey(h.q, h.r); })
         .filter(function (k) {
           var o = state.plants[k];
-          return o && breedReady(o);
+          return o && breedReady(o) && o.species === p.species;
         });
     }
 
@@ -5332,6 +5341,7 @@
       var a = state.plants[keyA], b = state.plants[keyB];
       if (!a || !b) { closePlantPanel(); return; }
       if (!breedReady(a) || !breedReady(b)) { toast('Those two are not both ready.'); return; }
+      if (a.species !== b.species) { toast('Only the same kind of flower can cross.'); return; }
       if (state.fertilizer <= 0) {
         toast('You are out of fertilizer - buy a bag in the Shop \u{1F338}');
         return;
@@ -5345,17 +5355,14 @@
       b.breedReadyAt = now + BREED_COOLDOWN_MS;
 
       var ca = colorOfPlant(a), cb = colorOfPlant(b);
-      // Signature recipes need both parents on the same shape; everything else
-      // ignores species entirely.
-      var color = crossColor(ca, cb, a.species === b.species ? a.species : null);
-      // Either parent's shape, so a color you have bred can be walked onto a
-      // different species instead of being stuck on the one it appeared in.
-      var species = Math.random() < 0.5 ? a.species : b.species;
-      // ...except a signature color, which has exactly one shape it can wear.
-      // Crossing an Ember Tulip with a Red Daisy can fall through to Ember on
-      // the coin flip, and the species roll could then pick Daisy - so the
-      // lock is enforced where the plant is created rather than trusted to
-      // every table entry. There is no such thing as an Ember Daisy.
+      // Parents are always the same species now (breedPartnersFor only offers
+      // same-species neighbours, and the guard above rejects anything else),
+      // so the seedling's shape is simply theirs - no coin flip needed.
+      var color = crossColor(ca, cb, a.species);
+      var species = a.species;
+      // A signature color has exactly one shape it can wear regardless of
+      // what the parents were - enforced here rather than trusted to every
+      // table entry. There is no such thing as an Ember Daisy.
       var lock = exclusiveSpeciesOf(color);
       if (lock) species = lock;
       // NOT recordCross(ca, cb, color) here - the Crossing Notes screen
@@ -5675,13 +5682,14 @@
         '<p><b>Signature colors</b> - past all of those, each species has <b>two colors of its own</b> ' +
         'that no other flower can wear. They shimmer and glow, and the only way to reach one is to ' +
         'cross two flowers <b>of the same species</b> deep in the Gold line.</p>' +
-        '<p><b>Crossing</b> \u{1F331} - grow two flowers to flourishing on tiles next to each other and buy ' +
-        'a bag of fertilizer. Press and hold either one with the fertilizer tool, or open its details and ' +
-        'tap <b>Cross with a neighbour</b> - either way crosses it with a <b>random</b> flourishing ' +
-        'neighbour, never one you pick. A flower with two or three flourishing neighbours could cross ' +
-        'with any of them, so where you plant relative to your other flowers is worth thinking about. A ' +
-        'seedling comes up in the gap between them, and its color stays a mystery until you water it into ' +
-        'bloom. Crossing two of the four standards always gives the same result - six pairs, six new ' +
+        '<p><b>Crossing</b> \u{1F331} - grow two flowers of the <b>same species</b> to flourishing on tiles ' +
+        'next to each other and buy a bag of fertilizer. Press and hold either one with the fertilizer ' +
+        'tool, or open its details and tap <b>Cross with a neighbour</b> - either way crosses it with a ' +
+        '<b>random</b> flourishing neighbour of the same species, never one you pick. A flower with two or ' +
+        'three same-species flourishing neighbours could cross with any of them, so where you plant ' +
+        'relative to your other flowers is worth thinking about. A seedling comes up in the gap between ' +
+        'them, in that same species, and its color stays a mystery until you water it into bloom. ' +
+        'Crossing two of the four standards always gives the same result - six pairs, six new ' +
         'colors - and those in turn cross into the rarer ones. Both parents rest for ' +
         formatDuration(BREED_COOLDOWN_MS) + ' afterwards, and they stay right where they are. Your ' +
         'Crossing Notes in the menu remember every pairing you\'ve tried.</p>' +

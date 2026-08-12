@@ -1141,7 +1141,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.11.0</span>
+      <span id="game-version">v2.11.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1354,7 +1354,7 @@
     // the game. (The old model accumulated growth purely from elapsed time,
     // which meant a plant reached a full cluster with zero watering visits
     // and the watering mechanic had no mechanical weight at all.)
-    var STAGE_READY_MS = 12 * HOUR;
+    var STAGE_READY_MS = 1.5 * HOUR;
     var MAX_STAGE = 3;
     var STAGE_LABELS = ['Seed', 'Sprout', 'In Bloom', 'Flourishing'];
 
@@ -1363,7 +1363,7 @@
     // instead of anything tunable. stageReadyMs() is the one place growth
     // timing is actually read from - every readyAt assignment and the growth
     // bar's percentage math go through it, so flipping the toggle can never
-    // leave one of them still counting against the real 12h constant.
+    // leave one of them still counting against the real 1.5h constant.
     var CHEAT_STAGE_MS = 15 * 1000;
     function stageReadyMs() { return state.cheatMode ? CHEAT_STAGE_MS : STAGE_READY_MS; }
     // Indexed by the stage just reached; index 0 is unused (you never water
@@ -5633,7 +5633,7 @@
       document.getElementById('modal-body').innerHTML =
         '<p>Bloom gives you a gentle reason to get out and walk. Plant one of your starter seeds in the ' +
         'ground near you, then swing back by to water it.</p>' +
-        '<p>Watering is what makes it grow. About every 12 hours a plant is ready for a drink, and each ' +
+        '<p>Watering is what makes it grow. About every 90 minutes a plant is ready for a drink, and each ' +
         'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
         'back, three stages.</p>' +
         '<p>Your tools live in the toolbox, top left: the watering can, the shears for collecting, and $ ' +
@@ -5673,7 +5673,7 @@
         'flower with no tool in hand just opens its details.</p>' +
         '<p><b>Water</b> - pick up the watering can and tap each flower you want watered. You have to be ' +
         'within a couple tiles of it.</p>' +
-        '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +
+        '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 90 minutes or so it becomes ' +
         'ready, and your next watering visit moves it up a stage: seed, sprout, single bloom, full ' +
         'flourishing cluster. A green \u{1F4A7} on the map means one is ready right now. Watering early is ' +
         'never wasted - it still tops up the tank and holds off wilting.</p>' +
@@ -6374,7 +6374,7 @@
     // ---------------------------------------------------------------------
 
     // Cheat Mode: a dev/testing shortcut, not a real game feature - unlimited
-    // Petals and a 15s stage-readiness time instead of 12h. Currency isn't a
+    // Petals and a 15s stage-readiness time instead of 1.5h. Currency isn't a
     // true sentinel "infinite" value, just topped up to CHEAT_CURRENCY (see
     // buySeed/buyFertilizer, which re-apply the top-up after every spend so
     // it never actually runs down). Turning it off doesn't claw anything
@@ -6660,12 +6660,12 @@
     //  TUTORIAL (first run only)
     //  A brand-new save (see loadState's tutorialDone default) walks through
     //  one real plant -> water -> water -> water -> harvest -> shop cycle, i.e.
-    //  the exact three-visit shape of the real game. The 12-hour readiness
+    //  the exact three-visit shape of the real game. The 1.5-hour readiness
     //  waits are simulated (tutorialMakeReady clears the ONE tutorial plant's
     //  readyAt, not a global time multiplier - recomputePlant treats that
     //  plant no differently from any other on every later call), so a new
-    //  player sees the whole loop in under a minute instead of a day and a
-    //  half. Every other step - actually planting, actually tapping Water,
+    //  player sees the whole loop in under a minute instead of several hours.
+    //  Every other step - actually planting, actually tapping Water,
     //  actually harvesting, actually buying - is a real action the player
     //  performs; nothing is auto-clicked for them. Always skippable via the
     //  banner's persistent link.
@@ -6712,7 +6712,7 @@
 
     // Clears the one tutorial plant's readiness wait so the next watering
     // advances it immediately. recomputePlant can't tell this apart from a
-    // real 12 hours having passed, so nothing needs to be "reverted" once the
+    // real 1.5 hours having passed, so nothing needs to be "reverted" once the
     // tutorial ends - it's just a normal plant with a running start.
     function tutorialMakeReady(p) {
       p.readyAt = Date.now();
@@ -6745,7 +6745,7 @@
         'your flower \u{1F4A7}');
     }
 
-    // Out in the real game each of these beats is a 12-hour wait and a walk
+    // Out in the real game each of these beats is a 1.5-hour wait and a walk
     // back; here they're a 2.5s pause so the shape of the loop lands without
     // the player having to leave and return three times before anything
     // happens. Driven off the plant's real stage, not a step counter, so it

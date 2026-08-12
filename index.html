@@ -1136,7 +1136,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.7.2</span>
+      <span id="game-version">v2.8.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -2459,14 +2459,17 @@
       if (viewingKey === key) renderPlantPanel(key);
       updateHUD();
 
+      // A routine top-up (not grown, not a cross reveal) gets no toast at
+      // all - watering is a plain tap done in a row across a whole bed, and
+      // the can-pour animation plus the marker's own instant change (badge
+      // gone, wilt cleared) already say "watered" without a popup on top.
+      // Only the two genuinely new pieces of news - a stage advanced, or a
+      // mystery cross opened - are worth a line, and both are rare enough
+      // per tap not to pile up.
       if (revealed) {
         toast('\u{1F338} Your cross opened - it\'s a ' + variantName(revealed) + '!');
       } else if (grew) {
         toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
-      } else if (p.stage >= MAX_STAGE) {
-        toast('\u{1F4A7} Watered! It is fully grown - Keep it or Sell it whenever you like.');
-      } else {
-        toast('\u{1F4A7} Watered! Ready to grow again in ' + formatDuration(p.readyAt - now) + '.');
       }
       vibrate(grew ? 30 : 15);
       tutorialOnWater(key);
@@ -3027,7 +3030,12 @@
         w = h = Math.round(base * 0.85);
         html = '<div style="' + wiltFilter + '">' + dot(w) + '</div>';
       } else {
-        var ds = Math.round(base * 0.5), gap = Math.max(2, Math.round(base * 0.04));
+        // gap first, ds derived from what's left (floor, not round) -
+        // guarantees 2*ds+gap <= base for every base, including the small
+        // ones near PLANT_ICON_MIN_PX, rather than a fixed 0.5 ratio that
+        // rounds up past base and overlaps the neighboring tile.
+        var gap = Math.max(2, Math.round(base * 0.04));
+        var ds = Math.floor((base - gap) / 2);
         w = 2 * ds + gap; h = 2 * ds + gap;
         html = '<div class="flourish-cluster" style="' + wiltFilter + 'display:flex;flex-direction:column;' +
           'gap:' + gap + 'px;align-items:center"><div style="display:flex;gap:' + gap + 'px">' +
@@ -3057,17 +3065,41 @@
     // right size once 'zoomend' rebuilt them. rescalePlantIcons() below covers
     // the gap by CSS-scaling the live DOM every 'zoom' tick; 'zoomend' (see the
     // map.on binding further down) then does the real rebuild.
-    // Clamped so icons stay legible at minZoom and don't get absurd at maxZoom.
-    var PLANT_ICON_REF_ZOOM = 17; // the zoom PLANT_ICON_REF_PX looks "normal" at
-    var PLANT_ICON_REF_PX = 44;
+    //
+    // The base size used to be a formula (a fixed px at a reference zoom,
+    // doubling/halving per zoom level) that was never actually checked
+    // against the grid's own real on-screen size - at most zoom levels and
+    // latitudes it came out noticeably bigger than one tile, so a flourishing
+    // cluster (see buildPlantVisual) visibly overlapped its neighbors. Now
+    // it's measured directly off the map's own projection instead: the exact
+    // pixel width of one grid cell at the current zoom. Building every icon
+    // at (a fraction of) this size is what guarantees it can never bleed
+    // into a neighboring tile, at any zoom, rather than hoping a hand-tuned
+    // constant happens to match. CELL_LNG_DEG is corrected for latitude once
+    // at GPS lock (see onGpsLocked), so a cell is locally square in both
+    // meters and screen pixels - and x-pixels-per-degree-longitude in Web
+    // Mercator is uniform across latitude, so which latitude these two probe
+    // points use doesn't matter.
+    function cellPixelWidth() {
+      var a = map.latLngToLayerPoint([0, 0]);
+      var b = map.latLngToLayerPoint([0, CELL_LNG_DEG]);
+      return Math.abs(b.x - a.x);
+    }
+    // Floor only - a ceiling would reintroduce the overlap this whole
+    // function exists to prevent. Only matters below GRID_MIN_ZOOM anyway,
+    // where the grid mesh itself isn't even drawn, so there's no visible
+    // tile edge for an icon at the floor to look wrong against.
+    var PLANT_ICON_MIN_PX = 16;
     function plantIconBase() {
-      var scale = Math.pow(2, map.getZoom() - PLANT_ICON_REF_ZOOM);
-      return PLANT_ICON_REF_PX * Math.max(0.5, Math.min(2.5, scale));
+      return Math.max(PLANT_ICON_MIN_PX, cellPixelWidth());
     }
     // The px plantIconBase() returned the last time icons were actually
     // rebuilt (makePlantIcon/makeWildIcon). rescalePlantIcons() compares the
-    // current value against this to know how far the live gesture has drifted.
-    var _iconBuiltPx = PLANT_ICON_REF_PX;
+    // current value against this to know how far the live gesture has
+    // drifted. Starts at 0 (map doesn't exist yet at this point in the
+    // script) - harmless, since nothing reads it before the first real
+    // renderPlants()/renderWild() call sets it for real.
+    var _iconBuiltPx = 0;
 
     function makePlantIcon(plant) {
       var d = recomputePlant(plant, Date.now());
@@ -3098,7 +3130,10 @@
       var px = plantIconBase();
       _iconBuiltPx = px;
       var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, px);
-      var pad = Math.max(6, Math.round(v.w * 0.18));
+      // Capped at what's left of the tile past the flower itself - the glow
+      // is a nice-to-have, not worth letting the whole marker spill into a
+      // neighboring tile the way an uncapped pad could at some zooms.
+      var pad = Math.max(0, Math.min(Math.max(6, Math.round(v.w * 0.18)), Math.floor((px - v.w) / 2)));
       var box = v.w + pad * 2, boxH = v.h + pad * 2;
       var html = '<div style="position:relative;width:' + box + 'px;height:' + boxH + 'px;' +
         'display:flex;align-items:center;justify-content:center">' +
@@ -4285,22 +4320,35 @@
 
     // -----------------------------------------------------------------------
     //  WELCOME-BACK TOUR
-    //  A short, skippable camera tour that runs once per session, only once
-    //  onboarding and the tutorial are both already done (see onGpsLocked),
-    //  hopping to whatever changed while the game was closed instead of
-    //  leaving the player to notice it themselves scrolling around the map.
-    //  Every stop is derived from timestamps the plant/wild objects already
-    //  carry (readyAt, lastWateredAt, spawnedAt) compared against
-    //  state.lastSeenAt - nothing new is tracked per plant, only the one
-    //  session-level checkpoint. Purely a presentation layer: it never
-    //  changes game state itself (aside from advancing the checkpoint), so
-    //  skipping it early costs nothing and loses no information - the plant
-    //  or wild flower it would have shown you is still sitting on the map
-    //  exactly where it was.
+    //  A short, skippable camera tour offering a status check-in whenever the
+    //  player is "back" - either a fresh page load once onboarding/tutorial/
+    //  fertilizer-unlock are all already done (see onGpsLocked), or the tab
+    //  becoming visible again after a real gap (see the visibilitychange
+    //  listener below, for the common case of backgrounding/minimizing
+    //  rather than fully closing the tab - the JS keeps running and
+    //  onGpsLocked never fires again on its own). Every stop is derived from
+    //  timestamps the plant/wild objects already carry (readyAt,
+    //  lastWateredAt, spawnedAt) - new wild flowers and vanished wild
+    //  flowers are diffed against state.lastSeenAt (a one-off event only
+    //  worth mentioning once), but a ready or wilted plant is reported by
+    //  its CURRENT state regardless of when it first became that way - it's
+    //  still true and still actionable, so a flower that was already ready
+    //  before the player last left is exactly the kind of thing a "here's
+    //  what needs you" check-in should surface, not silently omit for being
+    //  old news. Purely a presentation layer: it never changes game state
+    //  itself (aside from advancing the checkpoint), so skipping it early
+    //  costs nothing and loses no information - the plant or wild flower it
+    //  would have shown you is still sitting on the map exactly where it was.
     // -----------------------------------------------------------------------
     var wbTour = { active: false, stops: [], index: -1, timer: null, marker: null };
     var WB_TOUR_MAX_STOPS = 6;   // caps a long absence at a highlight reel, not a slog
     var WB_TOUR_DWELL_MS = 1600; // "a quick 1 or 2 second focus on each thing"
+    var WB_TOUR_ZOOM = 17;       // comfortable close-up zoom for each stop and the fly-back home
+    // How long the tab has to have been hidden before becoming visible again
+    // counts as "away" - keeps a quick alt-tab from retriggering the tour on
+    // every single switch. Only gates the visibilitychange path; a fresh
+    // page load (onGpsLocked) always checks, same as before.
+    var WB_TOUR_MIN_AWAY_MS = 5 * 60 * 1000;
 
     // Wild flowers that finished vanishing while the game was closed. Has to
     // be captured before tickPlants() sweeps them out of state.wild - by the
@@ -4326,13 +4374,18 @@
         var p = state.plants[key];
         var d = recomputePlant(p, now);
         var vk = variantKey(p.species, colorOfPlant(p));
-        // Readiness outranks wilt everywhere else in the UI (map badge, HUD,
-        // panel) - one stop per plant here too, rather than two competing
-        // messages about the same flower.
-        if (d.ready && p.readyAt > lastSeen) {
+        // Current state, not "became true since lastSeen" - a flower that
+        // was already ready or wilted before the player last left is still
+        // exactly as actionable as one that turned that way in between, so
+        // it stays a stop rather than being silently swallowed for being
+        // old news (see the section comment above). Readiness outranks wilt
+        // everywhere else in the UI (map badge, HUD, panel) - one stop per
+        // plant here too, rather than two competing messages about the same
+        // flower.
+        if (d.ready) {
           stops.push({ type: 'ready', lat: p.lat, lng: p.lng,
             text: variantName(vk) + ' is ready to water \u{1F4A7}' });
-        } else if (d.wilted && (p.lastWateredAt + WATER_DURATION_MS) > lastSeen) {
+        } else if (d.wilted) {
           stops.push({ type: 'wilted', lat: p.lat, lng: p.lng,
             text: variantName(vk) + ' is looking a little wilted' });
         }
@@ -4375,8 +4428,8 @@
         (wbTour.index + 1) + ' of ' + wbTour.stops.length;
       document.getElementById('wb-tour-text').textContent = stop.text;
 
-      if (reduceMotion) map.setView([stop.lat, stop.lng], PLANT_ICON_REF_ZOOM);
-      else map.flyTo([stop.lat, stop.lng], PLANT_ICON_REF_ZOOM, { duration: 0.7 });
+      if (reduceMotion) map.setView([stop.lat, stop.lng], WB_TOUR_ZOOM);
+      else map.flyTo([stop.lat, stop.lng], WB_TOUR_ZOOM, { duration: 0.7 });
 
       wbTour.marker = L.marker([stop.lat, stop.lng], {
         icon: L.divIcon({ html: '<div class="wb-tour-ping ' + stop.type + '"></div>',
@@ -4397,12 +4450,43 @@
       // deliberately hand it back, the same way it took it.
       if (userCellQ !== null && userCellR !== null) {
         var back = cellCenter(userCellQ, userCellR);
-        if (reduceMotion) map.setView([back.lat, back.lng], PLANT_ICON_REF_ZOOM);
-        else map.flyTo([back.lat, back.lng], PLANT_ICON_REF_ZOOM, { duration: 0.7 });
+        if (reduceMotion) map.setView([back.lat, back.lng], WB_TOUR_ZOOM);
+        else map.flyTo([back.lat, back.lng], WB_TOUR_ZOOM, { duration: 0.7 });
       }
     }
 
     function skipWelcomeBackTour() { endWelcomeBackTour(); }
+
+    // The other half of "what triggers the welcome-back tour": onGpsLocked
+    // only ever runs once, the moment the page first gets a GPS fix, so a
+    // full tab close+reopen (a real page load) is the only thing that used
+    // to reach it - backgrounding or minimizing a still-alive tab, by far
+    // the more common way a phone browser is "closed and reopened", left
+    // the page running with nothing to notice the player had ever left.
+    // Page Visibility firing 'visible' again is that actual moment.
+    //
+    // Deliberately narrower than onGpsLocked's own resume chain: this only
+    // ever offers the welcome-back tour, never onboarding/tutorial/
+    // fertilizer-unlock - those have their own state machines (startTutorial
+    // in particular RESETS tutorial.step back to 'plant' if called again
+    // mid-flight) that are only safe to re-enter from a real page load, not
+    // an arbitrary tab-visibility flicker, so this backs off entirely
+    // (shows nothing) if any of them isn't already resolved.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState !== 'visible') return;
+      if (!rangeArea) return; // GPS never locked yet this session - nothing to diff against
+      if (wbTour.active || document.getElementById('modal-overlay').classList.contains('open')) return;
+      if (!state.seenWelcome || !state.tutorialDone || (state.fertReady && !state.fertUnlocked)) return;
+      var lastSeen = state.lastSeenAt;
+      if (!lastSeen || Date.now() - lastSeen < WB_TOUR_MIN_AWAY_MS) return;
+      var goneWild = collectGoneWild(Date.now()); // must run before tickPlants() sweeps its answer away
+      tickPlants();
+      tickSprinklers();
+      maybeSpawnWild();
+      buildAndStartWelcomeBackTour(lastSeen, goneWild);
+      state.lastSeenAt = Date.now();
+      saveState();
+    });
 
     // The actual permission request - split out so both the normal startup
     // path and the primer's "Allow Location" button (see openGpsPrimer) and
@@ -6160,8 +6244,16 @@
       syncToolRail();
     }
 
+    // Capped so a burst of actions (watering or harvesting several flowers
+    // in a row) can't stack into a column tall enough to cover the map -
+    // only the newest MAX_VISIBLE_TOASTS stay up. Older ones are dropped
+    // outright rather than queued: by the time a 3rd action has happened,
+    // waiting to show the 1st one's news would just be stale.
+    var MAX_VISIBLE_TOASTS = 2;
     function toast(msg) {
       var c = document.getElementById('toast-container');
+      var existing = c.querySelectorAll('.toast');
+      for (var i = 0; i <= existing.length - MAX_VISIBLE_TOASTS; i++) existing[i].remove();
       var t = document.createElement('div');
       t.className = 'toast';
       t.textContent = msg;

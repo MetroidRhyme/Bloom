@@ -2119,6 +2119,18 @@
         // for wild spawning even if the player never goes back. See
         // markAccessible() and pickWildSpots().
         visited: {},
+        // cell key -> 1, every tile within planting range at any point during
+        // todayAccessibleDay (the player's local calendar day). Unlike
+        // `visited` above, this resets to empty at local midnight - see
+        // markAccessibleToday() and inRange(). Lets a tile tended earlier on
+        // today's walk stay actionable for the rest of the day even after
+        // the player has moved elsewhere.
+        todayAccessible: {},
+        // Local YYYY-MM-DD (see localDayKey) that `todayAccessible` was last
+        // reset for. Compared against localDayKey() on every read so a
+        // stale set from a previous day is never trusted just because
+        // nothing has touched it since the rollover.
+        todayAccessibleDay: null,
         // species key -> { single, cluster, firstAt }: the flowers you chose to
         // Keep, split by what they were when picked, since a cluster extracts
         // into more seeds than a single bloom. An entry is never deleted once
@@ -2199,6 +2211,11 @@
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
           visited: visited,
+          // Brand new with this feature - a pre-existing save simply starts
+          // with an empty today-set, same backfill treatment as `visited`
+          // and `sprinklers` got when they were introduced.
+          todayAccessible: parsed.todayAccessible || {},
+          todayAccessibleDay: parsed.todayAccessibleDay || null,
           // Brand new with this feature - any pre-existing save simply has
           // none placed/owned yet, same treatment as fertilizer's own
           // backfill just below.
@@ -2268,6 +2285,7 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
         visited: state.visited,
+        todayAccessible: state.todayAccessible, todayAccessibleDay: state.todayAccessibleDay,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         sprinklers: state.sprinklers, sprinklerInventory: state.sprinklerInventory,
@@ -2789,6 +2807,47 @@
         }
       }
       if (added) saveState();
+    }
+
+    // Sibling to markAccessible() above, but keyed to the player's local
+    // calendar day instead of forever: records every tile within planting
+    // range of (q, r) as usable for the rest of today, so a spot tended
+    // earlier on a walk stays actionable after the player has moved
+    // somewhere else entirely (see inRange()). Resets itself the first time
+    // it's called after a local-midnight rollover. NOT the same set as
+    // state.visited - that one is permanent and only ever biases wild-flower
+    // spawning; this one is real gameplay range and clears daily.
+    function markAccessibleToday(q, r) {
+      var today = localDayKey();
+      if (state.todayAccessibleDay !== today) {
+        state.todayAccessible = {};
+        state.todayAccessibleDay = today;
+      }
+      var added = false;
+      for (var dq = -PLANT_RANGE; dq <= PLANT_RANGE; dq++) {
+        for (var dr = -PLANT_RANGE; dr <= PLANT_RANGE; dr++) {
+          var key = cellKey(q + dq, r + dr);
+          if (!state.todayAccessible[key]) { state.todayAccessible[key] = 1; added = true; }
+        }
+      }
+      if (added) saveState();
+    }
+
+    // The one gate every plant/water/harvest/sell/fertilize/pick/sprinkler
+    // action goes through: true if the player's LIVE position is within
+    // PLANT_RANGE of (q, r) right now, OR if (q, r) was within range at any
+    // point earlier today (state.todayAccessible) - rewarding the walk
+    // itself rather than requiring the player to be standing right next to
+    // a tile at the exact moment they want to tend it. The day check is
+    // re-verified here (not just trusted from whenever todayAccessible was
+    // last written) so a set left over from before a midnight rollover that
+    // simply hasn't been touched yet is never mistaken for today's.
+    function inRange(q, r) {
+      if (!state.userPos) return false;
+      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+      if (cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
+      if (state.todayAccessibleDay !== localDayKey()) return false;
+      return !!state.todayAccessible[cellKey(q, r)];
     }
 
     // Priority + rejection sampling. First fills from state.visited - tiles
@@ -3468,18 +3527,17 @@
       if (state.plants[key]) { openPlantPanel(key); return; }
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
-      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      var inRange = cellDist(uh.q, uh.r, h.q, h.r) <= PLANT_RANGE;
+      var tileInRange = inRange(h.q, h.r);
       // A placed sprinkler always picks up on a tap, the same "act on what's
       // here" priority an occupied plant/wild tile already gets above -
       // moving it is an action, though, so it still needs the same walk-up
       // range every other action requires (unlike just opening a panel).
       if (state.sprinklers[key]) {
-        if (!inRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
+        if (!tileInRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
         pickUpSprinkler(key);
         return;
       }
-      if (!inRange) {
+      if (!tileInRange) {
         toast('Walk closer to plant a seed here \u{1F6B6}');
         return;
       }
@@ -3888,8 +3946,7 @@
     function toolBlockedReason(tool, target) {
       var o = target.obj;
       if (!state.userPos) return 'Waiting for GPS to lock on...';
-      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      if (cellDist(uh.q, uh.r, o.q, o.r) > PLANT_RANGE) return 'Walk closer to reach this one \u{1F6B6}';
+      if (!inRange(o.q, o.r)) return 'Walk closer to reach this one \u{1F6B6}';
 
       if (tool === 'water') {
         if (target.kind === 'wild') return 'Wild flowers look after themselves - pick this one instead';
@@ -4009,11 +4066,8 @@
       if (!ps.target) {
         // Empty ground. Only worth a word inside planting range, where the tap
         // was probably meant to plant something - otherwise stay quiet.
-        if (state.userPos) {
-          var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-          if (cellDist(uh.q, uh.r, ps.cell.q, ps.cell.r) <= PLANT_RANGE) {
-            toast('Put the ' + TOOL_NAMES[activeTool] + ' away to plant here \u{1F331}');
-          }
+        if (state.userPos && inRange(ps.cell.q, ps.cell.r)) {
+          toast('Put the ' + TOOL_NAMES[activeTool] + ' away to plant here \u{1F331}');
         }
         return;
       }
@@ -4035,14 +4089,13 @@
       if (state.plants[key]) { openPlantPanel(key); return; }
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
-      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      var inRange = cellDist(uh.q, uh.r, ps.cell.q, ps.cell.r) <= PLANT_RANGE;
+      var tileInRange = inRange(ps.cell.q, ps.cell.r);
       if (state.sprinklers[key]) {
-        if (!inRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
+        if (!tileInRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
         pickUpSprinkler(key);
         return;
       }
-      if (!inRange) { toast('Walk closer to plant a seed here \u{1F6B6}'); return; }
+      if (!tileInRange) { toast('Walk closer to plant a seed here \u{1F6B6}'); return; }
       plantEquippedSeedAt(ps.cell.q, ps.cell.r);
     }
 
@@ -4177,21 +4230,19 @@
     }
 
     // Every tile in the box gets the same toolBlockedReason check a single
-    // tap already runs (in range of the player, valid stage, etc.) -
-    // invalid ones are silently skipped rather than toasted one by one,
-    // which would just be the exact toast-pile-up problem a bulk action is
-    // supposed to avoid. Clamped to the player's own PLANT_RANGE square
-    // before looping at all - nothing outside it could ever be a valid
-    // target anyway, so there's no reason to walk a huge dragged box tile
-    // by tile just to skip almost all of it.
+    // tap already runs (in range of the player - live OR today-accessible,
+    // see inRange() - valid stage, etc.) - invalid ones are silently skipped
+    // rather than toasted one by one, which would just be the exact
+    // toast-pile-up problem a bulk action is supposed to avoid. No longer
+    // clamped to a square around the player's live position: today-accessible
+    // tiles can be scattered along a walking path rather than one contiguous
+    // block, so the full dragged box is walked and toolBlockedReason's own
+    // inRange() check (via toolTargetAt/inRange) is what filters each cell.
     function applyRangeToolAction(tool, box) {
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
-      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      var minQ = Math.max(box.minQ, uh.q - PLANT_RANGE), maxQ = Math.min(box.maxQ, uh.q + PLANT_RANGE);
-      var minR = Math.max(box.minR, uh.r - PLANT_RANGE), maxR = Math.min(box.maxR, uh.r + PLANT_RANGE);
       var acted = 0;
-      for (var q = minQ; q <= maxQ; q++) {
-        for (var r = minR; r <= maxR; r++) {
+      for (var q = box.minQ; q <= box.maxQ; q++) {
+        for (var r = box.minR; r <= box.maxR; r++) {
           var target = toolTargetAt(cellKey(q, r));
           if (!target || toolBlockedReason(tool, target)) continue;
           if (tool === 'water') {
@@ -4207,17 +4258,17 @@
       if (acted === 0) toast('Nothing in range there for the ' + TOOL_NAMES[tool]);
     }
 
-    // Same clamp-to-PLANT_RANGE reasoning as applyRangeToolAction. Stops
-    // (not just skips) the moment the pouch actually runs out mid-box,
-    // same as running out mid-tap would.
+    // Same reasoning as applyRangeToolAction above - the full dragged box is
+    // walked, and inRange(q, r) is the per-cell test rather than a clamp to
+    // a square around the player's live position. Stops (not just skips)
+    // the moment the pouch actually runs out mid-box, same as running out
+    // mid-tap would.
     function applyRangeSeedAction(box, vk) {
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
-      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      var minQ = Math.max(box.minQ, uh.q - PLANT_RANGE), maxQ = Math.min(box.maxQ, uh.q + PLANT_RANGE);
-      var minR = Math.max(box.minR, uh.r - PLANT_RANGE), maxR = Math.min(box.maxR, uh.r + PLANT_RANGE);
       var planted = 0;
-      for (var q = minQ; q <= maxQ; q++) {
-        for (var r = minR; r <= maxR; r++) {
+      for (var q = box.minQ; q <= box.maxQ; q++) {
+        for (var r = box.minR; r <= box.maxR; r++) {
+          if (!inRange(q, r)) continue;
           if (!(state.seeds[vk] > 0)) {
             toast("You're out of that seed - open the Shop \u{1F338} to buy more");
             unequipSeed();
@@ -4928,6 +4979,7 @@
       if (!rangeArea) {
         userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
+        markAccessibleToday(h.q, h.r);
         rangeArea = L.polygon(cellRingLatLngs(h.q, h.r, PLANT_RANGE), {
           color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
@@ -4938,6 +4990,7 @@
         var fromRing = cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE);
         userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
+        markAccessibleToday(h.q, h.r);
         animateRangeTo(fromRing, cellRingLatLngs(h.q, h.r, PLANT_RANGE));
         // Suppressed mid-tour - the welcome-back tour is deliberately
         // showing the player somewhere else on the map for a moment, and an
@@ -5105,15 +5158,14 @@
       breedBtn.style.display = 'none';
       breedBtn.onclick = null;
 
-      var uh = state.userPos ? latLngToCell(state.userPos.lat, state.userPos.lng) : null;
-      var inRange = uh && cellDist(uh.q, uh.r, w.q, w.r) <= PLANT_RANGE;
+      var tileInRange = inRange(w.q, w.r);
 
       var statusEl = document.getElementById('plant-status-line');
-      if (!inRange) { statusEl.textContent = 'Walk over to pick it'; statusEl.className = 'status-wilt'; }
+      if (!tileInRange) { statusEl.textContent = 'Walk over to pick it'; statusEl.className = 'status-wilt'; }
       else if (d.wilted) { statusEl.textContent = 'Wilting - pick it before it fades'; statusEl.className = 'status-wilt'; }
       else { statusEl.textContent = 'Ready to pick - it\'s yours if you want it'; statusEl.className = 'status-good'; }
 
-      document.getElementById('panel-hint').innerHTML = inRange
+      document.getElementById('panel-hint').innerHTML = tileInRange
         ? hintTool('shear') + ' to pick it, or ' + hintTool('sell') + ' to sell it for ' +
           SELL_SINGLE + ' \u{1F338}'
         : 'Walk over to pick it.';
@@ -5204,8 +5256,7 @@
       else if (d.stage >= MAX_STAGE) { statusEl.textContent = 'Fully grown - Keep it or Sell it'; statusEl.className = 'status-good'; }
       else { statusEl.textContent = 'Thriving'; statusEl.className = 'status-good'; }
 
-      var uh = state.userPos ? latLngToCell(state.userPos.lat, state.userPos.lng) : null;
-      var inRange = uh && cellDist(uh.q, uh.r, p.q, p.r) <= PLANT_RANGE;
+      var tileInRange = inRange(p.q, p.r);
 
       // The panel is a read-out now, not a control surface - tending happens
       // with the tools on the rail. So instead of a Water button and a
@@ -5223,9 +5274,9 @@
       }
       document.getElementById('panel-hint').innerHTML =
         !hints.length ? 'Nothing to do here yet - it is still growing.' :
-        !inRange ? 'Walk closer to tend it.' : hints.join('<br>');
+        !tileInRange ? 'Walk closer to tend it.' : hints.join('<br>');
 
-      renderBreedButton(key, p, d, inRange);
+      renderBreedButton(key, p, d, tileInRange);
     }
 
     // The Cross button only appears when a cross is actually possible, and

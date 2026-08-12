@@ -1149,7 +1149,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.9.0</span>
+      <span id="game-version">v2.10.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -3456,6 +3456,11 @@
       if (railOpen) { setRailOpen(false); return; }
       if (seedRailOpen) { closeSeedFan(); return; }
       if (activeTool) return;
+      // An equipped seed now drives itself off pointer events too (see
+      // resolveSeedTap in the TOOLS section) so it can tell a tap from a
+      // press-and-hold-and-drag the same way a tool already does - this
+      // handler would otherwise double-fire the plant right behind it.
+      if (equippedSeed) return;
       var h = latLngToCell(e.latlng.lat, e.latlng.lng);
       var key = cellKey(h.q, h.r);
       if (state.plants[key]) { openPlantPanel(key); return; }
@@ -3477,7 +3482,6 @@
         return;
       }
       if (equippedSprinkler) { placeSprinklerAt(h.q, h.r); return; }
-      if (equippedSeed) { plantEquippedSeedAt(h.q, h.r); return; }
       if (totalSeedCount() === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
       toast('Tap the seed pouch to choose what to plant \u{1F331}');
     });
@@ -3673,6 +3677,7 @@
       }
       renderToolRail();
       updateHUD();
+      syncMapDragging();
     }
 
     // ---- The toolbox fan: open/close state and the tap-or-drag gesture ----
@@ -3808,14 +3813,18 @@
     // ---- Press-and-hold confirmation --------------------------------------
     var RING_R = 22;
     var RING_C = 2 * Math.PI * RING_R;
-    function holdRingHtml(tool) {
+    // Takes the icon's own markup rather than a tool name, so a range
+    // selection (see RANGE SELECTION below) can hand it a seed's flower
+    // chip instead of a tool glyph - the single-tile callers below just
+    // wrap their tool name in toolIconHtml first.
+    function holdRingHtml(iconHtml) {
       return '<svg width="56" height="56" viewBox="0 0 56 56">' +
         '<circle cx="28" cy="28" r="' + RING_R + '" fill="rgba(255,255,255,0.94)" ' +
         'stroke="rgba(60,40,20,0.14)" stroke-width="5"/>' +
         '<circle class="hold-arc" cx="28" cy="28" r="' + RING_R + '" fill="none" stroke="#bfe6cd" ' +
         'stroke-width="5" stroke-linecap="round" transform="rotate(-90 28 28)" ' +
         'stroke-dasharray="' + RING_C.toFixed(1) + '" stroke-dashoffset="' + RING_C.toFixed(1) + '"/>' +
-        '</svg><div class="hold-ring-icon">' + toolIconHtml(tool, 22) + '</div>';
+        '</svg><div class="hold-ring-icon">' + iconHtml + '</div>';
     }
 
     var hold = null;
@@ -3828,7 +3837,7 @@
       // always due north (see cellCenter's math) - no direction-hunting
       // needed, unlike the old hex grid.
       var above = cellCenter(o.q, o.r + 1);
-      var item = addFx(holdRingHtml(tool), above.lat, above.lng, 'hold-ring', 0);
+      var item = addFx(holdRingHtml(toolIconHtml(tool, 22)), above.lat, above.lng, 'hold-ring', 0);
       hold = {
         tool: tool, target: target, item: item, raf: null,
         arc: item.el.querySelector('.hold-arc'), start: performance.now()
@@ -3927,27 +3936,55 @@
 
     // ---- Pointer plumbing --------------------------------------------------
     // Tool taps can't ride on Leaflet's click event: a press-and-hold has to
-    // start reacting while the finger is still down. Dragging is left enabled
-    // and a hold is simply cancelled once the finger travels far enough, so
-    // panning the map with a tool in hand still works normally.
+    // start reacting while the finger is still down. Also drives an equipped
+    // seed now (see the SEEDS section below for why the plain 'click'
+    // handler bows out whenever equippedSeed is set) - both a tool and a
+    // seed are "equipped, act on the map" modes, and both now support
+    // dragging across tiles for a range selection (see RANGE SELECTION
+    // below), so they share one pointer chain rather than two similar ones.
     var pointerState = null;
+    // Which mode is currently claiming the map, or null if neither - the
+    // one thing every gesture below branches on first.
+    function equippedMapMode() {
+      if (activeTool) return 'tool';
+      if (equippedSeed) return 'seed';
+      return null;
+    }
     function onToolPointerDown(ev) {
-      if (!activeTool || pointerState) return;
+      var mode = equippedMapMode();
+      if (!mode || pointerState) return;
       if (ev.pointerType === 'mouse' && ev.button !== 0) return;
       var ll = map.mouseEventToLatLng(ev);
       var h = latLngToCell(ll.lat, ll.lng);
-      var target = toolTargetAt(cellKey(h.q, h.r));
+      var target = mode === 'tool' ? toolTargetAt(cellKey(h.q, h.r)) : null;
       pointerState = {
         id: ev.pointerId, x: ev.clientX, y: ev.clientY,
-        cell: h, target: target, moved: false, completed: false
+        cell: h, target: target, moved: false, completed: false, mode: mode
       };
-      // Nothing starts sweeping for a tap-action tool, an empty tile, or a
-      // flower this tool can't be used on - those are all resolved on release.
-      if (activeTool === 'water' || !target) return;
+      // Nothing starts sweeping for a tap-action tool, an empty tile, a
+      // flower this tool can't be used on, or a seed (which always plants
+      // on release, never on press) - those are all resolved on release,
+      // unless a drag claims the gesture for a range selection first (see
+      // onToolPointerMove).
+      if (mode !== 'tool' || activeTool === 'water' || !target) return;
       if (!toolBlockedReason(activeTool, target)) startHold(activeTool, target);
     }
     function onToolPointerMove(ev) {
       if (!pointerState || ev.pointerId !== pointerState.id) return;
+      // Range selection: only for tools that support it (not fertilizer -
+      // see the RANGE SELECTION section) and always for a seed. A genuine
+      // drag into a different tile claims the gesture, cancelling whatever
+      // single-tile hold may have started under the finger on the way down.
+      if (pointerState.mode === 'seed' || (pointerState.mode === 'tool' && RANGE_TOOLS[activeTool])) {
+        var ll = map.mouseEventToLatLng(ev);
+        var h = latLngToCell(ll.lat, ll.lng);
+        if (h.q !== pointerState.cell.q || h.r !== pointerState.cell.r) {
+          if (!pointerState.moved) { pointerState.moved = true; cancelHold(); }
+          if (!rangeGesture) startRangeSelection(pointerState.mode, pointerState.cell);
+          updateRangeSelection(h);
+          return;
+        }
+      }
       if (Math.abs(ev.clientX - pointerState.x) > HOLD_MOVE_PX ||
           Math.abs(ev.clientY - pointerState.y) > HOLD_MOVE_PX) {
         pointerState.moved = true;
@@ -3959,8 +3996,11 @@
       var ps = pointerState;
       pointerState = null;
       cancelHold();
-      if (ps.moved || ps.completed || !activeTool) return;
-      resolveToolTap(ps);
+      // Lifted before the range hold-ring finished filling - just cancel,
+      // same as releasing early on a single-tile hold loses nothing.
+      if (rangeGesture) endRangeSelection();
+      if (ps.moved || ps.completed) return;
+      if (ps.mode === 'tool') resolveToolTap(ps); else resolveSeedTap(ps);
     }
 
     function resolveToolTap(ps) {
@@ -3981,12 +4021,215 @@
       toast('Press and hold to confirm');
     }
 
+    // A plain (non-dragged) tap with a seed equipped - exactly what the map
+    // 'click' handler used to do for this case (see the SEEDS section):
+    // an occupied tile still opens its panel or picks up a sprinkler, only
+    // genuinely empty ground plants. Kept as its own function, not folded
+    // into the click handler, since a press-and-hold now has to react while
+    // the finger is still down (for the range-selection case) the same way
+    // a tool's hold already does.
+    function resolveSeedTap(ps) {
+      var key = cellKey(ps.cell.q, ps.cell.r);
+      if (state.plants[key]) { openPlantPanel(key); return; }
+      if (state.wild[key]) { openPlantPanel(key, true); return; }
+      if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
+      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+      var inRange = cellDist(uh.q, uh.r, ps.cell.q, ps.cell.r) <= PLANT_RANGE;
+      if (state.sprinklers[key]) {
+        if (!inRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
+        pickUpSprinkler(key);
+        return;
+      }
+      if (!inRange) { toast('Walk closer to plant a seed here \u{1F6B6}'); return; }
+      plantEquippedSeedAt(ps.cell.q, ps.cell.r);
+    }
+
     map.getContainer().addEventListener('pointerdown', onToolPointerDown);
     // Move and release go on the window: a mouse can leave the map mid-hold,
     // and a hold that was never cleaned up would keep its ring on screen.
     window.addEventListener('pointermove', onToolPointerMove);
     window.addEventListener('pointerup', onToolPointerUp);
     window.addEventListener('pointercancel', onToolPointerUp);
+
+    // ---------------------------------------------------------------------
+    //  RANGE SELECTION
+    //  Press down on a tile with a tool (water/shear/sell - not fertilizer,
+    //  which only ever acts on one flower plus a random neighbour and has
+    //  no sensible bulk form) or a seed equipped, then drag without
+    //  lifting: the tile you started on and wherever your finger currently
+    //  is become the two opposite corners of a selection box - dragging
+    //  straight across one row or column makes a line, dragging diagonally
+    //  makes a rectangle, both the same mechanic. Holding still in place
+    //  for HOLD_MS (same filling-ring confirm a single flower already uses)
+    //  applies the action to every valid tile inside it. Releasing early,
+    //  before the ring fills, cancels with nothing changed - exactly like
+    //  releasing a single-tile hold early loses nothing.
+    // ---------------------------------------------------------------------
+    var RANGE_TOOLS = { water: true, shear: true, sell: true }; // fert deliberately excluded
+    var rangeGesture = null;
+
+    // Disables map panning for exactly as long as something range-capable
+    // is equipped - a drag on the map means "select a range" for these, the
+    // same way equipping any tool already claims what a plain tap means.
+    // Fertilizer and "nothing equipped" are untouched, so the map still
+    // pans normally in both.
+    function syncMapDragging() {
+      var capable = (activeTool && RANGE_TOOLS[activeTool]) || !!equippedSeed;
+      if (capable) map.dragging.disable(); else map.dragging.enable();
+    }
+
+    function rangeBox(g) {
+      return {
+        minQ: Math.min(g.anchor.q, g.cur.q), maxQ: Math.max(g.anchor.q, g.cur.q),
+        minR: Math.min(g.anchor.r, g.cur.r), maxR: Math.max(g.anchor.r, g.cur.r)
+      };
+    }
+    // Same shape cellRingLatLngs already returns for the "in range" overlay,
+    // generalized to an arbitrary (possibly non-square) box instead of a
+    // fixed radius around one center.
+    function cellBoxLatLngs(minQ, maxQ, minR, maxR) {
+      var half = 0.5;
+      return [
+        [(minR - half) * CELL_LAT_DEG, (minQ - half) * CELL_LNG_DEG],
+        [(minR - half) * CELL_LAT_DEG, (maxQ + half) * CELL_LNG_DEG],
+        [(maxR + half) * CELL_LAT_DEG, (maxQ + half) * CELL_LNG_DEG],
+        [(maxR + half) * CELL_LAT_DEG, (minQ - half) * CELL_LNG_DEG]
+      ];
+    }
+    function rangeSelColor(mode) {
+      if (mode === 'seed') return '#c9a565';
+      if (activeTool === 'water') return '#4aa3ff';
+      if (activeTool === 'sell') return '#f0a93a';
+      return '#4caf6d'; // shear
+    }
+    function rangeRingIconHtml(g) {
+      return g.mode === 'seed' ? variantChip(g.vk, 22) : toolIconHtml(g.tool, 22);
+    }
+
+    function startRangeSelection(mode, anchorCell) {
+      var color = rangeSelColor(mode);
+      var overlay = L.polygon(cellBoxLatLngs(anchorCell.q, anchorCell.q, anchorCell.r, anchorCell.r), {
+        color: color, weight: 2, fillColor: color, fillOpacity: 0.18, interactive: false
+      }).addTo(map);
+      rangeGesture = {
+        mode: mode, tool: activeTool, vk: equippedSeed,
+        anchor: anchorCell, cur: anchorCell, overlay: overlay,
+        ring: null, ringArc: null, ringStart: 0, raf: null
+      };
+      vibrate(8);
+    }
+    function updateRangeSelection(cell) {
+      if (!rangeGesture) return;
+      rangeGesture.cur = cell;
+      var b = rangeBox(rangeGesture);
+      rangeGesture.overlay.setLatLngs(cellBoxLatLngs(b.minQ, b.maxQ, b.minR, b.maxR));
+      restartRangeHoldRing();
+    }
+    // Same filling-ring visual a single flower's hold already uses
+    // (holdRingHtml), re-anchored to the current drag tile and reset on
+    // every move - it only ever finishes counting once the finger has been
+    // genuinely still for a full HOLD_MS, matching "once I'm done moving,
+    // hold in that spot".
+    function restartRangeHoldRing() {
+      var g = rangeGesture;
+      if (!g) return;
+      if (g.raf) cancelAnimationFrame(g.raf);
+      var c = cellCenter(g.cur.q, g.cur.r + 1); // one tile north, same reasoning startHold uses
+      if (!g.ring) {
+        g.ring = addFx(holdRingHtml(rangeRingIconHtml(g)), c.lat, c.lng, 'hold-ring', 0);
+        g.ringArc = g.ring.el.querySelector('.hold-arc');
+      } else {
+        g.ring.lat = c.lat; g.ring.lng = c.lng;
+        positionFx(g.ring);
+      }
+      g.ringStart = performance.now();
+      stepRangeHold();
+    }
+    function stepRangeHold() {
+      var g = rangeGesture;
+      if (!g) return;
+      var t = Math.min(1, (performance.now() - g.ringStart) / HOLD_MS);
+      g.ringArc.setAttribute('stroke-dashoffset', (RING_C * (1 - t)).toFixed(1));
+      g.ringArc.setAttribute('stroke', mixHex('#bfe6cd', '#4caf6d', t));
+      if (t >= 1) { completeRangeSelection(); return; }
+      g.raf = requestAnimationFrame(stepRangeHold);
+    }
+    function endRangeSelection() {
+      if (!rangeGesture) return;
+      if (rangeGesture.raf) cancelAnimationFrame(rangeGesture.raf);
+      if (rangeGesture.ring) removeFx(rangeGesture.ring);
+      map.removeLayer(rangeGesture.overlay);
+      rangeGesture = null;
+    }
+    function completeRangeSelection() {
+      var g = rangeGesture;
+      var box = rangeBox(g);
+      endRangeSelection();
+      // The finger is still down at this point, same as a single-tile hold
+      // completing - the pointerup that follows must not read as an
+      // aborted gesture.
+      if (pointerState) pointerState.completed = true;
+      vibrate(30);
+      if (g.mode === 'tool') applyRangeToolAction(g.tool, box);
+      else applyRangeSeedAction(box, g.vk);
+    }
+
+    // Every tile in the box gets the same toolBlockedReason check a single
+    // tap already runs (in range of the player, valid stage, etc.) -
+    // invalid ones are silently skipped rather than toasted one by one,
+    // which would just be the exact toast-pile-up problem a bulk action is
+    // supposed to avoid. Clamped to the player's own PLANT_RANGE square
+    // before looping at all - nothing outside it could ever be a valid
+    // target anyway, so there's no reason to walk a huge dragged box tile
+    // by tile just to skip almost all of it.
+    function applyRangeToolAction(tool, box) {
+      if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
+      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+      var minQ = Math.max(box.minQ, uh.q - PLANT_RANGE), maxQ = Math.min(box.maxQ, uh.q + PLANT_RANGE);
+      var minR = Math.max(box.minR, uh.r - PLANT_RANGE), maxR = Math.min(box.maxR, uh.r + PLANT_RANGE);
+      var acted = 0;
+      for (var q = minQ; q <= maxQ; q++) {
+        for (var r = minR; r <= maxR; r++) {
+          var target = toolTargetAt(cellKey(q, r));
+          if (!target || toolBlockedReason(tool, target)) continue;
+          if (tool === 'water') {
+            waterWithCan(target.key);
+          } else {
+            var sell = tool === 'sell';
+            if (target.kind === 'wild') pickWild(target.key, sell);
+            else onHarvestClick(target.key, sell);
+          }
+          acted++;
+        }
+      }
+      if (acted === 0) toast('Nothing in range there for the ' + TOOL_NAMES[tool]);
+    }
+
+    // Same clamp-to-PLANT_RANGE reasoning as applyRangeToolAction. Stops
+    // (not just skips) the moment the pouch actually runs out mid-box,
+    // same as running out mid-tap would.
+    function applyRangeSeedAction(box, vk) {
+      if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
+      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+      var minQ = Math.max(box.minQ, uh.q - PLANT_RANGE), maxQ = Math.min(box.maxQ, uh.q + PLANT_RANGE);
+      var minR = Math.max(box.minR, uh.r - PLANT_RANGE), maxR = Math.min(box.maxR, uh.r + PLANT_RANGE);
+      var planted = 0;
+      for (var q = minQ; q <= maxQ; q++) {
+        for (var r = minR; r <= maxR; r++) {
+          if (!(state.seeds[vk] > 0)) {
+            toast("You're out of that seed - open the Shop \u{1F338} to buy more");
+            unequipSeed();
+            return;
+          }
+          var key = cellKey(q, r);
+          if (state.plants[key] || state.wild[key] || state.sprinklers[key]) continue;
+          plantSeedAt(q, r, vk);
+          planted++;
+        }
+      }
+      if (planted === 0) toast('Nothing to plant in that range');
+      else renderSeedToggle();
+    }
 
     // ---------------------------------------------------------------------
     //  SEEDS
@@ -4220,6 +4463,7 @@
       renderSeedToggle();
       popSeedToggle();
       updateHUD();
+      syncMapDragging();
       vibrate(10);
     }
     function unequipSeed() {
@@ -4228,6 +4472,7 @@
       renderSeedToggle();
       popSeedToggle();
       updateHUD();
+      syncMapDragging();
     }
     function onSeedPacketEquippedClick() {
       if (equippedSeed) unequipSeed();
@@ -5415,6 +5660,12 @@
         'bloom. Both take a one-second press and hold, since neither can be undone. Kept flowers go into ' +
         'your Flower Journal in the menu, which has a page per species and tracks all ' + TOTAL_VARIANTS +
         ' flowers.</p>' +
+        '<p><b>Whole beds at once</b> - with the watering can, shears, $, or a seed in hand, press down ' +
+        'on a tile and drag before letting go: the tile you started on and wherever your finger ends up ' +
+        'become two corners of a selection - straight across makes a line, on an angle makes a square. ' +
+        'Hold still once you\'re done dragging and a ring fills over about a second; when it finishes, ' +
+        'the action applies to every valid tile inside. Releasing early cancels with nothing changed. ' +
+        'Fertilizer doesn\'t get this - it only ever works on one flower and a random neighbour.</p>' +
         '<p><b>Milestones</b> - a second page in the menu, tracking Petals earned, flowers grown, and ' +
         'more with a sticker for each one - once earned a sticker is yours for good, same as everything ' +
         'else here.</p>' +

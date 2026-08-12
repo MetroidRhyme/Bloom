@@ -1150,7 +1150,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.11.2</span>
+      <span id="game-version">v2.12.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1394,6 +1394,18 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.12.0', changes: [
+        'Flowers are no longer flat icons in a circle - each one is now a little ' +
+          'planting: soil and grass with a stem growing out of it, taller with every ' +
+          'stage. A full cluster is three real blooms on their own stems instead of ' +
+          'three squeezed into the old circle.',
+        'Added this "What\'s New" popup, so an update tells you what changed instead ' +
+          'of leaving you to guess.',
+        'Anywhere you\'ve been within planting range of today now stays tendable for ' +
+          'the rest of the day, even after you\'ve walked on - so a longer walk means ' +
+          'a bigger garden you can manage without retracing your steps, and resets ' +
+          'fresh every midnight.'
+      ] },
       { version: 'v2.11.2', changes: [
         'Fixed the toolbox and seed pouch showing through the Milestones page.',
         'Fixed an annoying sideways wiggle when scrolling the Milestones page.'
@@ -7172,7 +7184,7 @@
       var entry = CHANGELOG.filter(function (e) { return e.version === current; })[0];
       var changes = entry ? entry.changes : [];
       resetModalChrome();
-      document.getElementById('modal-title').textContent = "What's New in " + current;
+      document.getElementById('modal-title').textContent = 'What\'s New in ' + current;
       document.getElementById('modal-body').innerHTML =
         '<ul>' + changes.map(function (c) { return '<li>' + c + '</li>'; }).join('') + '</ul>';
       document.getElementById('modal-ok-btn').textContent = 'Got it \u{1F331}';

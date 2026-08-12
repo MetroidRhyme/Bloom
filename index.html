@@ -105,6 +105,10 @@
        #menu-dropdown button rule above that already sets display: block. */
     #menu-dropdown button#menu-crossnotes-btn { display: none; }
     body.fert-unlocked #menu-dropdown button#menu-crossnotes-btn { display: block; }
+    /* Same gate, same reasoning, for the Greenhouse - see
+       syncGreenhouseUnlockUI() in the GREENHOUSE section. */
+    #menu-dropdown button#menu-greenhouse-btn { display: none; }
+    body.greenhouse-unlocked #menu-dropdown button#menu-greenhouse-btn { display: block; }
     #menu-dropdown button.danger { color: #c0554a; }
 
     /* ================= BOTTOM HUD ================= */
@@ -662,6 +666,21 @@
     .stand-sprinkler-label { font-size: 9.5px; font-weight: 800; color: #2f4759; text-align: center; }
     .stand-sprinkler-price { font-size: 8.5px; font-weight: 700; color: #2f7ea6; }
     .stand-sprinkler-owned { font-size: 8px; font-weight: 700; color: #5a7387; margin-top: 4px; }
+    /* The Greenhouse's own tile, own row (stand-row-5, hidden once
+       state.greenhouseUnlocked) - a glasshouse green rather than the
+       sprinkler's cool blue or the sack's wheat gold, its own family member
+       again. Wider than the other two since "Greenhouse" alone is nearly as
+       long as the sprinkler's locked-teaser line. */
+    .stand-greenhouse-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 3px; width: 108px;
+      background: linear-gradient(180deg, #e3f3e6, #b9dcc0); border: 2px solid #3d7a4e;
+      border-radius: 12px; padding: 10px 6px 7px; cursor: pointer; box-shadow: var(--shadow-sm);
+    }
+    .stand-greenhouse-btn:disabled { filter: grayscale(60%); opacity: 0.5; cursor: default; box-shadow: none; }
+    .stand-greenhouse-icon { font-size: 24px; line-height: 1; }
+    .stand-greenhouse-label { font-size: 9.5px; font-weight: 800; color: #235533; text-align: center; }
+    .stand-greenhouse-price { font-size: 8.5px; font-weight: 700; color: #2f8a4e; }
+    .stand-greenhouse-owned { font-size: 8px; font-weight: 700; color: #5a8a68; margin-top: 4px; }
     /* Purchase confirmation: what you are about to buy, drawn big enough to
        tell a Red Tulip from a Pink one before the Petals are gone. */
     .buy-preview {
@@ -669,6 +688,111 @@
       padding: 14px; margin-bottom: 12px; border: 2px solid; border-radius: 16px;
       font-size: 15.5px; font-weight: 800; text-align: center;
     }
+
+    /* ================= GREENHOUSE PANEL ================= */
+    /* Full-screen like the shop, its own themed scene rather than the
+       journal's paper page - a glasshouse: soft sky-to-soil gradient, a
+       faint roof-glare texture, small faded flowers in the background for
+       depth, and the real shelves/pots in front. No wind, no grass (see the
+       GREENHOUSE section of the script for why) - a deliberately calmer,
+       indoor look next to the map's outdoor one. */
+    #greenhouse-panel {
+      position: fixed; inset: 0; z-index: 1100;
+      background: #fdfbf5;
+      padding: calc(14px + env(safe-area-inset-top, 0px)) 18px calc(16px + env(safe-area-inset-bottom, 0px));
+      display: flex; flex-direction: column; align-items: center;
+      transform: translateY(105%);
+      transition: transform 0.28s ease;
+    }
+    #greenhouse-panel.open { transform: translateY(0); }
+    #greenhouse-close-btn {
+      position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px;
+      width: 32px; height: 32px; border-radius: 50%; z-index: 2;
+      border: none; background: rgba(0,0,0,0.06); font-size: 18px; color: var(--text-dim); cursor: pointer;
+    }
+    #greenhouse-heading {
+      flex: 0 0 auto; font-size: 19px; font-weight: 800; color: var(--text);
+      margin: 0 0 10px; text-align: center;
+    }
+    /* Safety net only, same reasoning as #stand-counter - sized to fit a
+       phone screen with nothing to scroll in the common case; this is what
+       catches an unusually short one instead. */
+    #greenhouse-scroll {
+      flex: 1 1 auto; min-height: 0; width: 100%; max-width: 460px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+      display: flex; flex-direction: column; align-items: center;
+    }
+    #greenhouse-scene, #greenhouse-shelves {
+      width: 100%; position: relative; border-radius: 14px; overflow: hidden;
+    }
+    #greenhouse-scene {
+      height: 200px; margin-bottom: 3px;
+      background: linear-gradient(180deg, #cfe8ec 0%, #e7f2df 45%, #e9dcc0 100%);
+      border: 1px solid rgba(60,40,20,0.14); border-bottom: none;
+      border-radius: 14px 14px 0 0;
+    }
+    .gh-roof-glare {
+      position: absolute; inset: 0; opacity: 0.55;
+      background:
+        repeating-linear-gradient(115deg, rgba(255,255,255,0.35) 0 3px, transparent 3px 64px),
+        repeating-linear-gradient(65deg, rgba(255,255,255,0.18) 0 2px, transparent 2px 90px);
+      mix-blend-mode: soft-light;
+    }
+    /* Small, faded, non-interactive flower heads for depth - the real
+       flower-head art (flowerHeadInner), not a separate simplified sprite,
+       just tiny and translucent so it never competes with the real pots in
+       front. */
+    .gh-row { position: absolute; left: 0; right: 0; display: flex; justify-content: space-evenly; }
+    #greenhouse-shelves {
+      background: linear-gradient(180deg, #2c3520 0%, #241d15 100%);
+      border: 1px solid rgba(60,40,20,0.14); border-top: none;
+      border-radius: 0 0 14px 14px; box-shadow: var(--shadow-sm);
+      padding-top: 2px;
+    }
+    .gh-shelf { position: relative; padding: 0 8px 12px; }
+    .gh-plank {
+      height: 9px; margin: 0 -8px 7px; background: #8a6042;
+      box-shadow: 0 3px 5px rgba(0,0,0,0.35), inset 0 -2px 0 rgba(0,0,0,0.2), inset 0 2px 0 rgba(255,255,255,0.12);
+    }
+    .gh-pots { display: flex; justify-content: space-between; gap: 5px; }
+    .pot-slot {
+      position: relative; width: 25%; height: 68px; flex-shrink: 0;
+      display: flex; align-items: flex-end; justify-content: center; cursor: pointer;
+    }
+    .pot-slot.unaffordable { opacity: 0.55; }
+    .pot-icon { filter: drop-shadow(0 3px 3px rgba(0,0,0,0.4)); }
+    .pot-price-tag {
+      position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+      background: #fff; border: 1px solid rgba(60,40,20,0.14); border-radius: 999px;
+      font-size: 9px; font-weight: 700; padding: 2px 5px; color: #a24a2c;
+      white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    /* A tappable row of owned seeds inside the modal - the empty-pot picker.
+       Same taped-card family feel as .stand-item (a swatch you tap to
+       choose), just laid out as a list rather than a grid since it can run
+       to 14+ colors across several species. */
+    .pot-seed-row {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 9px 10px; margin-bottom: 6px; border-radius: 12px; cursor: pointer;
+      background: rgba(76,175,109,0.08); border: 2px solid transparent;
+    }
+    .pot-seed-row:active { border-color: var(--green); }
+    .pot-seed-row-name { flex: 1 1 auto; font-size: 13.5px; font-weight: 700; }
+    .pot-seed-row-count { font-size: 12px; font-weight: 700; color: var(--text-dim); }
+    /* The planted-pot detail modal: icon, status, then whichever action
+       buttons actually apply right now (see openPotDetail) - a pot has no
+       map tool rail to point at, so unlike the outdoor plant panel's hints
+       these are real, tappable buttons. */
+    .pot-detail-icon { display: flex; justify-content: center; margin-bottom: 6px; }
+    .pot-detail-status { font-size: 13px; color: var(--text-dim); text-align: center; margin-bottom: 12px; }
+    .pot-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .pot-action-btn {
+      flex: 1 1 44%; padding: 11px 8px; border-radius: 12px; font-size: 12.5px;
+      font-weight: 800; cursor: pointer; box-shadow: var(--shadow-sm); border: none;
+    }
+    .pot-action-btn.water { background: linear-gradient(90deg, var(--blue), #7cc0ff); color: #fff; }
+    .pot-action-btn.extract { background: #fff; color: var(--green-dark); border: 2px solid var(--green); }
+    .pot-action-btn.sell { background: linear-gradient(90deg, var(--amber), #f5c169); color: #fff; }
 
     /* ================= JOURNAL PANEL ================= */
     /* Full-screen like the shop - the panel IS the page, edge to edge, no
@@ -1180,7 +1304,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.15.0</span>
+      <span id="game-version">v2.16.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1198,6 +1322,10 @@
          just via a JS toggle after load) so there's no flash of a menu item
          pointing at a screen that would otherwise still be empty. -->
     <button id="menu-crossnotes-btn" onclick="openCrossNotes()">Crossing Notes</button>
+    <!-- Hidden until state.greenhouseUnlocked - see syncGreenhouseUnlockUI()
+         and the GREENHOUSE section, same reasoning as menu-crossnotes-btn
+         above. -->
+    <button id="menu-greenhouse-btn" onclick="openGreenhouse()">Greenhouse</button>
     <button onclick="openWildInfo()">Wild Flowers</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
@@ -1304,6 +1432,9 @@
         <!-- Hidden until sprinklerUnlocked() (10 flowers extracted or sold) -
              see renderShopRows. -->
         <div id="stand-row-4" class="stand-row stand-row-last"></div>
+        <!-- Hidden once state.greenhouseUnlocked (already bought, one-time
+             purchase) - see renderShopRows. -->
+        <div id="stand-row-5" class="stand-row stand-row-last"></div>
       </div>
     </div>
   </div>
@@ -1328,6 +1459,25 @@
     <button id="notes-close-btn" onclick="closeCrossNotes()">&times;</button>
     <div id="notes-heading">Crossing Notes &#x1F331;</div>
     <div id="notes-body"></div>
+  </div>
+
+  <!-- Full-screen like the other panels, but its own look (a physical
+       greenhouse scene) rather than the journal's aged-paper page or the
+       shop's wooden stand - see the GREENHOUSE PANEL CSS and the
+       GREENHOUSE section of the script. Deliberately sized to fit on
+       screen with no scrolling of its own in the common case - the same
+       "safety net only" #greenhouse-scroll pattern #stand-counter already
+       uses for the shop. -->
+  <div id="greenhouse-panel">
+    <button id="greenhouse-close-btn" onclick="closeGreenhouse()">&times;</button>
+    <div id="greenhouse-heading">Greenhouse</div>
+    <div id="greenhouse-scroll">
+      <div id="greenhouse-scene">
+        <div id="greenhouse-rows"></div>
+        <div class="gh-roof-glare"></div>
+      </div>
+      <div id="greenhouse-shelves"></div>
+    </div>
   </div>
 
   <div id="howto-panel">
@@ -1424,6 +1574,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.16.0', changes: [
+        'New: the Greenhouse. Grow and harvest 100 flowers and it unlocks in ' +
+          'the Shop for 1000 Petals, once - twelve pots under glass, three ready ' +
+          'to plant right away, the other nine broken and fixed one at a time. ' +
+          'Plant, water, extract seeds, or sell straight from a pot, no walking ' +
+          'required - the one thing pots can\'t do is cross with each other.'
+      ] },
       { version: 'v2.15.0', changes: [
         'Shears now extract seeds straight from a flower instead of collecting ' +
           'it into your Journal - press and hold a fully-grown flower to pull its ' +
@@ -1922,6 +2079,29 @@
     var SPRINKLER_COST_STEP = 100;
     var SPRINKLER_UNLOCK_FLOWERS = 10;
 
+    // ---- Greenhouse ---------------------------------------------------------
+    // A mid-late-game upgrade, well past the sprinkler - it stays out of the
+    // shop until the player has grown 100 flowers (see
+    // greenhouseUnlockedForShop/renderShopRows), then costs a flat 1000
+    // Petals, once. What it buys is 12 fixed pot slots (three shelves of
+    // four - see the GREENHOUSE section) for growing indoors, no walk-up
+    // visit needed: three start clean and plantable, the other nine start
+    // broken and have to be fixed individually (GREENHOUSE_FIX_COSTS) rather
+    // than bought as a batch, so the upgrade is a series of small choices
+    // instead of one lump sum. The cap (no 13th pot, ever) is deliberate -
+    // see the design conversation this shipped from - so the greenhouse
+    // stays something you fill out, not something you keep paying into.
+    var GREENHOUSE_COST = 1000;
+    var GREENHOUSE_UNLOCK_FLOWERS = 100;
+    var GREENHOUSE_POT_COUNT = 12;
+    var GREENHOUSE_STARTER_POTS = 3; // pots[0..2]: clean and plantable from the start
+    // pots[3..11]: start broken, one price each - index into this array is
+    // (slot index - GREENHOUSE_STARTER_POTS). Climbs to the same 500-Petal
+    // ceiling the sprinkler's own base price sits at (see SPRINKLER_COST),
+    // deliberately not scaling further - nine pots is the whole garden, not
+    // a grind.
+    var GREENHOUSE_FIX_COSTS = [100, 150, 200, 250, 300, 350, 400, 450, 500];
+
     // Pair key is order-independent, so a cross is one entry, not two.
     function crossKey(a, b) { return a < b ? a + '+' + b : b + '+' + a; }
 
@@ -2257,6 +2437,11 @@
         // checkSprinklerUnlock) can only ever fire once, even though every
         // call site that touches stats.grown rechecks the threshold.
         sprinklerUnlockAnnounced: false,
+        // Same one-time-toast pattern as sprinklerUnlockAnnounced above, for
+        // the Greenhouse becoming purchasable (not the same thing as
+        // greenhouseUnlocked, which means already bought - see
+        // checkGreenhouseTeaser).
+        greenhouseTeaserAnnounced: false,
         // cell key -> 1, every tile ever within planting range of the player.
         // Never shrinks - once a spot has been reachable it stays a priority
         // for wild spawning even if the player never goes back. See
@@ -2308,6 +2493,15 @@
         // sitting there unanswered across a reload.
         fertReady: false,
         fertUnlocked: false,
+        // Greenhouse starts locked - see the GREENHOUSE section. Flips true
+        // on the one-time GREENHOUSE_COST purchase (buyGreenhouse), which is
+        // also what fills in `greenhouse.pots` below for the first time.
+        greenhouseUnlocked: false,
+        // pots: a fixed-length array, always GREENHOUSE_POT_COUNT entries
+        // once populated - see buildInitialPots. Empty here (brand-new save,
+        // nothing bought yet) rather than pre-sized, so an unpurchased save
+        // carries no greenhouse data at all.
+        greenhouse: { pots: [] },
         cheatMode: false,    // dev/testing toggle, see the shop panel - see stageReadyMs/setCheatMode
         gridV2: true,        // brand-new save starts straight on the square grid - see migrateGridKeys
         // Brand-new device only - gates the one-time primer shown before the
@@ -2408,6 +2602,7 @@
           sprinklers: parsed.sprinklers || {},
           sprinklerInventory: typeof parsed.sprinklerInventory === 'number' ? parsed.sprinklerInventory : 0,
           sprinklerUnlockAnnounced: !!parsed.sprinklerUnlockAnnounced,
+          greenhouseTeaserAnnounced: !!parsed.greenhouseTeaserAnnounced,
           inventory: migratedInventory,
           crosses: parsed.crosses || {},
           stats: migratedStats,
@@ -2435,6 +2630,15 @@
           // silently skip it.
           fertReady: typeof parsed.fertReady === 'boolean' ? parsed.fertReady : true,
           fertUnlocked: typeof parsed.fertUnlocked === 'boolean' ? parsed.fertUnlocked : true,
+          // Brand new with this feature - a pre-existing save simply hasn't
+          // bought one yet, same treatment as the sprinkler's own backfill
+          // above. A malformed/missing pots array (or greenhouseUnlocked
+          // never actually having been bought) falls back to the same empty
+          // shape a brand-new save gets - buyGreenhouse is what ever
+          // populates it for real.
+          greenhouseUnlocked: !!parsed.greenhouseUnlocked,
+          greenhouse: (parsed.greenhouse && Array.isArray(parsed.greenhouse.pots)) ?
+            parsed.greenhouse : { pots: [] },
           cheatMode: !!parsed.cheatMode,
           gridV2: true, // migrated (or already was) above - never re-run the re-key on future loads
           gpsPrimerSeen: true, // see def.gpsPrimerSeen - any pre-existing save always skips the primer
@@ -2496,8 +2700,10 @@
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         sprinklers: state.sprinklers, sprinklerInventory: state.sprinklerInventory,
         sprinklerUnlockAnnounced: state.sprinklerUnlockAnnounced,
+        greenhouseTeaserAnnounced: state.greenhouseTeaserAnnounced,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
         fertReady: state.fertReady, fertUnlocked: state.fertUnlocked,
+        greenhouseUnlocked: state.greenhouseUnlocked, greenhouse: state.greenhouse,
         cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen,
         lastSeenAt: state.lastSeenAt, lastSeenVersion: state.lastSeenVersion
       }));
@@ -2776,6 +2982,7 @@
       closePlantPanel();
       vibrate(20);
       checkSprinklerUnlock();
+      checkGreenhouseTeaser();
       return value; // used by the tutorial's bonus top-up
     }
 
@@ -2786,6 +2993,10 @@
     function tickPlants() {
       var now = Date.now();
       Object.keys(state.plants).forEach(function (key) { recomputePlant(state.plants[key], now); });
+      // Potted plants use the exact same clock - see the GREENHOUSE section.
+      state.greenhouse.pots.forEach(function (pot) {
+        if (pot.plant) recomputePlant(pot.plant, now);
+      });
 
       // Wild flowers run on their own short clock and are the one thing in the
       // game that can be lost by leaving it - 12h to wilt, 18h to vanish.
@@ -2799,6 +3010,10 @@
       renderWild();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
+      // Keep an open Greenhouse fresh the same way an open plant panel is
+      // kept fresh above - a pot left wilting or ready while the panel sits
+      // open should still update without needing to back out and reopen it.
+      if (document.getElementById('greenhouse-panel').classList.contains('open')) renderGreenhouse();
     }
 
     // ---------------------------------------------------------------------
@@ -3715,6 +3930,118 @@
       return { html: html, w: v.w, h: v.h };
     }
 
+    // -----------------------------------------------------------------------
+    //  POTTED PLANT ART (greenhouse) - reuses the outdoor stem/leaf/flower-
+    //  head markup verbatim (sproutMarkup/BLOOM_STEM_MARKUP/
+    //  CLUSTER_STEM_MARKUP/headGroup, all unmodified, all still rooted at
+    //  local (50,92)) but swaps what's underneath: a clay pot with a small
+    //  soil mound instead of a grass-covered ground mound, and no wind - see
+    //  the GREENHOUSE section further down for where these get used.
+    // -----------------------------------------------------------------------
+    var POT_COLOR = '#c17a45';
+    var POT_COLOR_DARK = '#9c5a2e';
+    var POT_COLOR_LIGHT = '#e2a875';
+    var SOIL_DARK = '#5c3a1f';
+    var SOIL_MID = '#8a5a34';
+    var SOIL_LIGHT = '#b98a54';
+
+    // A clean, usable pot - same footprint every state (empty, mid-growth,
+    // full cluster) sits on, so switching a pot's contents never resizes the
+    // pot itself. Rim sits at y=86, exactly where the outdoor ground mound's
+    // own soil line sat, which is what lets the stem markup below be reused
+    // with zero coordinate changes - it was always rooted at (50,92), a few
+    // units below where the rim/soil line sits here too.
+    function potBody() {
+      return '<path d="M28 86 L72 86 L65 109 L35 109 Z" fill="' + POT_COLOR + '"/>' +
+        '<path d="M50 86 L72 86 L65 109 L54 109 Z" fill="' + POT_COLOR_DARK + '" opacity="0.35"/>' +
+        '<path d="M28 86 L72 86 L70 90.5 L30 90.5 Z" fill="' + POT_COLOR_DARK + '" opacity="0.45"/>' +
+        '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + POT_COLOR_LIGHT + '"/>';
+    }
+    // The little bump of soil a pot keeps, same layered-ellipse technique the
+    // outdoor ground mound uses (flat fill, a raised mound, a highlight
+    // patch), just scaled down to a pot's opening.
+    function potSoil() {
+      return '<ellipse cx="50" cy="87" rx="20.5" ry="3.2" fill="' + SOIL_DARK + '"/>' +
+        '<ellipse cx="50" cy="85.5" rx="16" ry="2.6" fill="' + SOIL_MID + '"/>' +
+        '<ellipse cx="50" cy="84.3" rx="8" ry="1.8" fill="' + SOIL_MID + '"/>' +
+        '<ellipse cx="44" cy="84.8" rx="4.5" ry="1" fill="' + SOIL_LIGHT + '" opacity="0.55"/>';
+    }
+
+    // Builds a potted plant at (species, color, stage) - stage 0 is pot +
+    // soil only (an unplanted-but-usable pot; the outdoor ground stage 0 is
+    // the same "nothing visible yet" convention), 1-3 reuse the exact same
+    // stem/head markup the map uses, just with no wind wrap.
+    function buildPottedVisual(species, color, stage, px) {
+      var defs = '<defs>' + HEAD_FX_DEFS + headClipDefs(species) + '</defs>' + fancyDefs(color);
+      var body = potBody() + potSoil();
+      if (stage === 1) body += sproutMarkup();
+      else if (stage === 2) body += BLOOM_STEM_MARKUP + headGroup(species, color, 50, 40);
+      else if (stage === 3) {
+        var left = { cx: 33, cy: 55, scale: SIDE_SCALE_L };
+        var right = { cx: 67, cy: 55, scale: SIDE_SCALE_R };
+        var front = { cx: 50, cy: 36, scale: HEAD_SCALE };
+        var shadow = headContactShadow(species, front, [left, right]);
+        defs += shadow.defs;
+        body += CLUSTER_STEM_MARKUP +
+          headGroup(species, color, left.cx, left.cy, { scale: left.scale, recede: true }) +
+          headGroup(species, color, right.cx, right.cy, { scale: right.scale, recede: true }) +
+          shadow.markup +
+          headGroup(species, color, front.cx, front.cy, { scale: front.scale });
+      }
+      var vw = 100, vh = 112, dispH = Math.round(px * vh / vw);
+      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH +
+        '" style="display:block">' + defs + body + '</svg>';
+      return { html: html, w: px, h: dispH };
+    }
+
+    // Broken pots - nine of the greenhouse's twelve slots start unusable, not
+    // just locked, so the other nine read as a cost of buying/fixing a pot
+    // rather than a plain locked slot sitting there waiting. Three distinct
+    // breaks, cycled across the slots (see brokenVariantFor in the
+    // GREENHOUSE section), each desaturated a shade duller than a clean pot
+    // so "this one needs fixing" reads before the price tag does.
+    var BROKEN_COLOR = '#a97e5f';
+    var BROKEN_COLOR_DARK = '#84604a';
+    var BROKEN_COLOR_LIGHT = '#c49872';
+    var DRY_DIRT = '#6b5a44';
+
+    function brokenCracked() {
+      return '<g transform="rotate(-4 50 97)">' +
+        '<path d="M28 86 L72 86 L65 109 L35 109 Z" fill="' + BROKEN_COLOR + '"/>' +
+        '<path d="M50 86 L72 86 L65 109 L54 109 Z" fill="' + BROKEN_COLOR_DARK + '" opacity="0.35"/>' +
+        '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + BROKEN_COLOR_LIGHT + '"/>' +
+        '<ellipse cx="50" cy="87" rx="18" ry="2.4" fill="' + DRY_DIRT + '" opacity="0.75"/>' +
+        '<path d="M39 87 L46 95 L41 100 L51 109" stroke="' + BROKEN_COLOR_DARK + '" stroke-width="1.8" ' +
+        'fill="none" stroke-linecap="round"/>' +
+        '<path d="M39 87 L46 95 L41 100 L51 109" stroke="#2c1e12" stroke-width="0.6" fill="none" stroke-linecap="round"/>' +
+        '</g>';
+    }
+    function brokenChipped() {
+      return '<path d="M28 86 L39 86 L43 90.5 L57 90.5 L61 86 L72 86 L65 109 L35 109 Z" fill="' + BROKEN_COLOR + '"/>' +
+        '<path d="M50 86 L72 86 L65 109 L54 109 Z" fill="' + BROKEN_COLOR_DARK + '" opacity="0.35"/>' +
+        '<ellipse cx="33.5" cy="86" rx="5.5" ry="2.4" fill="' + BROKEN_COLOR_LIGHT + '"/>' +
+        '<ellipse cx="66.5" cy="86" rx="5.5" ry="2.4" fill="' + BROKEN_COLOR_LIGHT + '"/>' +
+        '<ellipse cx="50" cy="88.5" rx="12" ry="2" fill="' + DRY_DIRT + '" opacity="0.7"/>';
+    }
+    function brokenToppled() {
+      return '<g transform="rotate(78 46 100)">' +
+        '<path d="M28 86 L72 86 L65 109 L35 109 Z" fill="' + BROKEN_COLOR + '"/>' +
+        '<path d="M50 86 L72 86 L65 109 L54 109 Z" fill="' + BROKEN_COLOR_DARK + '" opacity="0.35"/>' +
+        '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + BROKEN_COLOR_LIGHT + '"/>' +
+        '</g>' +
+        '<ellipse cx="68" cy="106" rx="11" ry="3.2" fill="' + DRY_DIRT + '" opacity="0.75"/>' +
+        '<ellipse cx="61" cy="104.5" rx="5" ry="1.8" fill="' + DRY_DIRT + '" opacity="0.55"/>';
+    }
+    var BROKEN_VARIANTS = [brokenCracked, brokenChipped, brokenToppled];
+
+    function buildBrokenVisual(variantIndex, px) {
+      var body = BROKEN_VARIANTS[variantIndex % BROKEN_VARIANTS.length]();
+      var vw = 100, vh = 112, dispH = Math.round(px * vh / vw);
+      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH +
+        '" style="display:block">' + body + '</svg>';
+      return { html: html, w: px, h: dispH };
+    }
+
     // Inline flower for text rows (collection list, shop, seed picker, modal
     // titles) - the same artwork the map uses, so a row and its marker are
     // recognisably the same flower. Replaces the emoji those labels used to
@@ -4214,7 +4541,8 @@
     // is nothing to tend in any of them. One check called wherever a
     // full-screen panel opens or closes, rather than a display toggle
     // duplicated across six functions.
-    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'milestones-panel', 'notes-panel', 'howto-panel'];
+    var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'milestones-panel', 'notes-panel', 'howto-panel',
+      'greenhouse-panel'];
     function fullscreenPanelOpen() {
       return FULLSCREEN_PANELS.some(function (id) {
         return document.getElementById(id).classList.contains('open');
@@ -5652,7 +5980,7 @@
     }
 
     function openPlantPanel(key, isWild) {
-      closeShop(); closeJournal(); closeCrossNotes(); // only one full-screen/bottom-sheet panel open at a time
+      closeShop(); closeJournal(); closeCrossNotes(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
       viewingKey = key;
       viewingWild = !!isWild;
       renderPlantPanel(key);
@@ -5754,6 +6082,7 @@
       closePlantPanel();
       vibrate(20);
       checkSprinklerUnlock();
+      checkGreenhouseTeaser();
     }
 
     function renderPlantPanel(key) {
@@ -6266,7 +6595,7 @@
     // phone's viewport in the old modal, which had no scroll of its own.
     function openHowToPlay() {
       toggleMenu();
-      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); // only one full-screen panel at a time
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeGreenhouse(); // only one full-screen panel at a time
       var s = state.stats;
       document.getElementById('howto-body').innerHTML =
         '<p><b>Plant</b> - tap the seed pouch (top right) and every species you hold seeds of drops down ' +
@@ -6324,6 +6653,12 @@
         'and tap empty ground to place it - it waters every flower on the eight tiles around it ' +
         'automatically from then on, no walk-up visit needed. Tap a placed one any time to pick it back ' +
         'up and move it.</p>' +
+        '<p><b>Greenhouse</b> \u{1F3E1} - grow and harvest ' + GREENHOUSE_UNLOCK_FLOWERS + ' flowers and it ' +
+        'unlocks in the Shop for ' + GREENHOUSE_COST + ' Petals, once. Twelve pots under glass - three ready ' +
+        'to plant right away, the other nine broken and fixed one at a time, each its own price. Tap a pot ' +
+        'to plant, water, extract seeds from, or sell whatever\'s growing in it - the same loop as the map, ' +
+        'just no walking required. The one thing a pot can\'t do is cross: there\'s no neighbour to cross ' +
+        'with in a pot of its own.</p>' +
         '<p><b>Wild flowers</b> \u{1F33C} - each day you open Bloom, up to ten wild blooms are scattered ' +
         'around you, marked with a soft glow. They cost nothing - just walk over and pick one. Unlike your ' +
         'own flowers they don\'t last: a wild bloom wilts after 12 hours and is gone 6 hours later, so ' +
@@ -6396,7 +6731,7 @@
 
     function openInventory() {
       toggleMenu();
-      closeShop(); closePlantPanel(); closeCrossNotes(); // only one full-screen/bottom-sheet panel open at a time
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
       // journalSpecies persists for the session, so re-opening the journal
       // returns to the page you were last reading.
       openJournalPage(journalSpecies || defaultJournalSpecies());
@@ -6615,7 +6950,7 @@
       // see that function's own comment for why this list (rather than the
       // shorter one on openInventory/openCrossNotes/openShop) is the
       // complete one to copy for a screen reachable from the same menu.
-      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay();
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeGreenhouse();
       renderMilestonesPage();
       document.getElementById('milestones-panel').classList.add('open');
       syncToolRail();
@@ -6831,7 +7166,7 @@
 
     function openCrossNotes() {
       toggleMenu();
-      closeShop(); closePlantPanel(); closeJournal(); // only one full-screen/bottom-sheet panel open at a time
+      closeShop(); closePlantPanel(); closeJournal(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
       renderCrossTree(notesSpecies || defaultJournalSpecies());
       document.getElementById('notes-panel').classList.add('open');
       syncToolRail();
@@ -7024,6 +7359,34 @@
           '<span class="stand-sprinkler-owned">have ' + state.sprinklerInventory + '</span>' +
           '</button>';
       }
+
+      // The Greenhouse: same locked-teaser-then-buyable shape as the
+      // sprinkler row above, but a one-time purchase, not a repeating one -
+      // once bought it disappears from the stand entirely (the menu entry
+      // is where it lives from then on, same as the sprinkler moving to its
+      // own equipment toggle once owned).
+      var row5 = document.getElementById('stand-row-5');
+      if (state.greenhouseUnlocked) {
+        row5.innerHTML = '';
+      } else if (!greenhouseAvailableForPurchase()) {
+        var greenhouseNeed = Math.max(0, GREENHOUSE_UNLOCK_FLOWERS - state.stats.grown);
+        row5.innerHTML =
+          '<button class="stand-greenhouse-btn" disabled title="Grow and harvest ' + GREENHOUSE_UNLOCK_FLOWERS +
+          ' flowers to unlock">' +
+          '<span class="stand-greenhouse-icon">\u{1F3E1}</span>' +
+          '<span class="stand-greenhouse-label">Greenhouse</span>' +
+          '<span class="stand-greenhouse-price">Locked</span>' +
+          '<span class="stand-greenhouse-owned">' + greenhouseNeed + ' more flower' +
+          (greenhouseNeed === 1 ? '' : 's') + '</span></button>';
+      } else {
+        row5.innerHTML =
+          '<button class="stand-greenhouse-btn"' + (state.currency >= GREENHOUSE_COST ? '' : ' disabled') +
+          ' title="Greenhouse - ' + GREENHOUSE_COST + ' Petals" onclick="confirmBuyGreenhouse()">' +
+          '<span class="stand-greenhouse-icon">\u{1F3E1}</span>' +
+          '<span class="stand-greenhouse-label">Greenhouse</span>' +
+          '<span class="stand-greenhouse-price">' + GREENHOUSE_COST + ' \u{1F338}</span>' +
+          '</button>';
+      }
     }
 
     // Nothing in the shop spends Petals on a single tap. The buy controls are
@@ -7145,7 +7508,7 @@
     // pill directly - callers handle closing the menu dropdown themselves
     // (see the menu button's onclick) so this doesn't force it open/closed.
     function openShop() {
-      closePlantPanel(); closeJournal(); closeCrossNotes(); // only one full-screen/bottom-sheet panel open at a time
+      closePlantPanel(); closeJournal(); closeCrossNotes(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
       if (activeTool) setActiveTool(null); // shopping is not tending; don't leave a tool armed behind the sheet
       renderShopRows();
       renderCheatToggle();
@@ -7181,6 +7544,370 @@
     function vibrate(ms) {
       if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} }
     }
+
+    // ---------------------------------------------------------------------
+    //  GREENHOUSE
+    //  A mid-late-game upgrade (see the GREENHOUSE_* constants) - twelve
+    //  fixed pot slots, three shelves of four, for growing indoors with no
+    //  walk-up visit needed. Reuses the growth engine verbatim
+    //  (recomputePlant/applyWatering take a plain plant object, with no map
+    //  dependency baked into either) and the same extract-or-sell split the
+    //  outdoor harvest loop uses (see harvestPlant) - a potted harvest
+    //  credits the same lifetime grown tally (recordGrown) and the same
+    //  stats every outdoor one does. The real differences: no wind/grass in
+    //  the art (see buildPottedVisual, POTTED PLANT ART section), no
+    //  crossbreeding (there is no grid here, so no adjacent-neighbour
+    //  concept to cross with), and real tap-to-act buttons in the pot detail
+    //  view in place of the map's equip-a-tool gesture, since there is no
+    //  tool rail indoors.
+    // ---------------------------------------------------------------------
+
+    // Whether the Shop's Greenhouse row should offer a real purchase yet -
+    // purely a read, recomputed live, same shape as sprinklerUnlocked().
+    function greenhouseAvailableForPurchase() {
+      return !state.greenhouseUnlocked && state.stats.grown >= GREENHOUSE_UNLOCK_FLOWERS;
+    }
+    // Fires the one-time "you can buy this now" toast - same pattern and
+    // same reasoning as checkSprinklerUnlock, called from the same harvest
+    // sites (see harvestPlant/pickWild/harvestPottedPlant).
+    function checkGreenhouseTeaser() {
+      if (state.greenhouseTeaserAnnounced || !greenhouseAvailableForPurchase()) return;
+      state.greenhouseTeaserAnnounced = true;
+      saveState();
+      toast('\u{1F331} The Greenhouse is available in the Shop!');
+    }
+
+    // Slots [0, GREENHOUSE_STARTER_POTS) start clean and empty - yours from
+    // the purchase, ready to plant right away. The rest start broken - see
+    // brokenVariantFor/fixCostFor below for what each one looks like and
+    // costs to fix.
+    function buildInitialPots() {
+      var pots = [];
+      for (var i = 0; i < GREENHOUSE_POT_COUNT; i++) {
+        pots.push({ fixed: i < GREENHOUSE_STARTER_POTS, plant: null });
+      }
+      return pots;
+    }
+
+    function confirmBuyGreenhouse() {
+      openPurchaseConfirm({
+        title: 'Buy the Greenhouse?',
+        preview: '<p>Twelve pots under glass - three ready to plant right away, the other nine ' +
+          'broken and needing to be fixed one at a time. Grow indoors without walking back, though ' +
+          'nothing planted in a pot can be crossed - there\'s no neighbour there to cross it with.</p>',
+        cost: GREENHOUSE_COST,
+        okText: 'Buy it \u{1F331}',
+        onOk: buyGreenhouse
+      });
+    }
+    function buyGreenhouse() {
+      if (state.currency < GREENHOUSE_COST) return;
+      state.currency -= GREENHOUSE_COST;
+      if (state.cheatMode) state.currency = CHEAT_CURRENCY;
+      state.greenhouseUnlocked = true;
+      state.greenhouse.pots = buildInitialPots();
+      saveState();
+      renderShopRows();
+      updateCurrencyPill();
+      syncGreenhouseUnlockUI();
+      toast('\u{1F331} Greenhouse unlocked! Find it in the menu.');
+      vibrate(20);
+    }
+
+    // Reveals the Greenhouse menu entry - see syncFertUnlockUI for the same
+    // pattern. Called once at boot (in case a returning player already
+    // bought it) and again the moment buyGreenhouse succeeds.
+    function syncGreenhouseUnlockUI() {
+      document.body.classList.toggle('greenhouse-unlocked', state.greenhouseUnlocked);
+    }
+
+    function openGreenhouse() {
+      toggleMenu();
+      // The complete close-list, same as openMilestones() - see that
+      // function's own comment for why this is the one to copy for a
+      // screen reachable from the menu.
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeMilestones();
+      renderGreenhouse();
+      document.getElementById('greenhouse-panel').classList.add('open');
+      syncToolRail();
+    }
+    function closeGreenhouse() {
+      document.getElementById('greenhouse-panel').classList.remove('open');
+      syncToolRail();
+    }
+
+    // Which of the three broken-pot art variants a slot shows, and what
+    // fixing it costs - both purely a function of its position among the
+    // nine non-starter slots, never stored, so GREENHOUSE_FIX_COSTS can be
+    // retuned later without a migration.
+    function brokenVariantFor(slotIndex) { return (slotIndex - GREENHOUSE_STARTER_POTS) % 3; }
+    function fixCostFor(slotIndex) { return GREENHOUSE_FIX_COSTS[slotIndex - GREENHOUSE_STARTER_POTS]; }
+
+    // Small, faded, non-interactive flower heads behind the shelves - the
+    // real flower-head art (flowerHeadInner), not a separate simplified
+    // sprite, just tiny and translucent so it never competes with the real
+    // pots in front. Purely decorative, same as the outdoor map's distant
+    // scenery - nothing here is a plant you own.
+    function greenhouseBackgroundHtml() {
+      var rows = [
+        { top: 14, count: 6, scale: 18, opacity: 0.30 },
+        { top: 40, count: 5, scale: 24, opacity: 0.42 }
+      ];
+      return rows.map(function (r) {
+        var cells = [];
+        for (var i = 0; i < r.count; i++) {
+          var sp = SPECIES[(i * 3 + r.top) % SPECIES.length];
+          var col = colorFor(sp.base);
+          cells.push('<span style="display:inline-block;width:' + r.scale + 'px;height:' + r.scale + 'px">' +
+            '<svg viewBox="0 0 100 100" width="' + r.scale + '" height="' + r.scale + '">' +
+            fancyDefs(col) + flowerHeadInner(sp, col) + '</svg></span>');
+        }
+        return '<div class="gh-row" style="top:' + r.top + 'px;opacity:' + r.opacity + '">' +
+          cells.join('') + '</div>';
+      }).join('');
+    }
+
+    // One slot's whole tile: a broken pot with its fix price, an empty
+    // usable pot, or whatever's actually growing in it - see onPotTap for
+    // what tapping each of the three does.
+    function potSlotHtml(slotIndex, px) {
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot.fixed) {
+        var cost = fixCostFor(slotIndex);
+        var vBroken = buildBrokenVisual(brokenVariantFor(slotIndex), px);
+        var cls = 'pot-slot' + (state.currency >= cost ? '' : ' unaffordable');
+        return '<div class="' + cls + '" onclick="onPotTap(' + slotIndex + ')">' +
+          '<div class="pot-icon" style="width:' + vBroken.w + 'px;height:' + vBroken.h + 'px">' +
+          vBroken.html + '</div>' +
+          '<div class="pot-price-tag">Fix - ' + cost + ' \u{1F338}</div></div>';
+      }
+      if (!pot.plant) {
+        // Species/color are irrelevant at stage 0 (pot + soil only, nothing
+        // colored drawn yet) - SPECIES[0] here is just a harmless stand-in.
+        var vEmpty = buildPottedVisual(SPECIES[0], colorFor(SPECIES[0].base), 0, px);
+        return '<div class="pot-slot" onclick="onPotTap(' + slotIndex + ')">' +
+          '<div class="pot-icon" style="width:' + vEmpty.w + 'px;height:' + vEmpty.h + 'px">' +
+          vEmpty.html + '</div></div>';
+      }
+      var p = pot.plant;
+      var d = recomputePlant(p, Date.now());
+      var vPlant = buildPottedVisual(speciesFor(p.species), paletteOf(p), d.stage, px);
+      var iconHtml = d.wilted ? '<div style="filter:grayscale(55%) opacity(0.7)">' + vPlant.html + '</div>' : vPlant.html;
+      return '<div class="pot-slot" onclick="onPotTap(' + slotIndex + ')">' +
+        '<div class="pot-icon" style="width:' + vPlant.w + 'px;height:' + vPlant.h + 'px">' +
+        iconHtml + '</div></div>';
+    }
+
+    function renderGreenhouse() {
+      document.getElementById('greenhouse-rows').innerHTML = greenhouseBackgroundHtml();
+
+      var potPx = 56;
+      var html = '';
+      for (var shelf = 0; shelf < 3; shelf++) {
+        html += '<div class="gh-shelf"><div class="gh-plank"></div><div class="gh-pots">';
+        for (var col = 0; col < 4; col++) {
+          html += potSlotHtml(shelf * 4 + col, potPx);
+        }
+        html += '</div></div>';
+      }
+      document.getElementById('greenhouse-shelves').innerHTML = html;
+    }
+
+    // Every seed you own, any species, sorted the same way a journal page
+    // sorts its colors - rarer things sink toward the bottom of the list.
+    function allOwnedSeedVariants() {
+      return sortVariants(Object.keys(state.seeds).filter(function (vk) { return state.seeds[vk] > 0; }));
+    }
+
+    // Routes a tap on a pot to whichever of the three things it can mean
+    // right now - fix it, plant something in it, or look at what's already
+    // growing.
+    function onPotTap(slotIndex) {
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot) return;
+      if (!pot.fixed) { openFixPotConfirm(slotIndex); return; }
+      if (!pot.plant) { openPotSeedPicker(slotIndex); return; }
+      openPotDetail(slotIndex);
+    }
+
+    function openFixPotConfirm(slotIndex) {
+      openPurchaseConfirm({
+        title: 'Fix this pot?',
+        preview: '<p>However it broke, a fresh pot and a scoop of soil puts it back to work.</p>',
+        cost: fixCostFor(slotIndex),
+        okText: 'Fix it \u{1F331}',
+        onOk: function () { fixPot(slotIndex); }
+      });
+    }
+    function fixPot(slotIndex) {
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot || pot.fixed) return;
+      var cost = fixCostFor(slotIndex);
+      if (state.currency < cost) return;
+      state.currency -= cost;
+      if (state.cheatMode) state.currency = CHEAT_CURRENCY;
+      pot.fixed = true;
+      saveState();
+      updateCurrencyPill();
+      renderGreenhouse();
+      toast('Pot fixed \u{1F331}');
+      vibrate(20);
+    }
+
+    // The empty-pot picker: every seed you own, any species, one tap plants
+    // it - there is no equip-then-tap-the-ground step here the way the map
+    // has one, since the pot IS the target and there's only ever one to
+    // choose.
+    function openPotSeedPicker(slotIndex) {
+      var variants = allOwnedSeedVariants();
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Plant a seed';
+      var body = !variants.length
+        ? '<p>You\'re out of seeds - the Shop sells the four standard colors.</p>'
+        : variants.map(function (vk) {
+            var c = colorFor(parseVariant(vk).color);
+            return '<div class="pot-seed-row" style="border-color:' + c.line + '" ' +
+              'onclick="plantInPot(' + slotIndex + ',\'' + vk + '\')">' +
+              variantChip(vk, 28) +
+              '<span class="pot-seed-row-name" style="color:' + c.ink + '">' + variantName(vk) + '</span>' +
+              '<span class="pot-seed-row-count">x' + state.seeds[vk] + '</span></div>';
+          }).join('');
+      document.getElementById('modal-body').innerHTML = body;
+      // No single "OK" action here - each row above IS the action, and the
+      // backdrop-tap-to-close handler (see the modal-overlay listener) is
+      // how you back out without planting anything.
+      document.getElementById('modal-ok-btn').style.display = 'none';
+      document.getElementById('modal-ok-btn').onclick = null; // no stale purchase-confirm handler lingering under a hidden button
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+    function plantInPot(slotIndex, vk) {
+      if (!(state.seeds[vk] > 0)) return; // stale tap - already spent since the picker opened
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot || !pot.fixed || pot.plant) return;
+      state.seeds[vk]--;
+      if (state.seeds[vk] <= 0) delete state.seeds[vk];
+      var v = parseVariant(vk);
+      var now = Date.now();
+      pot.plant = {
+        species: v.species, color: v.color,
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
+        reachedBloom: false, reachedFlourish: false
+      };
+      state.stats.planted++;
+      saveState();
+      closeModal();
+      renderGreenhouse();
+      updateHUD();
+      toast('\u{1F331} ' + variantName(vk) + ' planted! It will be ready for water in ' +
+        formatDuration(stageReadyMs()) + '.');
+      vibrate(20);
+    }
+
+    // The planted-pot detail: icon, status, then whichever action buttons
+    // actually apply right now. A pot has no map tool rail to point at like
+    // the outdoor plant panel's hints do, so these are real, tappable
+    // buttons instead - see waterPottedPlant/extractPottedPlant/
+    // sellPottedPlant just below.
+    function openPotDetail(slotIndex) {
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot || !pot.plant) { closeModal(); return; }
+      var p = pot.plant;
+      var d = recomputePlant(p, Date.now());
+      var vk = variantKey(p.species, p.color);
+
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = variantName(vk) + ' - ' + STAGE_LABELS[d.stage];
+      document.getElementById('modal-ok-btn').style.display = 'none';
+      document.getElementById('modal-ok-btn').onclick = null; // no stale purchase-confirm handler lingering under a hidden button
+
+      var v = buildPottedVisual(speciesFor(p.species), paletteOf(p), d.stage, 88);
+      var status;
+      if (d.ready) status = 'Ready to grow - give it a drink!';
+      else if (d.wilted) status = 'Looking wilted - a drink will perk it back up';
+      else if (d.stage >= MAX_STAGE) status = 'Fully grown';
+      else status = 'Thriving - ready to grow in ' + formatDuration(d.readyIn);
+
+      var buttons = '';
+      if (d.ready || d.wilted) {
+        buttons += '<button class="pot-action-btn water" onclick="waterPottedPlant(' + slotIndex +
+          ')">Water \u{1F4A7}</button>';
+      }
+      if (d.stage >= 2) {
+        var yieldText = d.stage >= MAX_STAGE ? '2-4 seeds' : '1-2 seeds';
+        buttons += '<button class="pot-action-btn extract" onclick="extractPottedPlant(' + slotIndex +
+          ')">Extract ' + yieldText + '</button>';
+        buttons += '<button class="pot-action-btn sell" onclick="sellPottedPlant(' + slotIndex +
+          ')">Sell for ' + harvestValue(p, d.stage) + ' \u{1F338}</button>';
+      }
+
+      document.getElementById('modal-body').innerHTML =
+        '<div class="pot-detail-icon"><div style="width:' + v.w + 'px;height:' + v.h + 'px">' + v.html + '</div></div>' +
+        '<p class="pot-detail-status">' + status + '</p>' +
+        (buttons ? '<div class="pot-action-row">' + buttons + '</div>' : '');
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // Water re-renders the detail in place (rather than closing) so the new
+    // stage/status shows immediately - unlike a harvest, watering isn't a
+    // terminal action, there's usually more to do with the same pot right
+    // after.
+    function waterPottedPlant(slotIndex) {
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot || !pot.plant) return;
+      var p = pot.plant;
+      var now = Date.now();
+      var res = applyWatering(p, now);
+      recomputePlant(p, now);
+      saveState();
+      renderGreenhouse();
+      if (res.revealed) {
+        toast('\u{1F338} Your cross opened - it\'s a ' + variantName(res.revealed) + '!');
+      } else if (res.grew) {
+        toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
+      }
+      vibrate(res.grew ? 30 : 15);
+      openPotDetail(slotIndex);
+    }
+
+    // Mirrors harvestPlant's extract/sell split verbatim (see its own
+    // comment) - same seed odds, same stats, same lifetime grown credit,
+    // just clearing a pot slot instead of a map tile.
+    function harvestPottedPlant(slotIndex, mode) {
+      var pot = state.greenhouse.pots[slotIndex];
+      if (!pot || !pot.plant) return;
+      var p = pot.plant;
+      var d = recomputePlant(p, Date.now());
+      var isCluster = d.stage >= MAX_STAGE;
+      var vk = variantKey(p.species, p.color);
+      var label = variantName(vk) + (isCluster ? ' cluster' : '');
+      pot.plant = null;
+      recordGrown(vk);
+
+      if (mode === 'sell') {
+        var value = harvestValue(p, d.stage);
+        state.currency += value;
+        state.stats.sold++;
+        state.stats.earned += value;
+        toast('Sold your potted ' + label + ' for ' + value + ' \u{1F338}');
+      } else {
+        var gained = rollWeighted(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
+        state.seeds[vk] = (state.seeds[vk] || 0) + gained;
+        state.stats.extracted += gained;
+        state.stats.extractedFlowers++;
+        toast('\u{1F331} Got ' + gained + ' seed' + (gained === 1 ? '' : 's') + ' from your potted ' + label);
+      }
+
+      saveState();
+      closeModal();
+      renderGreenhouse();
+      updateHUD();
+      updateCurrencyPill();
+      vibrate(20);
+      checkSprinklerUnlock();
+      checkGreenhouseTeaser();
+    }
+    function extractPottedPlant(slotIndex) { harvestPottedPlant(slotIndex, 'extract'); }
+    function sellPottedPlant(slotIndex) { harvestPottedPlant(slotIndex, 'sell'); }
 
     // ---------------------------------------------------------------------
     //  TUTORIAL (first run only)
@@ -7432,6 +8159,7 @@
     // ---------------------------------------------------------------------
     initToolRail();             // draw the three tool icons once
     syncFertUnlockUI();         // show Crossing Notes/fert sack right away for an already-unlocked save
+    syncGreenhouseUnlockUI();   // show the Greenhouse menu entry right away for an already-unlocked save
     tickPlants();               // recompute any growth/wilt accrued while closed
     tickSprinklers();           // catch up anything sprinklers should have watered while closed
     renderWild();               // wild flowers persist across sessions until picked

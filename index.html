@@ -2916,7 +2916,19 @@
           if (!state.todayAccessible[key]) { state.todayAccessible[key] = 1; added = true; }
         }
       }
-      if (added) saveState();
+      if (added) {
+        saveState();
+        // The green today-access fill (see renderGridMesh) needs to grow
+        // right away, not just on the next pan/zoom - e.g. the player is
+        // walking with 'following' off, so nothing else is about to pan the
+        // map and trigger a redraw on its own. scheduleGridRedraw is
+        // declared later in the file, textually, but function declarations
+        // (unlike var) are hoisted whole, not just their name, so it's
+        // already callable here regardless of source order. renderGridMesh
+        // itself is a no-op until the map/canvas actually exist and are
+        // zoomed in past GRID_MIN_ZOOM, so there's nothing to guard here.
+        scheduleGridRedraw();
+      }
     }
 
     // The one gate every plant/water/harvest/sell/fertilize/pick/sprinkler
@@ -3638,11 +3650,14 @@
     }
 
     // Soft outline mesh over the current viewport so planting spots read at a
-    // glance. Every edge is shared by exactly two tiles; only drawing each
-    // tile's bottom and left edges (corners BL/BR/TR/TL from cellVerticesPx)
-    // still covers every interior edge exactly once, so there's no dedup
-    // pass and no doubled lines - the +1 padding on every side below is what
-    // pulls in each cell's own top/right neighbor to draw the far edges too.
+    // glance, plus (drawn first, so the mesh lines above still show through
+    // it) a soft green fill over every tile the player currently has access
+    // to today (see markAccessibleToday/inRange/todayAccessible) - not just
+    // the live PLANT_RANGE square they're standing in right now (that one
+    // still gets its own separate, more solid rangeArea polygon - see
+    // onLocationUpdate), but everywhere along today's walk that still counts
+    // as in range. Both share the same viewport-bounded tile loop below,
+    // since recomputing that twice would be pure waste.
     function renderGridMesh() {
       if (!gridRenderer._ctx || !gridRenderer._bounds) return;
       var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
@@ -3659,6 +3674,28 @@
       var minR = Math.min.apply(null, corners.map(function (c) { return c.r; })) - 1;
       var maxR = Math.max.apply(null, corners.map(function (c) { return c.r; })) + 1;
       if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_CELLS) return;
+
+      // Re-validated against localDayKey() here too, same guard inRange()
+      // itself uses - a todayAccessible set left over from before a
+      // midnight rollover that simply hasn't been touched yet since must
+      // never paint as if it were still today's.
+      if (state.todayAccessibleDay === localDayKey()) {
+        ctx.fillStyle = 'rgba(76,175,109,0.10)';
+        for (var aq = minQ; aq <= maxQ; aq++) {
+          for (var ar = minR; ar <= maxR; ar++) {
+            if (!state.todayAccessible[cellKey(aq, ar)]) continue;
+            var averts = cellVerticesPx(aq, ar);
+            if (!cellOnScreen(averts)) continue;
+            ctx.beginPath();
+            ctx.moveTo(averts[0].x, averts[0].y);
+            ctx.lineTo(averts[1].x, averts[1].y);
+            ctx.lineTo(averts[2].x, averts[2].y);
+            ctx.lineTo(averts[3].x, averts[3].y);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+      }
 
       ctx.strokeStyle = 'rgba(70,120,80,0.14)';
       ctx.lineWidth = 1;

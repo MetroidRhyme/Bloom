@@ -3047,12 +3047,13 @@
       return out;
     }
 
-    var flowerSvgCache = {};
-    function flowerSVG(species, color, px) {
-      var ck = species.key + '|' + color.id + '|' + px;
-      if (flowerSvgCache[ck]) return flowerSvgCache[ck];
-
-      var sh = species.shape, out = fancyDefs(color);
+    // The flower head's own markup - halo, petal rows, center circle,
+    // dots/stamen, sparks - with no <svg> wrapper and no fancyDefs. Shared by
+    // flowerSVG (the flat, standalone flower used in chips/panels) and
+    // headGroup (the same flower head mounted on a stem - see
+    // buildPlantVisual) so both draw byte-identical petal geometry.
+    function flowerHeadInner(species, color) {
+      var sh = species.shape, out = '';
       if (color.glow) {
         out += '<circle class="bloom-halo" cx="50" cy="50" r="49" fill="url(#hg-' +
           color.id + ')"/>';
@@ -3089,74 +3090,223 @@
 
       // Sparks go last so they sit above the petals rather than behind them.
       out += sparkMarkup(color);
+      return out;
+    }
 
+    var flowerSvgCache = {};
+    function flowerSVG(species, color, px) {
+      var ck = species.key + '|' + color.id + '|' + px;
+      if (flowerSvgCache[ck]) return flowerSvgCache[ck];
+
+      var out = fancyDefs(color) + flowerHeadInner(species, color);
       var svg = '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px +
         '" style="display:block">' + out + '</svg>';
       flowerSvgCache[ck] = svg;
       return svg;
     }
 
-    function seedSVG(px) {
-      return '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px + '" style="display:block">' +
-        '<ellipse cx="50" cy="54" rx="26" ry="32" fill="#a9773f" stroke="#7d5628" stroke-width="3"/>' +
-        '<path d="M50 24 C45 40 45 52 50 68" stroke="#7d5628" stroke-width="3" fill="none"/>' +
-        '<ellipse cx="41" cy="42" rx="7" ry="10" fill="#d8b184" opacity="0.75" ' +
-        'transform="rotate(-22 41 42)"/></svg>';
-    }
-
-    function sproutSVG(px) {
-      return '<svg viewBox="0 0 100 100" width="' + px + '" height="' + px + '" style="display:block">' +
-        '<path d="M50 86 C50 64 50 50 50 32" stroke="#4e8b3f" stroke-width="6" fill="none" ' +
-        'stroke-linecap="round"/>' +
-        '<ellipse cx="31" cy="52" rx="18" ry="11" fill="#7cc45f" stroke="#4e8b3f" stroke-width="2.6" ' +
-        'transform="rotate(-26 31 52)"/>' +
-        '<ellipse cx="69" cy="62" rx="16" ry="10" fill="#66b04d" stroke="#4e8b3f" stroke-width="2.6" ' +
-        'transform="rotate(24 69 62)"/></svg>';
-    }
-
-    // The round backing every stage sits on. It is what makes a marker legible
-    // against an arbitrary patch of basemap; the flower itself only has to be
-    // a flower.
+    // The round backing the sprinkler marker still sits on (flower growth
+    // stages no longer use this - see buildPlantVisual below).
     function discStyle(bg, size) {
       return 'background:' + bg + ';border:2px solid rgba(255,255,255,0.85);border-radius:50%;width:' +
         size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;' +
         'box-shadow:0 2px 8px rgba(60,40,20,0.3);flex-shrink:0;overflow:hidden';
     }
 
+    // ---------------------------------------------------------------------
+    //  PLANT VISUAL - a small planting (soil + grass + stem + flower head)
+    //  rather than a flower icon on a disc. See buildPlantVisual below for
+    //  the entry point; everything above it is supporting art.
+    // ---------------------------------------------------------------------
+
+    // Scale applied to a flower head (in its own 100x100 local space) before
+    // it is mounted on a stem tip.
+    var HEAD_SCALE = 0.6;
+
+    // A single blade: filled and tapered (wide at the base, a point at the
+    // tip), not a constant-width stroke - a stroked line reads as a wire or
+    // a tendril because it never changes thickness. Two quadratic curves
+    // (left edge base->tip, right edge tip->base) share one bend control
+    // point, offset sideways by the blade's own half-width so it keeps a
+    // visible belly rather than pinching straight to a point immediately.
+    // Closed with Z along the ground so the base edge just disappears into
+    // the soil/neighboring blades. Outlined a shade darker, same fill+edge
+    // pairing every other piece of plant art in this file uses.
+    function bladePath(bx, by, cx, cy, tx, ty, w, fill) {
+      var edge = shadeHex(fill, 0.72);
+      return '<path d="M' + (bx - w).toFixed(1) + ' ' + by +
+        ' Q' + (cx - w * 0.45).toFixed(1) + ' ' + cy + ' ' + tx + ' ' + ty +
+        ' Q' + (cx + w * 0.45).toFixed(1) + ' ' + cy + ' ' + (bx + w).toFixed(1) + ' ' + by +
+        ' Z" fill="' + fill + '" stroke="' + edge + '" stroke-width="1" stroke-linejoin="round"/>';
+    }
+
+    // Three depth bands instead of one flat row: FAR sits behind the mound
+    // and is drawn first (partly buried by it), MID is the main clump
+    // framing the mound's edges (drawn with it), and NEAR is drawn
+    // separately - appended AFTER the stem/head, not here - so those blades
+    // land in front of the plant's own base instead of only ever behind it.
+    // That's what turns two flat rows into a little patch the plant is
+    // standing IN, rather than a backdrop.
+    var GROUND_MARKUP =
+      // FAR - smaller, muted, mostly hidden behind the mound itself
+      bladePath(44, 92, 42, 82, 40, 74, 2.4, '#345c30') +
+      bladePath(58, 93, 61, 83, 63, 75, 2.2, '#345c30') +
+      // MID, back half - taller, darker, framing the sides
+      bladePath(23, 98, 18, 84, 14, 68, 3.8, '#3f6b3a') +
+      bladePath(50, 100, 55, 88, 57, 76, 2.8, '#3f6b3a') +
+      bladePath(78, 98, 83, 84, 87, 68, 3.8, '#3f6b3a') +
+      // the soil clump itself, three layers for a little volume
+      '<ellipse cx="50" cy="100" rx="25" ry="8" fill="#5c3a1f"/>' +
+      '<ellipse cx="50" cy="95" rx="22" ry="9.5" fill="#8a5a34"/>' +
+      '<ellipse cx="43" cy="90" rx="9" ry="3.6" fill="#b98a54" opacity="0.55"/>' +
+      '<ellipse cx="60" cy="93" rx="2.4" ry="2" fill="#6b431f" opacity="0.8"/>' +
+      '<ellipse cx="37" cy="97" rx="2.2" ry="1.7" fill="#6b431f" opacity="0.7"/>' +
+      // MID, front half - overlapping the mound's edge
+      bladePath(32, 98, 26, 84, 27, 70, 4.2, '#5ea648') +
+      bladePath(41, 99, 38, 87, 42, 76, 3.0, '#7cc45f') +
+      bladePath(59, 99, 62, 87, 58, 76, 3.0, '#66b04d') +
+      bladePath(68, 98, 74, 84, 73, 70, 4.2, '#5ea648');
+
+    // NEAR - the biggest, brightest blades, rooted lower than the mound's
+    // own front edge so their base sits past where the stem meets the
+    // ground. Appended after the stem/head markup (see buildNewVisual), so
+    // they render in front of the plant's base rather than behind it -
+    // the "standing in a patch of grass" half of this pass.
+    var GROUND_NEAR =
+      bladePath(43, 102, 39, 88, 38, 72, 4.0, '#7cc45f') +
+      bladePath(58, 103, 62, 89, 64, 74, 3.6, '#5ea648');
+
+    var SPROUT_MARKUP =
+      '<path d="M50 92 C49 82 51 72 50 64" stroke="#4e8b3f" stroke-width="4" fill="none" stroke-linecap="round"/>' +
+      '<ellipse cx="39" cy="78" rx="9" ry="5.5" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.6" transform="rotate(-28 39 78)"/>' +
+      '<ellipse cx="61" cy="83" rx="8" ry="5" fill="#66b04d" stroke="#4e8b3f" stroke-width="1.6" transform="rotate(24 61 83)"/>';
+
+    var BLOOM_STEM_MARKUP =
+      '<path d="M50 92 C49 74 51 54 50 40" stroke="#4e8b3f" stroke-width="4.2" fill="none" stroke-linecap="round"/>' +
+      '<ellipse cx="39" cy="68" rx="7.5" ry="4.6" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.5" transform="rotate(-30 39 68)"/>' +
+      '<ellipse cx="61" cy="74" rx="7" ry="4.2" fill="#66b04d" stroke="#4e8b3f" stroke-width="1.5" transform="rotate(26 61 74)"/>';
+
+    var CLUSTER_STEM_MARKUP =
+      '<path d="M48 92 C40 78 34 65 33 55" stroke="#4e8b3f" stroke-width="3.4" fill="none" stroke-linecap="round"/>' +
+      '<path d="M52 92 C60 78 66 65 67 55" stroke="#4e8b3f" stroke-width="3.2" fill="none" stroke-linecap="round"/>' +
+      '<path d="M50 92 C50 76 50 54 50 36" stroke="#4e8b3f" stroke-width="4.2" fill="none" stroke-linecap="round"/>' +
+      '<ellipse cx="41" cy="70" rx="6.5" ry="4" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.4" transform="rotate(-26 41 70)"/>';
+
+    // A soft directional sheen on every head (gloss so a flat, radially-
+    // symmetric flower face doesn't read as a paper cutout), plus an
+    // optional "recede" wash for a head sitting behind the main one. Both
+    // clipped to the flower's own petal silhouette (see headClipDefs) - an
+    // earlier version wasn't clipped and it showed as a faint circular halo
+    // outside the petals and through the gaps between them.
+    var HEAD_FX_DEFS =
+      '<radialGradient id="headSheen" cx="34%" cy="26%" r="70%">' +
+      '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.4"/>' +
+      '<stop offset="45%" stop-color="#ffffff" stop-opacity="0.1"/>' +
+      '<stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></radialGradient>' +
+      '<filter id="headContactShadow" x="-60%" y="-60%" width="220%" height="220%">' +
+      '<feGaussianBlur stdDeviation="4"/></filter>';
+
+    // The exact same row/petal geometry the flower-head renderer paints,
+    // but as bare clip shapes (no fill/stroke - a clipPath only reads
+    // geometry). This is the flower's true silhouette, petal gaps and all.
+    function headSilhouetteShapes(species) {
+      var sh = species.shape, out = '';
+      sh.rows.forEach(function (row) {
+        var cy = 50 - row.r;
+        for (var i = 0; i < row.n; i++) out += petalShape(row, cy, '#000', '#000', (360 / row.n) * i + (row.rot || 0));
+      });
+      out += '<circle cx="50" cy="50" r="' + sh.center.r + '"/>';
+      return out;
+    }
+    function headClipId(species) { return 'headClip-' + species.key; }
+    function headClipDefs(species) {
+      return '<clipPath id="' + headClipId(species) + '">' + headSilhouetteShapes(species) + '</clipPath>';
+    }
+
+    // scale() runs on the flower's raw local coordinates BEFORE translate()
+    // shifts them - so translate(cx cy) alone lands the flower's own center
+    // (local 50,50) at (cx + 50*scale, cy + 50*scale), not at (cx,cy). The
+    // translate has to pre-subtract that scaled offset so the flower's
+    // center - not some point down-and-right of it - lands on the stem tip.
+    // opts.scale lets a head be drawn smaller than HEAD_SCALE (the two side
+    // heads in a cluster); opts.recede adds the dulling wash for a head
+    // sitting behind the front one. Only the sheen/recede overlay gets
+    // clipped, in its own inner group - the flower head itself stays
+    // unclipped, because a signature color's glow halo and sparks are drawn
+    // deliberately bigger than the petals and clipping the whole head to
+    // the petal outline would wrongly cut those off too.
+    function headGroup(species, color, cx, cy, opts) {
+      opts = opts || {};
+      var s = opts.scale || HEAD_SCALE, tx = cx - 50 * s, ty = cy - 50 * s;
+      var overlay = '<g clip-path="url(#' + headClipId(species) + ')"><circle cx="50" cy="50" r="48" fill="url(#headSheen)"/>' +
+        (opts.recede ? '<circle cx="50" cy="50" r="48" fill="#1c1208" opacity="0.16"/>' : '') + '</g>';
+      var inner = flowerHeadInner(species, color) + overlay;
+      return '<g transform="translate(' + tx + ' ' + ty + ') scale(' + s + ')">' + inner + '</g>';
+    }
+    // A blurred, low-opacity dark ellipse sitting just behind the front
+    // head - a contact shadow it casts onto whatever peeks out from behind
+    // it. Clipped to the union of all three heads' own silhouettes (each in
+    // its own position/scale), so it can only ever darken actual petal
+    // pixels - never bleed into the empty space around any of them.
+    function headContactShadow(species, front, sides) {
+      var clipId = 'clusterShadowClip-' + species.key;
+      var all = [front].concat(sides);
+      var clipShapes = all.map(function (h) {
+        var tx = h.cx - 50 * h.scale, ty = h.cy - 50 * h.scale;
+        return '<g transform="translate(' + tx + ' ' + ty + ') scale(' + h.scale + ')">' + headSilhouetteShapes(species) + '</g>';
+      }).join('');
+      var defs = '<clipPath id="' + clipId + '">' + clipShapes + '</clipPath>';
+      var tx = front.cx - 50 * front.scale, ty = front.cy - 50 * front.scale + 3;
+      var shadow = '<g clip-path="url(#' + clipId + ')"><g transform="translate(' + tx + ' ' + ty + ') scale(' + front.scale + ')">' +
+        '<ellipse cx="50" cy="52" rx="44" ry="42" fill="#241505" opacity="0.28" filter="url(#headContactShadow)"/></g></g>';
+      return { defs: defs, markup: shadow };
+    }
+
+    // Slightly different, both smaller than the front bloom - a real
+    // handful of stems is never three identical flowers, and the size step
+    // reinforces which one is in front vs. tucked behind it.
+    var SIDE_SCALE_L = HEAD_SCALE * 0.80;
+    var SIDE_SCALE_R = HEAD_SCALE * 0.70;
+
+    // The body of buildPlantVisual - stage 0 is bare ground, stage 1 a
+    // sprout, stage 2 a single bloom on a stem, stage 3 a three-head
+    // cluster. Returns {html, w, h} at the given px width.
+    function buildNewVisual(species, color, stage, px) {
+      var defs = '<defs>' + HEAD_FX_DEFS + headClipDefs(species) + '</defs>' + fancyDefs(color);
+      var body = GROUND_MARKUP;
+      if (stage === 1) body += SPROUT_MARKUP;
+      else if (stage === 2) body += BLOOM_STEM_MARKUP + headGroup(species, color, 50, 40);
+      else if (stage === 3) {
+        var left = { cx: 33, cy: 55, scale: SIDE_SCALE_L };
+        var right = { cx: 67, cy: 55, scale: SIDE_SCALE_R };
+        var front = { cx: 50, cy: 36, scale: HEAD_SCALE };
+        var shadow = headContactShadow(species, front, [left, right]);
+        defs += shadow.defs;
+        body += CLUSTER_STEM_MARKUP +
+          headGroup(species, color, left.cx, left.cy, { scale: left.scale, recede: true }) +
+          headGroup(species, color, right.cx, right.cy, { scale: right.scale, recede: true }) +
+          shadow.markup +
+          headGroup(species, color, front.cx, front.cy, { scale: front.scale });
+      }
+      // Drawn last, on top of the stem/head - see GROUND_NEAR above.
+      body += GROUND_NEAR;
+      var vw = 100, vh = 112, dispH = Math.round(px * vh / vw);
+      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH + '" style="display:block">' + defs + body + '</svg>';
+      return { html: html, w: px, h: dispH };
+    }
+
     // Builds the "look" for a plant at a given stage/size and returns its
     // rendered box dimensions so callers (map marker vs. big panel preview)
-    // can size their container to match exactly.
+    // can size their container to match exactly. `base` is the width in px
+    // to render at, used directly for every stage - the ground/grass base
+    // is common to all four stages, so (unlike the old disc icons) they all
+    // share one canvas size rather than growing stage by stage.
     function buildPlantVisual(species, color, stage, wilted, base) {
-      var wiltFilter = wilted ? 'filter:grayscale(55%) opacity(0.7);' : '';
-      function dot(size) {
-        return '<div style="' + discStyle(color.soft, size) + '">' +
-          flowerSVG(species, color, Math.round(size * 0.94)) + '</div>';
-      }
-      var html, w, h;
-      if (stage === 0) {
-        w = h = Math.round(base * 0.5);
-        html = '<div style="' + wiltFilter + discStyle('#e6cfa8', w) + '">' +
-          seedSVG(Math.round(w * 0.72)) + '</div>';
-      } else if (stage === 1) {
-        w = h = Math.round(base * 0.55);
-        html = '<div style="' + wiltFilter + discStyle('#d8ecc4', w) + '">' +
-          sproutSVG(Math.round(w * 0.82)) + '</div>';
-      } else if (stage === 2) {
-        w = h = Math.round(base * 0.85);
-        html = '<div style="' + wiltFilter + '">' + dot(w) + '</div>';
-      } else {
-        // gap first, ds derived from what's left (floor, not round) -
-        // guarantees 2*ds+gap <= base for every base, including the small
-        // ones near PLANT_ICON_MIN_PX, rather than a fixed 0.5 ratio that
-        // rounds up past base and overlaps the neighboring tile.
-        var gap = Math.max(2, Math.round(base * 0.04));
-        var ds = Math.floor((base - gap) / 2);
-        w = 2 * ds + gap; h = 2 * ds + gap;
-        html = '<div class="flourish-cluster" style="' + wiltFilter + 'display:flex;flex-direction:column;' +
-          'gap:' + gap + 'px;align-items:center"><div style="display:flex;gap:' + gap + 'px">' +
-          dot(ds) + dot(ds) + '</div>' + dot(ds) + '</div>';
-      }
-      return { html: html, w: w, h: h };
+      var v = buildNewVisual(species, color, stage, base);
+      var html = wilted
+        ? '<div style="filter:grayscale(55%) opacity(0.7)">' + v.html + '</div>'
+        : v.html;
+      return { html: html, w: v.w, h: v.h };
     }
 
     // Inline flower for text rows (collection list, shop, seed picker, modal
@@ -3233,7 +3383,12 @@
           'border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;' +
           'font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,0.35)">\u{1F4A7}</div></div>';
       }
-      return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h / 2], className: '' });
+      // The plant is rooted in the soil clump near the bottom of the tall
+      // (100x112) canvas, not at its vertical center - anchoring there
+      // (rather than dead center) is what lines the actual planted grid
+      // coordinate up with the ground instead of the middle of the whole
+      // stem+head art, letting the stem/head extend upward above the tile.
+      return L.divIcon({ html: html, iconSize: [v.w, v.h], iconAnchor: [v.w / 2, v.h * (97 / 112)], className: '' });
     }
 
     // Same bloom artwork as a planted flower, wrapped in a pulsing halo so a
@@ -3247,7 +3402,10 @@
       var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, px);
       // Capped at what's left of the tile past the flower itself - the glow
       // is a nice-to-have, not worth letting the whole marker spill into a
-      // neighboring tile the way an uncapped pad could at some zooms.
+      // neighboring tile the way an uncapped pad could at some zooms. Padded
+      // off v.w only (not v.h, which is taller by design - see
+      // buildNewVisual) so the glow stays proportioned to the flower's
+      // actual width rather than stretching tall with the ground art.
       var pad = Math.max(0, Math.min(Math.max(6, Math.round(v.w * 0.18)), Math.floor((px - v.w) / 2)));
       var box = v.w + pad * 2, boxH = v.h + pad * 2;
       var html = '<div style="position:relative;width:' + box + 'px;height:' + boxH + 'px;' +
@@ -3255,7 +3413,10 @@
         '<div class="wild-glow" style="position:absolute;inset:0;border-radius:50%;background:' +
         'radial-gradient(circle,rgba(255,255,255,0.9),rgba(255,236,150,0.5) 52%,rgba(255,236,150,0) 72%)"></div>' +
         '<div style="position:relative">' + v.html + '</div></div>';
-      return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, boxH / 2], className: '' });
+      // Same ground-point anchor as makePlantIcon, offset by this icon's own
+      // padding: the plant's soil clump sits at pad + v.h*(97/112) down from
+      // the padded box's top edge.
+      return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, pad + v.h * (97 / 112)], className: '' });
     }
 
     // A placed sprinkler, drawn at a fixed size (it doesn't grow or wilt) on

@@ -1135,6 +1135,40 @@
     .bloom-halo { opacity: 0.6; animation: bloom-halo 3.4s ease-in-out infinite; }
     .bloom-spark { opacity: 0.8; animation: bloom-spark 2.2s ease-in-out infinite; }
 
+    /* Wind sway for grass clumps and plant stems - the delay travels across
+       the map as a wave (see windDelayFor in the script) rather than every
+       plant twitching in sync. */
+    @keyframes windSway {
+      0% { transform: rotate(0deg); }
+      18% { transform: rotate(var(--sway, 5deg)); }
+      52% { transform: rotate(calc(var(--sway, 5deg) * -0.35)); }
+      78% { transform: rotate(calc(var(--sway, 5deg) * 0.12)); }
+      100% { transform: rotate(0deg); }
+    }
+    .wind-grass-back, .wind-grass-front, .wind-stem {
+      animation-name: windSway; animation-timing-function: ease-in-out; animation-iteration-count: infinite;
+      animation-delay: var(--wind-delay, 0s);
+      /* transform-box is deliberately NOT set to fill-box here. fill-box
+         resolves transform-origin against each element's OWN bounding box
+         instead of the SVG's coordinate system, so two elements with the
+         identical nominal "50px 95px" transform-origin end up pivoting
+         around two DIFFERENT actual points if their bounding boxes differ -
+         verified in isolation (a shape rotating around a point off in empty
+         space instead of the intended anchor). That mismatch between where
+         a blade is drawn and where its group actually pivots is exactly
+         what read as the grass "hopping" across the ground instead of
+         swaying while planted. The default transform-box for an SVG element
+         with no CSS layout box is already the SVG viewport's own coordinate
+         system, which these px-unit origins are authored against - leaving
+         it unset IS the fix. */
+    }
+    .wind-grass-back { animation-duration: 5.6s; --sway: 7deg; }
+    .wind-grass-front { animation-duration: 5.0s; --sway: 8deg; animation-delay: calc(var(--wind-delay, 0s) + 0.12s); }
+    .wind-stem { animation-duration: 8s; --sway: 3deg; }
+    @media (prefers-reduced-motion: reduce) {
+      .wind-grass-back, .wind-grass-front, .wind-stem { animation: none; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
@@ -3313,34 +3347,127 @@
     // land in front of the plant's own base instead of only ever behind it.
     // That's what turns two flat rows into a little patch the plant is
     // standing IN, rather than a backdrop.
-    var GROUND_MARKUP =
-      // FAR - smaller, muted, mostly hidden behind the mound itself
-      bladePath(44, 92, 42, 82, 40, 74, 2.4, '#345c30') +
-      bladePath(58, 93, 61, 83, 63, 75, 2.2, '#345c30') +
-      // MID, back half - taller, darker, framing the sides
-      bladePath(23, 98, 18, 84, 14, 68, 3.8, '#3f6b3a') +
-      bladePath(50, 100, 55, 88, 57, 76, 2.8, '#3f6b3a') +
-      bladePath(78, 98, 83, 84, 87, 68, 3.8, '#3f6b3a') +
-      // the soil clump itself, three layers for a little volume
+    //
+    // The mound itself is static (dirt doesn't blow in the wind) and shared
+    // by every tile, so it's its own var, unjittered and unswayed.
+    var GROUND_MOUND =
       '<ellipse cx="50" cy="100" rx="25" ry="8" fill="#5c3a1f"/>' +
       '<ellipse cx="50" cy="95" rx="22" ry="9.5" fill="#8a5a34"/>' +
       '<ellipse cx="43" cy="90" rx="9" ry="3.6" fill="#b98a54" opacity="0.55"/>' +
       '<ellipse cx="60" cy="93" rx="2.4" ry="2" fill="#6b431f" opacity="0.8"/>' +
-      '<ellipse cx="37" cy="97" rx="2.2" ry="1.7" fill="#6b431f" opacity="0.7"/>' +
-      // MID, front half - overlapping the mound's edge
-      bladePath(32, 98, 26, 84, 27, 70, 4.2, '#5ea648') +
-      bladePath(41, 99, 38, 87, 42, 76, 3.0, '#7cc45f') +
-      bladePath(59, 99, 62, 87, 58, 76, 3.0, '#66b04d') +
-      bladePath(68, 98, 74, 84, 73, 70, 4.2, '#5ea648');
+      '<ellipse cx="37" cy="97" rx="2.2" ry="1.7" fill="#6b431f" opacity="0.7"/>';
 
-    // NEAR - the biggest, brightest blades, rooted lower than the mound's
-    // own front edge so their base sits past where the stem meets the
-    // ground. Appended after the stem/head markup (see buildNewVisual), so
-    // they render in front of the plant's base rather than behind it -
-    // the "standing in a patch of grass" half of this pass.
-    var GROUND_NEAR =
-      bladePath(43, 102, 39, 88, 38, 72, 4.0, '#7cc45f') +
-      bladePath(58, 103, 62, 89, 64, 74, 3.6, '#5ea648');
+    // ===================================================================
+    //  WIND - the sway travels across the map as a wave (a per-tile delay
+    //  derived from the tile's own q/r) instead of every plant twitching in
+    //  sync. See the .wind-grass-back/.wind-grass-front/.wind-stem CSS
+    //  above for the animation itself.
+    // ===================================================================
+    var WIND_CYCLE_S = 8;
+    var WIND_DELAY_PER_TILE = 0.16;
+    var WIND_DIR_Q = 1, WIND_DIR_R = 0.4;
+    function windDelayFor(q, r) {
+      var phase = (q * WIND_DIR_Q + r * WIND_DIR_R) * WIND_DELAY_PER_TILE;
+      return -(((phase % WIND_CYCLE_S) + WIND_CYCLE_S) % WIND_CYCLE_S);
+    }
+    // Wraps a stem/head markup block in the sway group used by every plant
+    // stage (sprout, single bloom, cluster). transform-origin is the point
+    // where the stem meets the ground (see GROUND_MOUND/bladePath
+    // coordinates above) - not fill-box, per the CSS comment above.
+    function windStemWrap(markup) {
+      return '<g class="wind-stem" style="transform-origin:50px 92px">' + markup + '</g>';
+    }
+
+    // ===================================================================
+    //  GRASS CLUMPS - randomized per-tile tufts instead of a fixed
+    //  scattered band. Deterministic per tile (seeded off q,r - see
+    //  buildNewVisual) so the same tile always looks the same rather than
+    //  re-randomizing on every icon rebuild.
+    // ===================================================================
+    function jitter(rng, range) { return (rng() - 0.5) * 2 * range; }
+
+    // t.bx/t.by are used EXACTLY as given, NEVER jittered here - they must
+    // land exactly on the clump's own transform-origin (see clumpMarkup). A
+    // rotation only leaves its own center point stationary; any gap between
+    // where a blade is actually drawn and where its group pivots reads as
+    // the base sliding through a small arc on every swing - a real bug
+    // found and fixed during mockup iteration, not a stylistic choice.
+    function jitterBlade(rng, t) {
+      var lenScale = 0.85 + rng() * 0.3;
+      var leanShift = jitter(rng, 2.5);
+      var tx = t.bx + (t.tx - t.bx) * lenScale + leanShift;
+      var ty = t.by + (t.ty - t.by) * lenScale;
+      var cx = t.bx + (t.cx - t.bx) * lenScale + leanShift * 0.6 + jitter(rng, 0.8);
+      var cy = t.by + (t.cy - t.by) * lenScale;
+      var w = t.w * (0.85 + rng() * 0.3);
+      return bladePath(t.bx, t.by, cx, cy, tx, ty, w, t.fill);
+    }
+
+    // One clump's shape relative to its own root at (0,0): left/right splay
+    // out to their own side with a slight upward lean, center is taller and
+    // near-vertical - the fan silhouette of an actual grass tuft, not a
+    // scattered row. Narrower base widths (1.9-2.1) than GROUND_MOUND's own
+    // framing blades (up to 4.2) but less taper, which is what reads as
+    // "thick" without needing a wide base to do it.
+    var CLUMP_SHAPE = [
+      { dcx: -4.2, dcy: -3.2, dtx: -7.5, dty: -5.5, w: 1.9 },
+      { dcx: 0.4, dcy: -6, dtx: 0.6, dty: -10.5, w: 2.1 },
+      { dcx: 4.2, dcy: -3.2, dtx: 7.5, dty: -5.5, w: 1.9 }
+    ];
+
+    // Builds one full clump at spot.bx/spot.by: a static dirt indent (NOT
+    // in the sway group - dirt doesn't blow in the wind, only what's rooted
+    // in it does) plus three jittered blades inside their own <g>.
+    function clumpMarkup(rng, spot, swayClass) {
+      // Rounded once, here, reused as-is everywhere below (both the blade
+      // paths' own base coordinate AND the sway group's transform-origin
+      // string) - bladePath() doesn't round bx/by the way it rounds every
+      // other coordinate, so leaving these as raw floats would let the
+      // path's actual base drift a fraction of a unit from transform-
+      // origin's rounded string.
+      var bx = Math.round((spot.bx + jitter(rng, 2.5)) * 10) / 10;
+      var by = Math.round((spot.by + jitter(rng, 0.8)) * 10) / 10;
+      var scale = 0.85 + rng() * 0.3;
+      var indent = '<ellipse cx="' + bx.toFixed(1) + '" cy="' + (by + 1.1).toFixed(1) + '" rx="' +
+        (4.6 * scale).toFixed(1) + '" ry="' + (1.8 * scale).toFixed(1) + '" fill="#6b431f" opacity="0.38"/>';
+      var blades = CLUMP_SHAPE.map(function (shape, i) {
+        var t = {
+          bx: bx, by: by,
+          cx: bx + shape.dcx * scale, cy: by + shape.dcy * scale,
+          tx: bx + shape.dtx * scale, ty: by + shape.dty * scale,
+          w: shape.w * scale, fill: i === 1 ? spot.fillCenter : spot.fill
+        };
+        return jitterBlade(rng, t);
+      }).join('');
+      return indent + '<g class="' + swayClass + '" style="transform-origin:' + bx.toFixed(1) + 'px ' + by.toFixed(1) + 'px">' +
+        blades + '</g>';
+    }
+
+    // Five spots: one behind the mound, two framing its sides (drawn after
+    // the mound - overlapping its edge, the "grass at the base" look the
+    // old GROUND_MARKUP front band had), and two out front in
+    // groundNearRandom (drawn after the stem so they cross in front of it,
+    // same idea as the old GROUND_NEAR).
+    var FAR_CLUMP_SPOTS = [
+      { bx: 50, by: 90, fill: '#345c30', fillCenter: '#3f6b3a' }
+    ];
+    var MID_CLUMP_SPOTS = [
+      { bx: 25, by: 96, fill: '#3f6b3a', fillCenter: '#4e8b3f' },
+      { bx: 75, by: 96, fill: '#3f6b3a', fillCenter: '#4e8b3f' }
+    ];
+    var NEAR_CLUMP_SPOTS = [
+      { bx: 40, by: 102, fill: '#5ea648', fillCenter: '#7cc45f' },
+      { bx: 60, by: 103, fill: '#5ea648', fillCenter: '#7cc45f' }
+    ];
+
+    function groundMarkupRandom(rng) {
+      var far = FAR_CLUMP_SPOTS.map(function (s) { return clumpMarkup(rng, s, 'wind-grass-back'); }).join('');
+      var mid = MID_CLUMP_SPOTS.map(function (s) { return clumpMarkup(rng, s, 'wind-grass-back'); }).join('');
+      return far + GROUND_MOUND + mid;
+    }
+    function groundNearRandom(rng) {
+      return NEAR_CLUMP_SPOTS.map(function (s) { return clumpMarkup(rng, s, 'wind-grass-front'); }).join('');
+    }
 
     // A sprout, capped with a closed bud rather than just two bare leaves -
     // the stem is stretched a little taller (was 64, now 56) to make room
@@ -3365,10 +3492,16 @@
       '<ellipse cx="39" cy="68" rx="7.5" ry="4.6" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.5" transform="rotate(-30 39 68)"/>' +
       '<ellipse cx="61" cy="74" rx="7" ry="4.2" fill="#66b04d" stroke="#4e8b3f" stroke-width="1.5" transform="rotate(26 61 74)"/>';
 
+    // The center stem carries one leaf (at 41,70); each side stem gets its
+    // own smaller leaf near its own bend (36,76 and 64,76) so a cluster
+    // reads as three stems each with foliage, not three bare stems with a
+    // leaf tucked in the middle.
     var CLUSTER_STEM_MARKUP =
       '<path d="M48 92 C40 78 34 65 33 55" stroke="#4e8b3f" stroke-width="3.4" fill="none" stroke-linecap="round"/>' +
       '<path d="M52 92 C60 78 66 65 67 55" stroke="#4e8b3f" stroke-width="3.2" fill="none" stroke-linecap="round"/>' +
       '<path d="M50 92 C50 76 50 54 50 36" stroke="#4e8b3f" stroke-width="4.2" fill="none" stroke-linecap="round"/>' +
+      '<ellipse cx="36" cy="76" rx="5.5" ry="3.4" fill="#66b04d" stroke="#4e8b3f" stroke-width="1.3" transform="rotate(-22 36 76)"/>' +
+      '<ellipse cx="64" cy="76" rx="5.5" ry="3.4" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.3" transform="rotate(22 64 76)"/>' +
       '<ellipse cx="41" cy="70" rx="6.5" ry="4" fill="#7cc45f" stroke="#4e8b3f" stroke-width="1.4" transform="rotate(-26 41 70)"/>';
 
     // A soft directional sheen on every head (gloss so a flat, radially-
@@ -3449,28 +3582,33 @@
 
     // The body of buildPlantVisual - stage 0 is bare ground, stage 1 a
     // sprout, stage 2 a single bloom on a stem, stage 3 a three-head
-    // cluster. Returns {html, w, h} at the given px width.
-    function buildNewVisual(species, color, stage, px) {
+    // cluster. Returns {html, w, h} at the given px width. q, r seed the
+    // grass clump randomization and the wind delay (see groundMarkupRandom/
+    // windDelayFor above) - same tile, same look, every rebuild.
+    function buildNewVisual(species, color, stage, px, q, r) {
+      var rng = mulberry32(dailyStockSeed(cellKey(q, r)));
       var defs = '<defs>' + HEAD_FX_DEFS + headClipDefs(species) + '</defs>' + fancyDefs(color);
-      var body = GROUND_MARKUP;
-      if (stage === 1) body += sproutMarkup();
-      else if (stage === 2) body += BLOOM_STEM_MARKUP + headGroup(species, color, 50, 40);
+      var body = groundMarkupRandom(rng);
+      if (stage === 1) body += windStemWrap(sproutMarkup());
+      else if (stage === 2) body += windStemWrap(BLOOM_STEM_MARKUP + headGroup(species, color, 50, 40));
       else if (stage === 3) {
         var left = { cx: 33, cy: 55, scale: SIDE_SCALE_L };
         var right = { cx: 67, cy: 55, scale: SIDE_SCALE_R };
         var front = { cx: 50, cy: 36, scale: HEAD_SCALE };
         var shadow = headContactShadow(species, front, [left, right]);
         defs += shadow.defs;
-        body += CLUSTER_STEM_MARKUP +
+        body += windStemWrap(CLUSTER_STEM_MARKUP +
           headGroup(species, color, left.cx, left.cy, { scale: left.scale, recede: true }) +
           headGroup(species, color, right.cx, right.cy, { scale: right.scale, recede: true }) +
           shadow.markup +
-          headGroup(species, color, front.cx, front.cy, { scale: front.scale });
+          headGroup(species, color, front.cx, front.cy, { scale: front.scale }));
       }
-      // Drawn last, on top of the stem/head - see GROUND_NEAR above.
-      body += GROUND_NEAR;
+      // Drawn last, on top of the stem/head - see groundNearRandom above.
+      body += groundNearRandom(rng);
       var vw = 100, vh = 112, dispH = Math.round(px * vh / vw);
-      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH + '" style="display:block">' + defs + body + '</svg>';
+      var windDelay = windDelayFor(q, r);
+      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH +
+        '" style="display:block;--wind-delay:' + windDelay.toFixed(2) + 's">' + defs + body + '</svg>';
       return { html: html, w: px, h: dispH };
     }
 
@@ -3479,9 +3617,11 @@
     // can size their container to match exactly. `base` is the width in px
     // to render at, used directly for every stage - the ground/grass base
     // is common to all four stages, so (unlike the old disc icons) they all
-    // share one canvas size rather than growing stage by stage.
-    function buildPlantVisual(species, color, stage, wilted, base) {
-      var v = buildNewVisual(species, color, stage, base);
+    // share one canvas size rather than growing stage by stage. q, r are the
+    // plant's grid position, forwarded to buildNewVisual for the grass seed
+    // and wind delay.
+    function buildPlantVisual(species, color, stage, wilted, base, q, r) {
+      var v = buildNewVisual(species, color, stage, base, q, r);
       var html = wilted
         ? '<div style="filter:grayscale(55%) opacity(0.7)">' + v.html + '</div>'
         : v.html;
@@ -3549,7 +3689,7 @@
       var d = recomputePlant(plant, Date.now());
       var px = plantIconBase();
       _iconBuiltPx = px;
-      var v = buildPlantVisual(speciesFor(plant.species), paletteOf(plant), d.stage, d.wilted, px);
+      var v = buildPlantVisual(speciesFor(plant.species), paletteOf(plant), d.stage, d.wilted, px, plant.q, plant.r);
       var html = v.html;
       // A corner droplet marks any plant that wants a visit, so the map alone
       // answers "is there anything to do right now?". Green means it is ready
@@ -3583,7 +3723,7 @@
       var d = wildDerived(w, Date.now());
       var px = plantIconBase();
       _iconBuiltPx = px;
-      var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, px);
+      var v = buildPlantVisual(speciesFor(w.species), paletteOf(w), 2, d.wilted, px, w.q, w.r);
       // Capped at what's left of the tile past the flower itself - the glow
       // is a nice-to-have, not worth letting the whole marker spill into a
       // neighboring tile the way an uncapped pad could at some zooms. Padded
@@ -5446,7 +5586,7 @@
       var species = speciesFor(w.species);
       var d = wildDerived(w, Date.now());
 
-      var v = buildPlantVisual(species, paletteOf(w), 2, d.wilted, 88);
+      var v = buildPlantVisual(species, paletteOf(w), 2, d.wilted, 88, w.q, w.r);
       var iconEl = document.getElementById('plant-icon-big');
       iconEl.innerHTML = v.html;
       iconEl.style.width = v.w + 'px';
@@ -5534,7 +5674,7 @@
       var d = recomputePlant(p, Date.now());
       var species = speciesFor(p.species);
 
-      var v = buildPlantVisual(species, paletteOf(p), d.stage, d.wilted, 88);
+      var v = buildPlantVisual(species, paletteOf(p), d.stage, d.wilted, 88, p.q, p.r);
       var iconEl = document.getElementById('plant-icon-big');
       iconEl.innerHTML = v.html;
       iconEl.style.width = v.w + 'px';

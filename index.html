@@ -271,15 +271,18 @@
        flower.
 
        Presented as a toolbox at the top-left corner rather than a permanent
-       stack of buttons: a single tap (or a press-and-hold-then-drag) flies
-       the tools out across the top-left quarter circle (right, down-right,
-       below - a fourth, fertilizer, only once a bag is owned; see
+       stack of buttons: a single tap (or a press-and-hold-then-drag) drops
+       the tools down the left edge of the screen in a vertical column
+       (water, shears, $, then fertilizer once a bag is owned - see
        .tool-btn.fert/syncFertTool), and picking one swaps the toolbox for
        that tool's own icon in place - so there is exactly one button here
-       at rest, and the fan only exists while you are actively choosing.
+       at rest, and the column only exists while you are actively choosing.
        #tool-rail is a fixed-size anchor box; #tool-toggle and the .petal
        buttons are all absolutely positioned inside it from the same
-       top-left origin, so every "fly out" is just a transform.
+       top-left origin, so every "drop down" is just a transform. Each tool
+       keeps a fixed row regardless of whether fertilizer is currently
+       visible, so gaining/losing the fourth row never shifts the other
+       three.
 
        Anchored flush to the top-left corner, right under the top bar -
        and stacked ABOVE both the tutorial banner (950) and the plant panel
@@ -327,26 +330,22 @@
     .tool-btn.equip-pop { animation: tool-equip-pop 0.32s cubic-bezier(.34,1.56,.64,1); }
 
     /* The tools themselves. Closed = collapsed onto the toolbox origin,
-       shrunk, faded and untappable. Each one flies out to its own spot on an
-       overshoot easing with a slight counter-rotation, staggered so they
-       cascade out rather than jumping together; closing reverses the
-       stagger so the last one out is the first one home.
+       shrunk, faded and untappable. Each one drops straight down to its own
+       fixed row on an overshoot easing, staggered so they cascade down
+       rather than jumping together; closing reverses the stagger so the
+       last one out is the first one home.
 
-       Fertilizer is a fourth petal, but only ever shown once a bag is
-       actually owned (see .tool-btn.fert below and syncFertTool) - so there
-       are two layouts here: the original three spots (right, down-right,
-       below, unchanged) for the common case, and a wider evenly-spaced
-       quarter-circle (#tool-petals.has-fert) for the four-tool case, rather
-       than always reserving a fourth spot nobody without fertilizer would
-       ever see filled. */
+       Fertilizer is a fourth row, but only ever shown once a bag is
+       actually owned (see .tool-btn.fert below and syncFertTool) - its row
+       is reserved either way so gaining it never reflows the three above. */
     .tool-btn.petal {
       position: absolute; left: 0; top: 0;
-      transform: translate(0, 0) scale(0.3) rotate(-32deg);
+      transform: translate(0, -6px) scale(0.35);
       opacity: 0; pointer-events: none;
-      transition: transform 0.38s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
+      transition: transform 0.34s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
     }
-    /* Never a tap target and never occupies a spot in the 3-tool layout -
-       only #tool-petals.has-fert (state.fertilizer > 0) makes it visible.
+    /* Never a tap target and never occupies a row until owned - only
+       #tool-petals.has-fert (state.fertilizer > 0) makes it visible.
        Scoped to .petal specifically, NOT plain .tool-btn.fert - #tool-toggle
        also picks up a bare "fert" class (via renderToolRail, to color it
        while fert is the active tool) and is a .tool-btn too, so an
@@ -356,48 +355,25 @@
     .tool-btn.petal.fert { display: none; }
     #tool-petals.has-fert .tool-btn.fert { display: flex; }
 
-    .tool-btn.petal.water { transition-delay: 0.10s, 0.10s; }
-    .tool-btn.petal.shear { transition-delay: 0.05s, 0.05s; }
-    .tool-btn.petal.sell  { transition-delay: 0s, 0s; }
+    /* Closed-state delays are the open order in reverse, so the last row to
+       drop down is the first one to retract. */
+    .tool-btn.petal.water { transition-delay: 0.18s, 0.18s; }
+    .tool-btn.petal.shear { transition-delay: 0.12s, 0.12s; }
+    .tool-btn.petal.sell  { transition-delay: 0.06s, 0.06s; }
+    .tool-btn.petal.fert  { transition-delay: 0s, 0s; }
     #tool-petals.open .tool-btn.petal { opacity: 1; pointer-events: auto; }
-    #tool-petals.open .tool-btn.water { transform: translate(76px, 0) scale(1) rotate(0deg); transition-delay: 0s, 0s; }
-    #tool-petals.open .tool-btn.shear { transform: translate(54px, 54px) scale(1) rotate(0deg); transition-delay: 0.06s, 0.06s; }
-    #tool-petals.open .tool-btn.sell  { transform: translate(0, 76px) scale(1) rotate(0deg); transition-delay: 0.12s, 0.12s; }
+    #tool-petals.open .tool-btn.water { transform: translate(0, 62px) scale(1); transition-delay: 0s, 0s; }
+    #tool-petals.open .tool-btn.shear { transform: translate(0, 124px) scale(1); transition-delay: 0.06s, 0.06s; }
+    #tool-petals.open .tool-btn.sell  { transform: translate(0, 186px) scale(1); transition-delay: 0.12s, 0.12s; }
+    #tool-petals.open .tool-btn.fert  { transform: translate(0, 248px) scale(1); transition-delay: 0.18s, 0.18s; }
     /* Live highlight while a press-and-hold drag is passing over a petal -
-       the fast path from the skill spec: hold the toolbox, drag over the
-       icon you want, release to equip it without a second tap. */
+       the fast path from the skill spec: hold the toolbox, drag down over
+       the row you want, release to equip it without a second tap. */
     .tool-btn.petal.drag-hover { box-shadow: 0 0 0 5px rgba(255,255,255,0.55), var(--shadow); }
-    #tool-petals.open .tool-btn.water.drag-hover { transform: translate(76px, 0) scale(1.22) rotate(0deg); }
-    #tool-petals.open .tool-btn.shear.drag-hover { transform: translate(54px, 54px) scale(1.22) rotate(0deg); }
-    #tool-petals.open .tool-btn.sell.drag-hover  { transform: translate(0, 76px) scale(1.22) rotate(0deg); }
-
-    /* Four-tool layout: same 76px radius, now spread evenly across the
-       quarter circle (0/30/60/90deg) instead of 0/45/90, so the new fourth
-       spot (fert, at 90deg/straight down) doesn't just bolt on past the old
-       "sell" spot - closing order is reversed and re-staggered the same way
-       the three-tool layout is (last opened, first home). Higher specificity
-       than the plain .open rules above (two classes vs one), so this wins
-       whenever has-fert is set. */
-    #tool-petals.has-fert .tool-btn.water { transition-delay: 0.18s, 0.18s; }
-    #tool-petals.has-fert .tool-btn.shear { transition-delay: 0.12s, 0.12s; }
-    #tool-petals.has-fert .tool-btn.sell  { transition-delay: 0.06s, 0.06s; }
-    #tool-petals.has-fert .tool-btn.fert  { transition-delay: 0s, 0s; }
-    #tool-petals.open.has-fert .tool-btn.water {
-      transform: translate(76px, 0) scale(1) rotate(0deg); transition-delay: 0s, 0s;
-    }
-    #tool-petals.open.has-fert .tool-btn.shear {
-      transform: translate(65.8px, 38px) scale(1) rotate(0deg); transition-delay: 0.06s, 0.06s;
-    }
-    #tool-petals.open.has-fert .tool-btn.sell {
-      transform: translate(38px, 65.8px) scale(1) rotate(0deg); transition-delay: 0.12s, 0.12s;
-    }
-    #tool-petals.open.has-fert .tool-btn.fert {
-      transform: translate(0, 76px) scale(1) rotate(0deg); transition-delay: 0.18s, 0.18s;
-    }
-    #tool-petals.open.has-fert .tool-btn.water.drag-hover { transform: translate(76px, 0) scale(1.22) rotate(0deg); }
-    #tool-petals.open.has-fert .tool-btn.shear.drag-hover { transform: translate(65.8px, 38px) scale(1.22) rotate(0deg); }
-    #tool-petals.open.has-fert .tool-btn.sell.drag-hover  { transform: translate(38px, 65.8px) scale(1.22) rotate(0deg); }
-    #tool-petals.open.has-fert .tool-btn.fert.drag-hover  { transform: translate(0, 76px) scale(1.22) rotate(0deg); }
+    #tool-petals.open .tool-btn.water.drag-hover { transform: translate(0, 62px) scale(1.18); }
+    #tool-petals.open .tool-btn.shear.drag-hover { transform: translate(0, 124px) scale(1.18); }
+    #tool-petals.open .tool-btn.sell.drag-hover  { transform: translate(0, 186px) scale(1.18); }
+    #tool-petals.open .tool-btn.fert.drag-hover  { transform: translate(0, 248px) scale(1.18); }
 
     /* First run only - the tutorial points at whichever tool it is asking
        for, on the toolbox itself while it is stowed and on the real petal
@@ -410,21 +386,26 @@
 
     /* ================= SEED RAIL ================= */
     /* Same idea as the tool rail (see above), mirrored to the top-right
-       corner and one level deeper: tap (or hold-and-drag) the seed packet to
-       fan out every species you actually hold a seed of, tap one of those to
-       swap the fan for that species' owned colors, then tap a color to equip
-       it - which replaces the packet with that flower's own icon, exactly
-       like a tool. An equipped seed is planted with a plain tap on empty
-       ground (see plantEquippedSeedAt), and it stays equipped across many
-       taps so a whole bed of the same color is a row of taps, not a picker
+       corner and one level deeper: tap (or hold-and-drag) the seed packet
+       and every species you actually hold a seed of drops down the right
+       edge of the screen, same as the toolbox. Tapping one of those rows
+       doesn't replace it - it flies that species' owned colors out to the
+       LEFT of that row, alongside the species column rather than in place
+       of it, so switching species mid-browse is just tapping a different
+       row. Tapping a color equips it - which replaces the packet with that
+       flower's own icon, exactly like a tool - and closes both. An equipped
+       seed is planted with a plain tap on empty ground (see
+       plantEquippedSeedAt), and it stays equipped across many taps so a
+       whole bed of the same color is a row of taps, not a picker
        round-trip per tile.
 
        Species and color counts are both open-ended (up to 7 species, up to
        14 colors each), unlike the tool rail's fixed three, so there is no
-       per-item CSS selector to fan them out with - .seed-petal only carries
+       per-item CSS selector to lay them out with - .seed-petal only carries
        the closed rest state and the transition; the open position for each
-       one is computed by JS (seedFanSlots) and written as an inline
-       transform. See renderSeedPetals/animateSeedFanOpen in the SEEDS
+       one is computed by JS (SEED_ROW for the species column,
+       SEED_COLOR_ROW for a color flyout) and written as an inline
+       transform. See renderSeedPetals/renderSeedColorPetals in the SEEDS
        section of the script for the JS half of this. */
     #seed-rail {
       position: fixed; right: 12px; top: calc(var(--hud-top-h) + 10px); z-index: 1150;
@@ -432,16 +413,27 @@
     }
     #seed-toggle { position: absolute; right: 0; top: 0; z-index: 2; }
     #seed-toggle:active { transform: scale(0.92); }
-    #seed-petals { position: absolute; right: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+    /* #seed-petals holds the species column; #seed-color-petals holds
+       whichever one species' colors are currently flown out (see
+       seedColorSpecies) - a separate layer so both can be visible together,
+       stacked in DOM order so a color flyout draws over the column it came
+       from. */
+    #seed-petals, #seed-color-petals {
+      position: absolute; right: 0; top: 0; width: 0; height: 0; pointer-events: none;
+    }
 
     .seed-petal {
       position: absolute; right: 0; top: 0; width: 40px; height: 40px;
-      transform: translate(0, 0) scale(0.3) rotate(28deg);
+      transform: translate(0, 0) scale(0.3);
       opacity: 0; pointer-events: none;
-      transition: transform 0.38s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
+      transition: transform 0.34s cubic-bezier(.34,1.56,.64,1), opacity 0.2s ease;
     }
-    #seed-petals.open .seed-petal { opacity: 1; pointer-events: auto; }
+    #seed-petals.open .seed-petal, #seed-color-petals.open .seed-petal { opacity: 1; pointer-events: auto; }
     .seed-petal.drag-hover { box-shadow: 0 0 0 5px rgba(255,255,255,0.55), var(--shadow); z-index: 1; }
+    /* The species row whose colors are currently flown out - a steady
+       highlight (as opposed to drag-hover's transient one) so it is obvious
+       which row the color flyout belongs to. */
+    .seed-petal.selected { box-shadow: 0 0 0 3px rgba(255,255,255,0.7), var(--shadow); }
 
     /* Same shape/position as the journal's slot badge - a small filled pill
        in the corner rather than a bare number, so it reads at a glance
@@ -1149,7 +1141,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.10.1</span>
+      <span id="game-version">v2.11.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1198,13 +1190,17 @@
     </div>
   </div>
 
-  <!-- Mirrors #tool-rail at the top-right corner, but the fan's contents are
-       built by JS (renderSeedPetals, in the SEEDS section of the script)
-       instead of living here as static buttons - species/color counts are
-       both open-ended, so #seed-petals starts empty. -->
+  <!-- Mirrors #tool-rail at the top-right corner, but the contents are built
+       by JS (renderSeedPetals/renderSeedColorPetals, in the SEEDS section of
+       the script) instead of living here as static buttons - species/color
+       counts are both open-ended, so both start empty. #seed-color-petals is
+       a second layer (see the SEED RAIL CSS comment) rather than reusing
+       #seed-petals, since a color flyout appears alongside the species
+       column, not in place of it. -->
   <div id="seed-rail">
     <button id="seed-toggle" class="tool-btn seed-packet" title="Seeds" onclick="onSeedPacketEquippedClick()"></button>
     <div id="seed-petals"></div>
+    <div id="seed-color-petals"></div>
   </div>
 
   <div id="fx-layer"></div>
@@ -3454,7 +3450,7 @@
       // panel underneath it. See onToolboxPointerUp for why the fan can be
       // left open after a plain tap on the toolbox.
       if (railOpen) { setRailOpen(false); return; }
-      if (seedRailOpen) { closeSeedFan(); return; }
+      if (seedRailOpen) { closeSeedRail(); return; }
       if (activeTool) return;
       // An equipped seed now drives itself off pointer events too (see
       // resolveSeedTap in the TOOLS section) so it can tell a tap from a
@@ -3510,10 +3506,10 @@
     //  both parents' next 12h) and there is no undo.
     //
     //  Picking a tool up is itself a two-stage gesture (see the RAIL section
-    //  below): tap the toolbox to fan the tools out and tap the one you
-    //  want, or press-and-hold the toolbox and drag straight to it. Whichever
-    //  one gets equipped replaces the toolbox icon in place; tapping it again
-    //  unequips and the toolbox comes back.
+    //  below): tap the toolbox to drop the tools down the left edge and tap
+    //  the one you want, or press-and-hold the toolbox and drag straight
+    //  down to it. Whichever one gets equipped replaces the toolbox icon in
+    //  place; tapping it again unequips and the toolbox comes back.
     // ---------------------------------------------------------------------
     var HOLD_MS = 1000;      // press-and-hold to confirm a collect or a sale
     var HOLD_MOVE_PX = 14;   // finger travel that turns a hold back into a pan
@@ -3638,7 +3634,7 @@
     function syncSeedRail() {
       var hide = fullscreenPanelOpen() || document.getElementById('menu-dropdown').classList.contains('open');
       document.getElementById('seed-rail').style.display = hide ? 'none' : '';
-      if (hide && seedRailOpen) closeSeedFan();
+      if (hide && seedRailOpen) closeSeedRail();
     }
     // The tutorial's pointer at whichever tool it is asking for next; cleared
     // the moment that tool is equipped. A tool already in hand is never
@@ -4234,20 +4230,23 @@
     // ---------------------------------------------------------------------
     //  SEEDS
     //  The seed packet at the top-right is the same idea as the toolbox,
-    //  one level deeper: tap (or hold-and-drag) it to fan out every species
-    //  you hold at least one seed of; tap a species and its fan is replaced
-    //  by that species' owned colors; tap a color and it equips, replacing
-    //  the packet with that flower's own icon - exactly like a tool. An
-    //  equipped seed plants itself with a plain tap on empty ground (see
-    //  plantEquippedSeedAt, wired into the map click handler below) and
-    //  stays equipped across taps, so filling a bed with one color is a row
-    //  of taps rather than a picker round-trip per tile.
+    //  one level deeper: tap (or hold-and-drag) it and every species you
+    //  hold at least one seed of drops down the right edge of the screen;
+    //  tap a species row and its owned colors fly out to the LEFT of that
+    //  row, alongside the column rather than replacing it - tap a different
+    //  species and the flyout swaps to its colors instead. Tap a color and
+    //  it equips, replacing the packet with that flower's own icon - exactly
+    //  like a tool - and closes the whole thing. An equipped seed plants
+    //  itself with a plain tap on empty ground (see plantEquippedSeedAt,
+    //  wired into the map click handler below) and stays equipped across
+    //  taps, so filling a bed with one color is a row of taps rather than a
+    //  picker round-trip per tile.
     //
     //  Every icon carries a count badge: the packet shows the total seeds
-    //  held, a species petal shows that species' total, and a color petal
+    //  held, a species row shows that species' total, and a color petal
     //  (and the equipped toggle) show that exact variant's count. Species
     //  and colors with zero seeds never appear - "options should be limited
-    //  to the seeds the player actually has" - so the fan is never a picker
+    //  to the seeds the player actually has" - so this is never a picker
     //  for things you can't plant, unlike the shop.
     // ---------------------------------------------------------------------
     // A torn-edge packet, like a real seed envelope: zigzags top and
@@ -4277,16 +4276,8 @@
     }
 
     var equippedSeed = null;         // a variant key ("species:color"), or null
-    var seedRailOpen = false;
-    var seedLevel = 'species';       // 'species' while the fan shows species, 'color' once one is picked
-    var seedSpecies = null;          // which species' colors are showing, once seedLevel === 'color'
-    // Where the CURRENT fan's petals fly out from, in the same dx/dy space as
-    // seedFanSlots. 0,0 (the pouch icon itself) for the species level; the
-    // tapped species petal's own resting spot for the color level, so the
-    // colors visibly emerge from the species you just picked instead of
-    // reappearing at the pouch - which, with only one species/color, looked
-    // indistinguishable from nothing having happened at all.
-    var seedFanOriginDx = 0, seedFanOriginDy = 0;
+    var seedRailOpen = false;        // true while the species column is dropped down
+    var seedColorSpecies = null;     // which species' colors are currently flown out to the left, or null
 
     // ---- What's actually in the pouch, grouped for the fan -----------------
     function ownedSeedVariantsOfSpecies(speciesKey) {
@@ -4343,122 +4334,135 @@
       toggle.classList.add('equip-pop');
     }
 
-    // Spreads n petals evenly across an arc starting straight down (90deg)
-    // and sweeping toward the left - away from the screen edge the packet
-    // sits against, and never past "up" into the header above it. Widens
-    // with n (up to a cap) rather than staying a fixed 90deg like the
-    // three-item tool fan, since the seed fan can hold anywhere from one
-    // item to all seven species - tight but still usable at the high end.
-    var SEED_FAN_RADIUS = 92;
-    function seedFanSlots(n) {
-      var startDeg = 90, span = Math.min(112, 55 + (n - 1) * 26);
-      var slots = [];
-      for (var i = 0; i < n; i++) {
-        var deg = n === 1 ? startDeg + span / 2 : startDeg + (span * i) / (n - 1);
-        var rad = deg * Math.PI / 180;
-        slots.push({ dx: Math.cos(rad) * SEED_FAN_RADIUS, dy: Math.sin(rad) * SEED_FAN_RADIUS });
-      }
-      return slots;
-    }
-    // Flies the current set of petal buttons out to their fan positions.
-    // Split into two rAFs: the first lets a freshly-built (still-closed)
-    // button actually paint before its transform changes, or the browser can
-    // collapse both states into one frame and skip the animation entirely.
-    function animateSeedFanOpen() {
-      var container = document.getElementById('seed-petals');
+    // Vertical spacing between species rows, dropping straight down the
+    // right edge from the pouch - same pitch as the tool rail's rows so the
+    // two columns read as one family. Colors fly out to the left of
+    // whichever row is open, tighter-pitched since the petals themselves
+    // are smaller (see .seed-petal).
+    var SEED_ROW = 62;
+    var SEED_COLOR_ROW = 48;
+    // Flies a freshly-built container's petals from a shared origin out to
+    // their final translate(dx,dy). Split into two rAFs: the first lets a
+    // still-closed button actually paint before its transform changes, or
+    // the browser can collapse both states into one frame and skip the
+    // animation entirely. `slots` gives each child's target {dx,dy} in
+    // order; `originDy` is where they all visually start from (0 for the
+    // species column, the open species row's own dy for a color flyout, so
+    // the colors read as emerging from the row you just tapped).
+    function animatePetalsOpen(containerId, slots, originDy) {
+      var container = document.getElementById(containerId);
       var petals = Array.prototype.slice.call(container.children);
-      var slots = seedFanSlots(petals.length);
-      var originTransform = 'translate(' + seedFanOriginDx.toFixed(1) + 'px,' + seedFanOriginDy.toFixed(1) +
-        'px) scale(0.3) rotate(28deg)';
+      var originTransform = 'translate(0px,' + originDy.toFixed(1) + 'px) scale(0.3)';
       petals.forEach(function (el) { el.style.transform = originTransform; });
       container.classList.add('open');
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           petals.forEach(function (el, i) {
-            el.style.transitionDelay = (i * 0.05) + 's, ' + (i * 0.05) + 's';
-            // Stashed so a tap on THIS petal (species -> color drill-in) can
-            // hand its own resting spot back in as the next fan's origin.
-            el.dataset.dx = slots[i].dx.toFixed(1);
-            el.dataset.dy = slots[i].dy.toFixed(1);
-            el.style.transform = 'translate(' + slots[i].dx.toFixed(1) + 'px,' + slots[i].dy.toFixed(1) + 'px) scale(1) rotate(0deg)';
+            el.style.transitionDelay = (i * 0.04) + 's, ' + (i * 0.04) + 's';
+            el.style.transform = 'translate(' + slots[i].dx.toFixed(1) + 'px,' + slots[i].dy.toFixed(1) + 'px) scale(1)';
           });
         });
       });
     }
-    // Rebuilds the fan's contents for the current level. Called on open and
-    // every time the level changes (species -> color) - a fresh set of
-    // buttons each time, not a morph, since they are genuinely different
-    // tap targets before and after.
+    // Rebuilds the species column. Called on open, and whenever the pouch's
+    // species set could have changed while open - a fresh set of buttons
+    // each time, not a morph, since owning/running out of a species is rare
+    // enough not to need one.
     function renderSeedPetals() {
       var container = document.getElementById('seed-petals');
-      var items;
-      if (seedLevel === 'species') {
-        items = ownedSpeciesKeys().map(function (sk) {
-          var s = speciesFor(sk);
-          var owned = ownedSeedVariantsOfSpecies(sk);
-          // Rarest owned seed color of this species, same idea as the
-          // journal's bookmark strip - a species you can plant six colors of
-          // shows its rarest one, not always the base color.
-          var repColor = owned.length ? parseVariant(owned[owned.length - 1]).color : s.base;
-          return { key: sk, iconHtml: speciesChip(s, repColor, 26), count: speciesSeedCount(sk), title: s.name };
-        });
-      } else {
-        var s2 = speciesFor(seedSpecies);
-        items = ownedSeedVariantsOfSpecies(seedSpecies).map(function (vk) {
-          var v = parseVariant(vk);
-          return { key: vk, iconHtml: speciesChip(s2, v.color, 26), count: state.seeds[vk] || 0, title: variantName(vk) };
-        });
+      var keys = ownedSpeciesKeys();
+      var items = keys.map(function (sk) {
+        var s = speciesFor(sk);
+        var owned = ownedSeedVariantsOfSpecies(sk);
+        // Rarest owned seed color of this species, same idea as the
+        // journal's bookmark strip - a species you can plant six colors of
+        // shows its rarest one, not always the base color.
+        var repColor = owned.length ? parseVariant(owned[owned.length - 1]).color : s.base;
+        return { key: sk, iconHtml: speciesChip(s, repColor, 26), count: speciesSeedCount(sk), title: s.name };
+      });
+      container.innerHTML = items.map(function (it) {
+        return '<button class="tool-btn seed-petal' + (it.key === seedColorSpecies ? ' selected' : '') +
+          '" data-key="' + it.key + '" title="' + it.title +
+          '" onclick="onSeedPetalTap(\'' + it.key + '\')">' + it.iconHtml + seedCountBadgeHtml(it.count) + '</button>';
+      }).join('');
+      if (seedRailOpen) {
+        var slots = keys.map(function (k, i) { return { dx: 0, dy: (i + 1) * SEED_ROW }; });
+        animatePetalsOpen('seed-petals', slots, 0);
       }
+    }
+    // Rebuilds the color flyout for whichever species is open (seedColorSpecies),
+    // or clears it. Anchored to that species' own row so the colors visibly
+    // fly out to the left of the row you tapped, alongside the species
+    // column rather than replacing it.
+    function renderSeedColorPetals() {
+      var container = document.getElementById('seed-color-petals');
+      if (!seedColorSpecies) {
+        Array.prototype.slice.call(container.children).forEach(function (el) {
+          el.style.transform = ''; el.style.transitionDelay = '';
+        });
+        container.classList.remove('open');
+        container.innerHTML = '';
+        return;
+      }
+      var idx = ownedSpeciesKeys().indexOf(seedColorSpecies);
+      if (idx < 0) { seedColorSpecies = null; renderSeedColorPetals(); return; } // stale - species ran out
+      var rowDy = (idx + 1) * SEED_ROW;
+      var s2 = speciesFor(seedColorSpecies);
+      var vks = ownedSeedVariantsOfSpecies(seedColorSpecies);
+      var items = vks.map(function (vk) {
+        var v = parseVariant(vk);
+        return { key: vk, iconHtml: speciesChip(s2, v.color, 26), count: state.seeds[vk] || 0, title: variantName(vk) };
+      });
       container.innerHTML = items.map(function (it) {
         return '<button class="tool-btn seed-petal" data-key="' + it.key + '" title="' + it.title +
           '" onclick="onSeedPetalTap(\'' + it.key + '\')">' + it.iconHtml + seedCountBadgeHtml(it.count) + '</button>';
       }).join('');
-      if (seedRailOpen) animateSeedFanOpen();
+      var slots = vks.map(function (k, i) { return { dx: -(i + 1) * SEED_COLOR_ROW, dy: rowDy }; });
+      animatePetalsOpen('seed-color-petals', slots, rowDy);
     }
 
     // ---- Open/close and selection ------------------------------------------
-    // originDx/originDy default to 0,0 (the pouch icon) - the species level
-    // always opens from there; only the species -> color drill-in passes a
-    // real origin, see onSeedPetalTap below.
-    function openSeedFan(level, species, originDx, originDy) {
-      seedLevel = level;
-      seedSpecies = species;
-      seedFanOriginDx = originDx || 0;
-      seedFanOriginDy = originDy || 0;
+    function openSeedRail() {
       seedRailOpen = true;
+      seedColorSpecies = null;
       renderSeedPetals();
+      renderSeedColorPetals(); // clears any stale flyout from a previous session
     }
-    function closeSeedFan() {
+    function closeSeedRail() {
       var container = document.getElementById('seed-petals');
       Array.prototype.slice.call(container.children).forEach(function (el) {
         el.style.transform = ''; el.style.transitionDelay = '';
       });
       container.classList.remove('open');
       seedRailOpen = false;
+      seedColorSpecies = null;
+      renderSeedColorPetals(); // retracts the color flyout too, if one was open
       clearSeedRailHover();
     }
-    // A species petal drills into its colors without equipping or closing;
-    // a color petal equips and closes. Shared by both the tap-then-tap path
-    // (each petal's own onclick) and the hold-and-drag release path below.
+    // A species row toggles its own color flyout open/closed without
+    // equipping or closing the column - tapping a different species while
+    // one is already open swaps which row's colors are showing. A color
+    // petal equips and closes everything. Shared by both the tap-then-tap
+    // path (each petal's own onclick) and the hold-and-drag release path
+    // below. Species keys never contain a colon; variant keys always do
+    // (see variantKey) - cheap enough to tell the two apart by that alone.
     function onSeedPetalTap(key) {
-      if (seedLevel === 'species') {
-        var el = seedPetalEl(key);
-        var dx = el ? parseFloat(el.dataset.dx) || 0 : 0;
-        var dy = el ? parseFloat(el.dataset.dy) || 0 : 0;
-        openSeedFan('color', key, dx, dy);
+      if (key.indexOf(':') === -1) {
+        seedColorSpecies = (seedColorSpecies === key) ? null : key;
+        renderSeedPetals();       // to (un)highlight the tapped row
+        renderSeedColorPetals();
         vibrate(10);
       } else {
         equipSeed(key);
       }
     }
     function equipSeed(vk) {
-      closeSeedFan();
+      closeSeedRail();
       if (!(state.seeds[vk] > 0)) return; // stale tap - already spent since the fan opened
       if (activeTool) setActiveTool(null); // a tool, a seed and a sprinkler are mutually exclusive modes
       if (equippedSprinkler) unequipSprinkler();
       closePlantPanel(); closeShop();
       equippedSeed = vk;
-      seedLevel = 'species'; seedSpecies = null; // reset for next time the fan opens
       setSeedHint(false); // the tutorial's pouch pointer, if any - the player just found it
       renderSeedToggle();
       popSeedToggle();
@@ -4468,7 +4472,6 @@
     }
     function unequipSeed() {
       equippedSeed = null;
-      seedLevel = 'species'; seedSpecies = null;
       renderSeedToggle();
       popSeedToggle();
       updateHUD();
@@ -4494,8 +4497,11 @@
     // ---- Pointer plumbing (tap-open-then-tap, or hold-and-drag-to-select) --
     var seedRailPointer = null;
     var SEED_HOVER_PAD = 10;
-    function hitTestSeedPetal(x, y) {
-      var petals = document.getElementById('seed-petals').children;
+    // Color petals are checked first - they draw over the species column
+    // they flew out from, so a finger resting where the two visually
+    // overlap should hit whichever is actually on top.
+    function hitTestInContainer(containerId, x, y) {
+      var petals = document.getElementById(containerId).children;
       for (var i = 0; i < petals.length; i++) {
         var r = petals[i].getBoundingClientRect();
         if (x >= r.left - SEED_HOVER_PAD && x <= r.right + SEED_HOVER_PAD &&
@@ -4503,7 +4509,13 @@
       }
       return null;
     }
-    function seedPetalEl(key) { return document.querySelector('#seed-petals [data-key="' + key + '"]'); }
+    function hitTestSeedPetal(x, y) {
+      return hitTestInContainer('seed-color-petals', x, y) || hitTestInContainer('seed-petals', x, y);
+    }
+    function seedPetalEl(key) {
+      return document.querySelector('#seed-color-petals [data-key="' + key + '"]') ||
+        document.querySelector('#seed-petals [data-key="' + key + '"]');
+    }
     function markSeedHoverOff(key) { var el = seedPetalEl(key); if (el) el.classList.remove('drag-hover'); }
     function clearSeedRailHover() {
       if (!seedRailPointer || !seedRailPointer.hoverKey) return;
@@ -4518,7 +4530,7 @@
       }
       ev.preventDefault();
       seedRailPointer = { id: ev.pointerId, startedOpen: seedRailOpen, hoverKey: null };
-      if (!seedRailOpen) { openSeedFan('species', null); vibrate(10); }
+      if (!seedRailOpen) { openSeedRail(); vibrate(10); }
     }
     function onSeedPointerMove(ev) {
       if (!seedRailPointer || ev.pointerId !== seedRailPointer.id) return;
@@ -4541,7 +4553,7 @@
         onSeedPetalTap(sp.hoverKey);
         return;
       }
-      if (sp.startedOpen) closeSeedFan();
+      if (sp.startedOpen) closeSeedRail();
     }
     document.getElementById('seed-toggle').addEventListener('pointerdown', onSeedPointerDown);
     window.addEventListener('pointermove', onSeedPointerMove);
@@ -5549,15 +5561,16 @@
       var rail = document.getElementById('tool-rail');
       if (railOpen && !rail.contains(e.target)) setRailOpen(false);
       // composedPath(), not contains(e.target): tapping a species petal
-      // rebuilds #seed-petals' innerHTML (to the color set) from inside that
-      // same click's own bubble phase, which detaches the clicked node
-      // before this listener runs - contains() would then see a node that
-      // is no longer anywhere in the document and wrongly close the fan it
-      // just opened one level deeper. composedPath() is captured at
-      // dispatch time, before any handler had a chance to mutate the DOM.
+      // rebuilds #seed-petals' innerHTML (to redraw its selected highlight)
+      // from inside that same click's own bubble phase, which detaches the
+      // clicked node before this listener runs - contains() would then see
+      // a node that is no longer anywhere in the document and wrongly close
+      // the column it just opened a color flyout on. composedPath() is
+      // captured at dispatch time, before any handler had a chance to
+      // mutate the DOM.
       var srail = document.getElementById('seed-rail');
       var path = e.composedPath ? e.composedPath() : [e.target];
-      if (seedRailOpen && path.indexOf(srail) === -1) closeSeedFan();
+      if (seedRailOpen && path.indexOf(srail) === -1) closeSeedRail();
     });
 
     function onRecenter() {
@@ -5624,8 +5637,9 @@
         'visit moves it up a stage - seed to sprout to bloom to a full flourishing cluster. Three walks ' +
         'back, three stages.</p>' +
         '<p>Your tools live in the toolbox, top left: the watering can, the shears for collecting, and $ ' +
-        'for selling. Tap it and the three fly out - tap the one you want, or hold the toolbox down and ' +
-        'drag straight to it. Use it on as many flowers as you like, then tap it again to put it away.</p>' +
+        'for selling. Tap it and the three drop down the left edge - tap the one you want, or hold the ' +
+        'toolbox down and drag straight to it. Use it on as many flowers as you like, then tap it again ' +
+        'to put it away.</p>' +
         '<p>Harvest it to keep for yourself or sell to the shop for Petals \u{1F338} - spend those on more ' +
         'seeds. Every flower costs and sells for the same, so plant whichever ones you like the look of.</p>' +
         '<p>Nothing here can be lost. Go a couple of days without watering and a flower just looks a bit ' +
@@ -5648,14 +5662,15 @@
       closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); // only one full-screen panel at a time
       var s = state.stats;
       document.getElementById('howto-body').innerHTML =
-        '<p><b>Plant</b> - tap the seed pouch (top right), pick a species, then a color, then tap the ' +
-        'ground within a couple tiles of you to plant it. A bare tap with nothing equipped won\'t plant ' +
-        'anything on its own - it just points you back at the pouch.</p>' +
+        '<p><b>Plant</b> - tap the seed pouch (top right) and every species you hold seeds of drops down ' +
+        'the right edge. Tap one and its colors fly out to the left of that row - tap a color to equip ' +
+        'it, then tap the ground within a couple tiles of you to plant it. A bare tap with nothing ' +
+        'equipped won\'t plant anything on its own - it just points you back at the pouch.</p>' +
         '<p><b>Your tools</b> - tap the toolbox (top left) and the watering can, shears (collect) and $ ' +
-        '(sell) fly out - fertilizer joins them once you own a bag. Tap the one you want, or hold the ' +
-        'toolbox down and drag straight to it and let go. It replaces the toolbox while equipped - tap it ' +
-        'again to put it away. Use it on as many flowers as you like first. Tapping a flower with no tool ' +
-        'in hand just opens its details.</p>' +
+        '(sell) drop down the left edge - fertilizer joins them once you own a bag. Tap the one you want, ' +
+        'or hold the toolbox down and drag straight down to it and let go. It replaces the toolbox while ' +
+        'equipped - tap it again to put it away. Use it on as many flowers as you like first. Tapping a ' +
+        'flower with no tool in hand just opens its details.</p>' +
         '<p><b>Water</b> - pick up the watering can and tap each flower you want watered. You have to be ' +
         'within a couple tiles of it.</p>' +
         '<p><b>Grow</b> - watering is what grows a plant, not just time. Every 12 hours or so it becomes ' +

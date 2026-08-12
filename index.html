@@ -1136,7 +1136,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.8.0</span>
+      <span id="game-version">v2.8.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -4908,11 +4908,11 @@
     function neighborsOf(q, r) {
       return CELL_NEIGHBORS.map(function (d) { return { q: q + d[0], r: r + d[1] }; });
     }
-    // Free means nothing of yours and no wild flower - a bred seedling must
-    // never overwrite something already growing there.
+    // Free means nothing of yours, no wild flower, and no placed sprinkler -
+    // a bred seedling must never land on top of something already there.
     function cellFree(q, r) {
       var k = cellKey(q, r);
-      return !state.plants[k] && !state.wild[k];
+      return !state.plants[k] && !state.wild[k] && !state.sprinklers[k];
     }
     function colorOfPlant(p) { return p.color || baseColorOf(p.species); }
 

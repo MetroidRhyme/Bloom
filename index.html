@@ -1091,6 +1091,9 @@
        cross's partner is always a random draw rather than a choice - see
        openBreedPicker. */
     #modal-body p:last-child { margin-bottom: 0; }
+    #modal-body ul { margin: 0; padding-left: 22px; }
+    #modal-body li { margin-bottom: 8px; }
+    #modal-body li:last-child { margin-bottom: 0; }
     #modal-ok-btn {
       display: block; width: 100%; padding: 14px; border: none; border-radius: 16px;
       font-size: 15px; font-weight: 800; cursor: pointer; color: #fff;
@@ -1379,6 +1382,59 @@
       'It sprouted! \u{1F331}',
       'It burst into bloom! \u{1F338}',
       'It flourished into a full cluster! \u{1F337}'
+    ];
+
+    // Player-facing release notes for the "What's New" popup (see
+    // maybeShowWhatsNew/openWhatsNew) - newest first. Only the entry
+    // matching the live #game-version is ever shown, so this only needs to
+    // go back far enough to cover a player who skipped a few updates, not
+    // the whole project history. Written for a player, not a changelog for
+    // developers - what changed for someone playing the game, never the
+    // code/data change behind it. Deliberately does NOT include an entry
+    // for the version this popup itself ships in - that gets added later,
+    // alongside the version bump.
+    var CHANGELOG = [
+      { version: 'v2.11.2', changes: [
+        'Fixed the toolbox and seed pouch showing through the Milestones page.',
+        'Fixed an annoying sideways wiggle when scrolling the Milestones page.'
+      ] },
+      { version: 'v2.11.1', changes: [
+        'Flowers grow a lot faster now - about every 90 minutes instead of every ' +
+          '12 hours, so your first flower can flourish in about half a day instead ' +
+          'of three or four.'
+      ] },
+      { version: 'v2.11.0', changes: [
+        'The toolbox and seed pouch now drop straight down the edge of the screen ' +
+          'instead of fanning out in an arc.',
+        'Tapping a seed species flies its colors out to the side instead of ' +
+          'replacing it, so it\'s easier to see what you\'re picking.'
+      ] },
+      { version: 'v2.10.1', changes: [
+        'Crossbreeding now only works between two flowers of the same kind.',
+        'Fixed a plant panel message that wrongly said a different-kind neighbour ' +
+          'was "still resting" when it was never eligible to cross in the first place.'
+      ] },
+      { version: 'v2.10.0', changes: [
+        'New: press and drag with the watering can, shears, $, or a seed equipped ' +
+          'to water, harvest, sell, or plant a whole area at once instead of one ' +
+          'tile at a time.'
+      ] },
+      { version: 'v2.9.0', changes: [
+        'Fixed sprinklers not actually watering nearby flowers on their own.',
+        'Sprinklers now show a little droplet animation when they water a flower ' +
+          'for you.'
+      ] },
+      { version: 'v2.8.1', changes: [
+        'Fixed a new crossbred seedling sometimes popping up on top of a placed ' +
+          'sprinkler.'
+      ] },
+      { version: 'v2.8.0', changes: [
+        'Fixed flower icons sometimes growing bigger than their tile and spilling ' +
+          'into neighbouring ones.',
+        'Watering and harvesting no longer stack up a wall of toast notifications.',
+        'Fixed the welcome-back tour not returning after just backgrounding the ' +
+          'app for a while.'
+      ] }
     ];
 
     // Every species is bought by name and every species is worth exactly the
@@ -2166,7 +2222,18 @@
         // this feature land here, and both correctly get no tour on the
         // very next load (nothing to compare against), only from the visit
         // after that once a real checkpoint exists.
-        lastSeenAt: null
+        lastSeenAt: null,
+        // Version string the player last actually saw (via #game-version),
+        // for the "What's New" popup - see maybeShowWhatsNew/openWhatsNew.
+        // null means "never recorded yet", which covers both a brand-new
+        // save (nothing to compare against, and it would just be noise
+        // before the tutorial even runs) and an existing save from before
+        // this feature existed (which lived through every prior version
+        // with no popup, so it shouldn't get one all at once now either).
+        // Both cases are handled the same way: maybeShowWhatsNew() sees the
+        // null, shows nothing, and silently records the current version so
+        // the mechanism starts working from the *next* update onward.
+        lastSeenVersion: null
       };
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return def;
@@ -2233,7 +2300,14 @@
           cheatMode: !!parsed.cheatMode,
           gridV2: true, // migrated (or already was) above - never re-run the re-key on future loads
           gpsPrimerSeen: true, // see def.gpsPrimerSeen - any pre-existing save always skips the primer
-          lastSeenAt: typeof parsed.lastSeenAt === 'number' ? parsed.lastSeenAt : null
+          lastSeenAt: typeof parsed.lastSeenAt === 'number' ? parsed.lastSeenAt : null,
+          // Same "never claw back, never dump noise on an existing player"
+          // fallback shape as the fields above: a save that predates this
+          // feature has no lastSeenVersion, same as a brand-new save, and
+          // both should fall through to def's null (never parsed.true-ish
+          // default here, since there is no "already had it" concept for a
+          // popup that did not exist yet).
+          lastSeenVersion: typeof parsed.lastSeenVersion === 'string' ? parsed.lastSeenVersion : null
         };
       } catch (e) {
         return def; // corrupted save falls back to defaults rather than breaking load
@@ -2275,7 +2349,7 @@
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
         fertReady: state.fertReady, fertUnlocked: state.fertUnlocked,
         cheatMode: state.cheatMode, gridV2: state.gridV2, gpsPrimerSeen: state.gpsPrimerSeen,
-        lastSeenAt: state.lastSeenAt
+        lastSeenAt: state.lastSeenAt, lastSeenVersion: state.lastSeenVersion
       }));
     }
 
@@ -5183,10 +5257,15 @@
       // A fertilizer modal left unanswered (see maybeStartFertTutorial) resumes
       // here too, ahead of the welcome-back tour, for the same reason as the
       // tutorialDone branch above it - it would otherwise compete with it.
+      // The "What's New" popup (see maybeShowWhatsNew) is checked last,
+      // after every onboarding step is actually done, so a returning player
+      // never sees a changelog before they have even planted a seed; it
+      // only ever wins this lock's modal slot over the welcome-back tour
+      // when there is actually something new to show.
       if (!state.seenWelcome) openWelcome();
       else if (!state.tutorialDone) startTutorial();
       else if (state.fertReady && !state.fertUnlocked) openFertTutorial();
-      else buildAndStartWelcomeBackTour(lastSeen, goneWild);
+      else if (!maybeShowWhatsNew()) buildAndStartWelcomeBackTour(lastSeen, goneWild);
 
       // Advance the checkpoint on every lock, regardless of which branch
       // above ran - a brand-new save's very first lock needs this too, or
@@ -7005,6 +7084,55 @@
         closeModal();
         syncFertUnlockUI();
         toast('Fertilizer is in the Shop, and Crossing Notes is in the menu \u{1F338}');
+      };
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // ---------------------------------------------------------------------
+    //  WHAT'S NEW
+    //  Called from onGpsLocked, after the onboarding/fertilizer branches
+    //  above it - see that chain's own comments for why order matters. Only
+    //  opens the popup when the save actually remembers a *different*,
+    //  older version (see CHANGELOG/state.lastSeenVersion). A null
+    //  lastSeenVersion (brand-new save, or an existing save from before
+    //  this feature existed) is deliberately silent: it just starts
+    //  tracking from here so the mechanism is live for the *next* update,
+    //  rather than dumping a changelog on someone mid-tutorial or
+    //  surfacing "what's new" for versions a returning player already
+    //  lived through unannounced.
+    // ---------------------------------------------------------------------
+    // Returns true if it opened the popup (so onGpsLocked's caller can skip
+    // the welcome-back tour on this same lock, the same way it already
+    // defers to the fertilizer/tutorial modals above it), false otherwise.
+    function maybeShowWhatsNew() {
+      var current = document.getElementById('game-version').textContent;
+      if (!state.lastSeenVersion) {
+        // Nothing to compare against - just start remembering from now on.
+        state.lastSeenVersion = current;
+        saveState();
+        return false;
+      }
+      if (state.lastSeenVersion === current) return false;
+      openWhatsNew(current);
+      return true;
+    }
+
+    function openWhatsNew(current) {
+      var entry = CHANGELOG.filter(function (e) { return e.version === current; })[0];
+      var changes = entry ? entry.changes : [];
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = "What's New in " + current;
+      document.getElementById('modal-body').innerHTML =
+        '<ul>' + changes.map(function (c) { return '<li>' + c + '</li>'; }).join('') + '</ul>';
+      document.getElementById('modal-ok-btn').textContent = 'Got it \u{1F331}';
+      // Recorded on close, not on open: if the app crashes or the tab closes
+      // with the modal still up, lastSeenVersion is still the old value, so
+      // the popup correctly shows again next launch instead of silently
+      // being marked "seen" for a version the player never actually read.
+      document.getElementById('modal-ok-btn').onclick = function () {
+        state.lastSeenVersion = current;
+        saveState();
+        closeModal();
       };
       document.getElementById('modal-overlay').classList.add('open');
     }

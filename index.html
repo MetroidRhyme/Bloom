@@ -503,6 +503,19 @@
       100% { opacity: 0; transform: translateY(30px) scale(1); }
     }
 
+    /* A sprinkler's own droplets (see playSprinklerDroplets) - same teardrop
+       shape as .water-drop for visual continuity, but positioned via a live
+       JS transform every frame rather than a fixed CSS keyframe, since each
+       one's path (sprinkler -> a random burst point -> the flower) is
+       different every time. left/top stay at 0 - the transform is the only
+       thing that ever moves it, matching the fx-layer's own coordinate
+       space (map.latLngToContainerPoint). */
+    .sprinkler-drop {
+      position: absolute; left: 0; top: 0; width: 6px; height: 8px;
+      background: var(--blue); opacity: 0; border-radius: 50% 50% 55% 55% / 62% 62% 40% 40%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    }
+
     /* ================= SHOP PANEL ================= */
     /* Full-screen takeover rather than a bottom sheet - stepping up to the
        stand should feel like leaving the map for a moment, not peeking at a
@@ -1136,7 +1149,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.8.1</span>
+      <span id="game-version">v2.9.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -2593,41 +2606,141 @@
       toast('\u{1F4A6} Sprinklers unlocked! Check the Shop \u{1F338}');
     }
 
-    // Runs alongside tickPlants (same three call sites: boot, onGpsLocked,
-    // and the 60s interval) rather than living inside it - tickPlants is
+    // Runs on its own short interval (SPRINKLER_TICK_MS, well under
+    // tickPlants' 60s) rather than living inside tickPlants - tickPlants is
     // deliberately a pure read (see its own comment above), and this one
     // genuinely mutates plants, exactly the way waterPlant does, just
-    // without a finger behind it. Each adjacent plant only ever advances one
-    // stage per call, same as a real watering visit (applyWatering sets
-    // readyAt relative to *now*, not to the missed threshold), so there is
-    // no way to bank multiple stages by leaving the sprinkler running
-    // offline - it simply resumes the instant the game is open again,
-    // consistent with the rest of the growth engine's no-punishment design.
+    // without a finger behind it. Purely detection: for every adjacent
+    // plant that newly qualifies, it hands off to startSprinklerWatering
+    // (below) and moves on - the actual watering happens at the end of that
+    // plant's own animation, not here, so a garden full of sprinklers
+    // doesn't all water in perfect lockstep. sprinklerAnimKeys is the guard
+    // against re-starting a plant that's already mid-flight; each plant
+    // only ever advances one stage per completed watering, same as a real
+    // watering visit (applyWatering sets readyAt relative to *now*, not to
+    // the missed threshold), so there is no way to bank multiple stages by
+    // leaving a sprinkler running offline - it simply resumes the instant
+    // the game is open again.
+    var SPRINKLER_TICK_MS = 1000;
     function tickSprinklers() {
       if (!Object.keys(state.sprinklers).length) return;
-      var now = Date.now(), watered = 0, grew = 0;
+      var now = Date.now();
       Object.keys(state.sprinklers).forEach(function (skey) {
         var s = state.sprinklers[skey];
         CELL_NEIGHBORS.forEach(function (d) {
-          var p = state.plants[cellKey(s.q + d[0], s.r + d[1])];
+          var pkey = cellKey(s.q + d[0], s.r + d[1]);
+          if (sprinklerAnimKeys[pkey]) return; // already on its way to this one
+          var p = state.plants[pkey];
           if (!p) return;
           var wilted = (now - p.lastWateredAt) >= WATER_DURATION_MS;
           var ready = p.stage < MAX_STAGE && now >= p.readyAt;
           if (!wilted && !ready) return; // already fully topped up - nothing to do here
-          var res = applyWatering(p, now);
-          watered++;
-          if (res.grew) grew++;
+          startSprinklerWatering(pkey, s);
         });
       });
-      if (watered === 0) return;
+    }
+
+    // ---- Sprinkler watering animation --------------------------------------
+    // A placed sprinkler doesn't reach out and touch a flower the way a
+    // watering-can tap does, so the state change needs its own signal, the
+    // same reasoning waterWithCan already applies to a manual tap: play the
+    // animation, then apply the real mutation once it lands, so the
+    // animation reads as the cause of the watering rather than decoration
+    // tacked on after the fact. A beat passes first (SPRINKLER_ANIM_DELAY_MS
+    // - "the sprinkler noticed"), then a handful of droplets burst outward
+    // from the sprinkler in random directions and curve back in to converge
+    // on the flower.
+    var SPRINKLER_ANIM_DELAY_MS = 1000; // the pause between "needs water" and the droplets launching
+    var SPRINKLER_DROPLET_COUNT = 4;
+    var SPRINKLER_DROPLET_MS = 750;     // flight time per droplet, burst-out to landing
+    // Plant key -> true while that plant has a sprinkler watering event in
+    // flight (the delay, or the droplets themselves) - guards tickSprinklers
+    // from starting a second one on top of it before the first lands.
+    var sprinklerAnimKeys = {};
+
+    function startSprinklerWatering(pkey, sprinkler) {
+      sprinklerAnimKeys[pkey] = true;
+      // Reduced motion collapses every animation to 0.01ms elsewhere in the
+      // game, so there's nothing to wait out here either - straight to the
+      // result, same as waterWithCan's own reduceMotion branch.
+      if (reduceMotion) { delete sprinklerAnimKeys[pkey]; finishSprinklerWatering(pkey); return; }
+      setTimeout(function () {
+        var p = state.plants[pkey];
+        if (!p) { delete sprinklerAnimKeys[pkey]; return; } // harvested during the delay
+        playSprinklerDroplets(sprinkler, pkey, function (landed) {
+          delete sprinklerAnimKeys[pkey];
+          if (landed) finishSprinklerWatering(pkey);
+        });
+      }, SPRINKLER_ANIM_DELAY_MS);
+    }
+
+    // Drives SPRINKLER_DROPLET_COUNT droplets along their own quadratic
+    // Bezier curve each frame: sprinkler -> a random outward point (the
+    // "burst") -> the flower (the "home in"). Recomputes both endpoints'
+    // screen position every frame (map.latLngToContainerPoint) rather than
+    // caching them once, so a pan or zoom mid-flight doesn't leave the
+    // droplets drifting off their real targets - same reasoning the fx-layer
+    // comment already gives for repositioning on 'move zoom'. Calls back
+    // with false (no watering applied) if the flower was harvested out from
+    // under the animation before it landed.
+    function playSprinklerDroplets(sprinkler, plantKey, onDone) {
+      var layer = document.getElementById('fx-layer');
+      var drops = [];
+      for (var i = 0; i < SPRINKLER_DROPLET_COUNT; i++) {
+        var el = document.createElement('div');
+        el.className = 'fx-item sprinkler-drop';
+        layer.appendChild(el);
+        drops.push({
+          el: el,
+          angle: Math.random() * Math.PI * 2,
+          burst: 10 + Math.random() * 16,   // px flung outward before curving toward the flower
+          delay: Math.random() * 160        // slight stagger so the burst doesn't read as one blob
+        });
+      }
+      var start = performance.now();
+      function frame(now) {
+        var p = state.plants[plantKey];
+        if (!p) { drops.forEach(function (d) { d.el.remove(); }); onDone(false); return; }
+        var s = map.latLngToContainerPoint([sprinkler.lat, sprinkler.lng]);
+        var e = map.latLngToContainerPoint([p.lat, p.lng]);
+        var allDone = true;
+        drops.forEach(function (d) {
+          var elapsed = now - start - d.delay;
+          if (elapsed < 0) { d.el.style.opacity = '0'; allDone = false; return; }
+          var frac = Math.min(1, elapsed / SPRINKLER_DROPLET_MS);
+          if (frac < 1) allDone = false;
+          var ctrlX = s.x + Math.cos(d.angle) * d.burst;
+          var ctrlY = s.y + Math.sin(d.angle) * d.burst;
+          var u = 1 - frac;
+          var x = u * u * s.x + 2 * u * frac * ctrlX + frac * frac * e.x;
+          var y = u * u * s.y + 2 * u * frac * ctrlY + frac * frac * e.y;
+          // Fade in fast, hold, fade out right at landing (reads as a small splash).
+          d.el.style.opacity = frac < 0.12 ? (frac / 0.12) : (frac > 0.82 ? Math.max(0, (1 - frac) / 0.18) : 1);
+          d.el.style.transform = 'translate(' + (x - 3) + 'px,' + (y - 4) + 'px)';
+        });
+        if (!allDone) requestAnimationFrame(frame);
+        else { drops.forEach(function (d) { d.el.remove(); }); onDone(true); }
+      }
+      requestAnimationFrame(frame);
+    }
+
+    // The actual mutation, applied once the droplets land - same worker
+    // waterPlant uses, just with its own messaging (no vibrate; a sprinkler
+    // acting on its own isn't something to buzz the player's phone over).
+    function finishSprinklerWatering(pkey) {
+      var p = state.plants[pkey];
+      if (!p) return;
+      var now = Date.now();
+      var res = applyWatering(p, now);
+      recomputePlant(p, now);
       saveState();
       renderPlants();
       updateHUD();
-      if (viewingKey && state.plants[viewingKey]) renderPlantPanel(viewingKey);
-      // Only the growth is worth a toast - a quiet cosmetic top-up (see
-      // WATER_DURATION_MS) would just be noise every tick a sprinkler runs.
-      if (grew > 0) {
-        toast('\u{1F4A6} Your sprinkler grew ' + grew + (grew === 1 ? ' flower' : ' flowers') + '!');
+      if (viewingKey === pkey) renderPlantPanel(pkey);
+      if (res.revealed) {
+        toast('\u{1F338} Your cross opened - it\'s a ' + variantName(res.revealed) + '!');
+      } else if (res.grew) {
+        toast('\u{1F4A6} ' + GROWTH_MESSAGES[p.stage]);
       }
     }
 
@@ -6475,7 +6588,12 @@
     renderSprinklers();         // placed sprinklers persist across sessions until picked back up
     updateHUD();
     updateCurrencyPill();
-    setInterval(function () { tickPlants(); tickSprinklers(); }, 60000);
+    setInterval(tickPlants, 60000);
+    // Its own, much shorter interval than tickPlants - a sprinkler is meant
+    // to read as "noticing" a flower needs water within about a second (see
+    // SPRINKLER_ANIM_DELAY_MS), not on the same minute-long cadence the
+    // player's own badges refresh on.
+    setInterval(tickSprinklers, SPRINKLER_TICK_MS);
   </script>
 </body>
 </html>

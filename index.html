@@ -790,7 +790,7 @@
     .pot-icon-art {
       display: block; width: 100%; height: 100%;
       filter: drop-shadow(0 3px 3px rgba(0,0,0,0.4));
-      transform: scaleY(1.08); transform-origin: bottom center;
+      transform: scaleY(1.16); transform-origin: bottom center;
     }
     /* Pushed well clear of the (now shelf-touching, much bigger) pot above
        it, onto the plank/floor the pot is resting on, rather than
@@ -1355,7 +1355,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.17.0</span>
+      <span id="game-version">v2.17.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1625,6 +1625,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.17.1', changes: [
+        'Greenhouse pots are a touch taller and now sit flush on their ' +
+          'shelf with zero gap, instead of floating just above it.',
+        'A potted flower\'s stem now visibly grows up out of the pot\'s ' +
+          'soil instead of appearing to float in front of the rim.',
+        'Fixed a broken pot that could render slightly clipped at the ' +
+          'bottom.'
+      ] },
       { version: 'v2.17.0', changes: [
         'Greenhouse pots are bigger and sit flush on their shelves, and a ' +
           'broken pot is no longer hidden behind its own price tag.',
@@ -4017,26 +4025,46 @@
     // own soil line sat, which is what lets the stem markup below be reused
     // with zero coordinate changes - it was always rooted at (50,92), a few
     // units below where the rim/soil line sits here too.
+    //
+    // Split into a back (this function - the container wall and shading) and
+    // a front (potRimFront, below) rather than one combined shape, so a stem
+    // can be sandwiched between them - see buildPottedVisual. Without the
+    // split, the stem (drawn on top of everything so it reads over the
+    // soil) also drew on top of the rim's own near edge, which looked like
+    // the stem was floating in front of the pot instead of growing out of
+    // it.
     function potBody() {
       return '<path d="M28 86 L72 86 L65 109 L35 109 Z" fill="' + POT_COLOR + '"/>' +
         '<path d="M50 86 L72 86 L65 109 L54 109 Z" fill="' + POT_COLOR_DARK + '" opacity="0.35"/>' +
-        '<path d="M28 86 L72 86 L70 90.5 L30 90.5 Z" fill="' + POT_COLOR_DARK + '" opacity="0.45"/>' +
-        '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + POT_COLOR_LIGHT + '"/>';
+        '<path d="M28 86 L72 86 L70 90.5 L30 90.5 Z" fill="' + POT_COLOR_DARK + '" opacity="0.45"/>';
     }
     // The little bump of soil a pot keeps, same layered-ellipse technique the
     // outdoor ground mound uses (flat fill, a raised mound, a highlight
-    // patch), just scaled down to a pot's opening.
+    // patch), just scaled down to a pot's opening. Stays entirely on the
+    // back layer, same as potBody - soil is what a stem grows OUT of, so it
+    // must never draw on top of one.
     function potSoil() {
       return '<ellipse cx="50" cy="87" rx="20.5" ry="3.2" fill="' + SOIL_DARK + '"/>' +
         '<ellipse cx="50" cy="85.5" rx="16" ry="2.6" fill="' + SOIL_MID + '"/>' +
         '<ellipse cx="50" cy="84.3" rx="8" ry="1.8" fill="' + SOIL_MID + '"/>' +
         '<ellipse cx="44" cy="84.8" rx="4.5" ry="1" fill="' + SOIL_LIGHT + '" opacity="0.55"/>';
     }
+    // The rim's own near edge - drawn AFTER the stem (see buildPottedVisual)
+    // so it sits in front of the stem's base, the same "something drawn last
+    // occludes the very bottom of the stem" trick the outdoor ground mound
+    // already uses (see groundNearRandom).
+    function potRimFront() {
+      return '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + POT_COLOR_LIGHT + '"/>';
+    }
 
     // Builds a potted plant at (species, color, stage) - stage 0 is pot +
     // soil only (an unplanted-but-usable pot; the outdoor ground stage 0 is
     // the same "nothing visible yet" convention), 1-3 reuse the exact same
-    // stem/head markup the map uses, just with no wind wrap.
+    // stem/head markup the map uses, just with no wind wrap. potRimFront is
+    // appended last regardless of stage, both to draw over a real stem's
+    // base and (at stage 0, where there's no stem to sandwich) simply to
+    // finish the pot - see potBody's own comment for why the rim isn't part
+    // of it.
     function buildPottedVisual(species, color, stage, px) {
       var defs = '<defs>' + HEAD_FX_DEFS + headClipDefs(species) + '</defs>' + fancyDefs(color);
       var body = potBody() + potSoil();
@@ -4054,7 +4082,13 @@
           shadow.markup +
           headGroup(species, color, front.cx, front.cy, { scale: front.scale });
       }
-      var vw = 100, vh = 112, dispH = Math.round(px * vh / vw);
+      body += potRimFront();
+      // vh trimmed to 109 (not the outdoor ground art's 112) - a pot's own
+      // lowest drawn pixel is y=109, so anything taller just left dead
+      // transparent space between the art and this box's own bottom edge,
+      // which is what a pot-slot's flex alignment (see .pot-slot) actually
+      // rests against the shelf below - see the GREENHOUSE PANEL CSS.
+      var vw = 100, vh = 109, dispH = Math.round(px * vh / vw);
       var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH +
         '" style="display:block">' + defs + body + '</svg>';
       return { html: html, w: px, h: dispH };
@@ -4089,20 +4123,29 @@
         '<ellipse cx="66.5" cy="86" rx="5.5" ry="2.4" fill="' + BROKEN_COLOR_LIGHT + '"/>' +
         '<ellipse cx="50" cy="88.5" rx="12" ry="2" fill="' + DRY_DIRT + '" opacity="0.7"/>';
     }
+    // Pivot/angle chosen so the rotated pot's lowest point lands right at
+    // y=109 (same floor every other pot shape uses - see buildBrokenVisual's
+    // own comment on vh) rather than overshooting it - the original
+    // rotate(78 46 100) actually pushed the pot down to y~=122, past the old
+    // vh=112 canvas entirely, so part of it was always being silently
+    // clipped off. Verified by rotating all four corners through the same
+    // math the browser uses and checking the resulting bounding box.
     function brokenToppled() {
-      return '<g transform="rotate(78 46 100)">' +
+      return '<g transform="rotate(82 54 92)">' +
         '<path d="M28 86 L72 86 L65 109 L35 109 Z" fill="' + BROKEN_COLOR + '"/>' +
         '<path d="M50 86 L72 86 L65 109 L54 109 Z" fill="' + BROKEN_COLOR_DARK + '" opacity="0.35"/>' +
         '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + BROKEN_COLOR_LIGHT + '"/>' +
         '</g>' +
-        '<ellipse cx="68" cy="106" rx="11" ry="3.2" fill="' + DRY_DIRT + '" opacity="0.75"/>' +
-        '<ellipse cx="61" cy="104.5" rx="5" ry="1.8" fill="' + DRY_DIRT + '" opacity="0.55"/>';
+        '<ellipse cx="72" cy="92" rx="11" ry="3.2" fill="' + DRY_DIRT + '" opacity="0.75"/>' +
+        '<ellipse cx="64" cy="89" rx="5" ry="1.8" fill="' + DRY_DIRT + '" opacity="0.55"/>';
     }
     var BROKEN_VARIANTS = [brokenCracked, brokenChipped, brokenToppled];
 
     function buildBrokenVisual(variantIndex, px) {
       var body = BROKEN_VARIANTS[variantIndex % BROKEN_VARIANTS.length]();
-      var vw = 100, vh = 112, dispH = Math.round(px * vh / vw);
+      // Same vh=109 trim as buildPottedVisual, and the same reason - see its
+      // own comment.
+      var vw = 100, vh = 109, dispH = Math.round(px * vh / vw);
       var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + px + '" height="' + dispH +
         '" style="display:block">' + body + '</svg>';
       return { html: html, w: px, h: dispH };

@@ -1395,7 +1395,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.20.2</span>
+      <span id="game-version">v2.21.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1671,6 +1671,16 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.21.0', changes: [
+        'Opening the game away from your garden now drops you on one of ' +
+          'your own flowers instead of stranding you at your current ' +
+          'location - no more scrolling around to find your plants when ' +
+          'you check in while out and about. If you\'re already near a ' +
+          'flower, nothing changes.',
+        'Placed sprinklers now sit right on the ground on a little dirt ' +
+          'patch, matching how flowers are planted, instead of floating on ' +
+          'an icon badge.'
+      ] },
       { version: 'v2.20.2', changes: [
         'Tapping bare ground you can reach no longer nags about seeds -' +
           ' "you\'re out of seeds" and "tap the seed pouch" are gone from' +
@@ -4632,17 +4642,37 @@
       return L.divIcon({ html: html, iconSize: [box, boxH], iconAnchor: [box / 2, pad + v.h * (61 / 112)], className: '' });
     }
 
-    // A placed sprinkler, drawn at a fixed size (it doesn't grow or wilt) on
-    // the same round backing the flowers use, so it reads as "a thing that
-    // lives on this tile" rather than a foreign UI element dropped on the
-    // map. sprinklerIconSVG is defined in the EQUIPMENT section further
-    // down, but shared as-is with the toggle button and the shop stand.
+    // A placed sprinkler, drawn at a fixed size (it doesn't grow or wilt),
+    // planted into its own small dirt mound - the same layered-ellipse look
+    // GROUND_MOUND gives a flower (dark base, a lighter raised mound, a
+    // small highlight, a couple of pebble-like flecks) - rather than the
+    // old disc-badge background (GitHub issue #18: "look a lot more like
+    // the flower icons... slight dirt pile underneath... no icon background
+    // or shape"). The mound is drawn in the SAME viewBox as
+    // sprinklerGlyphMarkup's stake (sprinklerGlyphMarkup/sprinklerIconSVG
+    // are defined in the EQUIPMENT section further down, shared as-is with
+    // the toggle button and shop stand, neither of which wants ground under
+    // it) - one shared coordinate space, not two separately-positioned
+    // pieces, so the stake's own bottom edge (local y=29) actually sits
+    // inside the mound instead of merely butting up against it.
     function makeSprinklerIcon() {
       var px = plantIconBase();
       _iconBuiltPx = px;
-      var w = Math.round(px * 0.7);
-      var html = '<div style="' + discStyle('#eaf3fb', w) + '">' + sprinklerIconSVG(Math.round(w * 0.66)) + '</div>';
-      return L.divIcon({ html: html, iconSize: [w, w], iconAnchor: [w / 2, w / 2], className: '' });
+      var w = Math.round(px * 0.6);
+      var vw = 32, vh = 38, dispH = Math.round(w * vh / vw);
+      var mound =
+        '<ellipse cx="16" cy="32" rx="14" ry="4.5" fill="#5c3a1f"/>' +
+        '<ellipse cx="16" cy="30.5" rx="11.5" ry="4.3" fill="#8a5a34"/>' +
+        '<ellipse cx="12" cy="29" rx="4.4" ry="1.3" fill="#b98a54" opacity="0.55"/>' +
+        '<ellipse cx="21" cy="30.2" rx="1.1" ry="0.8" fill="#6b431f" opacity="0.8"/>';
+      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + w + '" height="' + dispH +
+        '" style="display:block">' + mound + sprinklerGlyphMarkup() + '</svg>';
+      // Same waist-height anchor convention as makePlantIcon (61/112 down
+      // its own stem, not the ground itself - see that function's comment)
+      // scaled to this icon's own viewBox height, so the mound sinks toward
+      // the tile's bottom edge and the sprinkler sits even with a planted
+      // flower instead of floating high in the square.
+      return L.divIcon({ html: html, iconSize: [w, dispH], iconAnchor: [w / 2, dispH * (61 / 112)], className: '' });
     }
 
     // A single, bigger grass clump - the same clumpMarkup/CLUMP_SHAPE/
@@ -6114,18 +6144,30 @@
     // ---------------------------------------------------------------------
     var equippedSprinkler = false;
 
-    // Drawn stroke-and-fill like the tool icons, reused as-is for the map
-    // marker, this toggle button, and the shop's stand icon - one artwork,
-    // three places, like the watering can icon already is.
-    function sprinklerIconSVG(px) {
-      return '<svg viewBox="0 0 32 32" width="' + px + '" height="' + px + '">' +
-        '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#8a8f98"/>' +
+    // The raw stroke-and-fill shapes, split out from sprinklerIconSVG below
+    // so makeSprinklerIcon (map marker) can compose them into its own
+    // viewBox alongside a dirt mound - see that function's comment. Local
+    // coordinate space is a 32x32 square; callers that just want the icon
+    // as-is (the toggle button, the shop stand) go through sprinklerIconSVG.
+    function sprinklerGlyphMarkup() {
+      return '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#8a8f98"/>' +
         '<circle cx="16" cy="15" r="4.5" fill="#5b6b7a"/>' +
         '<g fill="none" stroke="#6ec6ff" stroke-width="2.2" stroke-linecap="round">' +
         '<path d="M16 11 C10 5 6 5 3 8"/>' +
         '<path d="M16 10 C16 3 16 3 16 2"/>' +
         '<path d="M16 11 C22 5 26 5 29 8"/>' +
-        '</g></svg>';
+        '</g>';
+    }
+
+    // Drawn stroke-and-fill like the tool icons, reused as-is for this
+    // toggle button and the shop's stand icon - one artwork, two places,
+    // like the watering can icon already is. The map marker (makeSprinklerIcon)
+    // uses sprinklerGlyphMarkup() directly instead, so it can share a
+    // viewBox with its own dirt mound rather than wrapping this fixed
+    // 32x32 square.
+    function sprinklerIconSVG(px) {
+      return '<svg viewBox="0 0 32 32" width="' + px + '" height="' + px + '">' +
+        sprinklerGlyphMarkup() + '</svg>';
     }
 
     function renderSprinklerToggle() {
@@ -6445,6 +6487,33 @@
       _circleAnimRAF = requestAnimationFrame(step);
     }
 
+    // Issue #17: "it's hard because I need to scroll all the way down to
+    // where my house is on the map" - on the very first GPS lock of a
+    // session, a player whose flowers are nowhere near wherever they
+    // happen to be standing right now (out running errands, say) used to
+    // always get dropped on their own position and have to go hunt the
+    // garden down by hand. If they're not within PLANT_RANGE of any of
+    // their own planted flowers right now, land the initial view on a
+    // randomly-picked one of those flowers instead - still findable at a
+    // glance - falling back to the player's own position when they have no
+    // flowers planted yet, or when they're already standing near one (a
+    // player working their own garden sees exactly the old behavior).
+    // Deliberately only affects this one first-lock framing; every GPS fix
+    // after this still follows the player as usual (see the
+    // state.following branch below/onRecenter) - it's the "where do I open
+    // to" decision, not a standing "show my flowers" mode.
+    function pickInitialCameraTarget(q, r, playerLatLng) {
+      var keys = Object.keys(state.plants);
+      if (!keys.length) return { lat: playerLatLng.lat, lng: playerLatLng.lng, onFlower: false };
+      var nearOwnFlower = keys.some(function (k) {
+        var p = state.plants[k];
+        return cellDist(q, r, p.q, p.r) <= PLANT_RANGE;
+      });
+      if (nearOwnFlower) return { lat: playerLatLng.lat, lng: playerLatLng.lng, onFlower: false };
+      var pick = state.plants[keys[Math.floor(Math.random() * keys.length)]];
+      return { lat: pick.lat, lng: pick.lng, onFlower: true };
+    }
+
     function onLocationUpdate(pos) {
       document.getElementById('gps-denied-banner').classList.remove('open'); // any fix clears a prior denial
       var lat = pos.coords.latitude, lng = pos.coords.longitude;
@@ -6465,7 +6534,13 @@
           color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
         }).addTo(map);
-        map.setView([c.lat, c.lng], 17);
+        var initialTarget = pickInitialCameraTarget(h.q, h.r, c);
+        map.setView([initialTarget.lat, initialTarget.lng], 17);
+        // Landed on a flower instead of the player - same reasoning as
+        // panMapToPlant: leave state.following false so the very next GPS
+        // fix doesn't immediately yank the view back to the player and
+        // undo the point of centering here in the first place.
+        if (initialTarget.onFlower) { state.following = false; saveState(); }
         onGpsLocked();
       } else if (h.q !== userCellQ || h.r !== userCellR) {
         var fromRing = cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE);

@@ -1392,7 +1392,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.19.0</span>
+      <span id="game-version">v2.19.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1673,6 +1673,15 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.19.1', changes: [
+        'The Flower Journal now credits a flower the moment you actually ' +
+          'see it bloom, instead of only once you extract its seeds or ' +
+          'sell it - a flower left blooming on the vine still counts.',
+        'Fixed dragging to plant a whole row of seeds sometimes leaving ' +
+          'the seed pouch stuck open with nothing left in it - it now ' +
+          'puts itself away the instant the last seed is planted, same ' +
+          'as a single tap already did.'
+      ] },
       { version: 'v2.19.0', changes: [
         'Sprinklers now keep watering while you are away - when you get ' +
           'back, any of their flowers that would have been watered in the ' +
@@ -2866,24 +2875,28 @@
       saveState();
     }
 
-    // One-time catch-up for anything already blooming the moment
-    // journal-on-bloom discovery shipped (see discoverVariant/waterPlant) -
-    // discoverVariant only ever fires from the exact instant reachedBloom
-    // flips false->true, so a flower that had already crossed that line
-    // under the older Keep-only journal would otherwise sit blooming on the
-    // map forever without ever showing up in the collection. Skips anything
-    // still mystery - that reveal (and its own discovery) hasn't happened
-    // yet and shouldn't be forced here.
-    (function backfillBloomedIntoJournal() {
+    // One-time catch-up for anything already blooming - on the map or in a
+    // greenhouse pot - the moment grown-on-bloom crediting shipped (issue
+    // #13, see applyWatering). The credit only ever fires from the exact
+    // instant reachedBloom flips false->true, so a flower that had already
+    // crossed that line under the old harvest-only tally (or an even older
+    // save, from before journal-on-bloom discovery existed at all) would
+    // otherwise sit blooming forever without ever counting. grownCredited is
+    // the same flag applyWatering/harvestPlant/harvestPottedPlant use to
+    // guard against double-crediting, so anything already flagged is skipped
+    // - this can safely run on every load. Skips anything still mystery -
+    // that reveal (and its own credit) hasn't happened yet and shouldn't be
+    // forced here.
+    (function backfillGrownCreditForBloomed() {
       var changed = false;
-      Object.keys(state.plants).forEach(function (key) {
-        var p = state.plants[key];
-        if (p.stage < 2 || p.mystery) return;
-        var vk = variantKey(p.species, colorOfPlant(p));
-        if (state.inventory[vk]) return;
-        discoverVariant(vk);
+      function creditIfBloomed(p) {
+        if (!p || p.stage < 2 || p.mystery || p.grownCredited) return;
+        p.grownCredited = true;
+        recordGrown(variantKey(p.species, colorOfPlant(p)));
         changed = true;
-      });
+      }
+      Object.keys(state.plants).forEach(function (key) { creditIfBloomed(state.plants[key]); });
+      (state.greenhouse.pots || []).forEach(function (pot) { creditIfBloomed(pot && pot.plant); });
       if (changed) saveState();
     })();
 
@@ -3014,7 +3027,7 @@
       state.plants[key] = {
         q: q, r: r, lat: c.lat, lng: c.lng, species: v.species, color: v.color,
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
-        reachedBloom: false, reachedFlourish: false
+        reachedBloom: false, reachedFlourish: false, grownCredited: false
       };
       state.stats.planted++;
       saveState();
@@ -3046,11 +3059,14 @@
         if (p.stage >= 2 && !p.reachedBloom) {
           p.reachedBloom = true;
           state.stats.bloomed++;
-          // Discovered the moment it's actually seen in bloom, not only if
-          // it's later extracted or sold - growing it is the whole point, so
-          // the journal shouldn't require a second decision on top of that.
-          // discoverVariant never touches the grown tally, only a harvest does.
-          discoverVariant(variantKey(p.species, colorOfPlant(p)));
+          // Credited to the journal the moment it's actually seen in bloom,
+          // not only if it's later extracted or sold (issue #13) - growing
+          // it is the whole point, so the journal shouldn't require a second
+          // decision on top of that. grownCredited marks it as counted so
+          // harvestPlant/harvestPottedPlant don't credit the same flower a
+          // second time once it's later sheared or sold.
+          p.grownCredited = true;
+          recordGrown(variantKey(p.species, colorOfPlant(p)));
         }
         if (p.stage >= 3 && !p.reachedFlourish) {
           p.reachedFlourish = true;
@@ -3117,13 +3133,14 @@
       tutorialOnWater(key);
     }
 
-    // Records a harvest against its species+color's lifetime tally - the
-    // Journal's whole reason to exist now that Keep is gone (see
-    // harvestPlant/pickWild). Every harvest counts, extracted or sold, owned
-    // plant or wild pick: the point is how many of this exact flower you have
-    // ever grown, not what you did with it afterward. Never resets and never
-    // shrinks, same "nothing here can be lost" guarantee as the rest of the
-    // save.
+    // Records a grown flower against its species+color's lifetime tally - the
+    // Journal's whole reason to exist. Credited the instant a flower of your
+    // own is actually seen in bloom (see applyWatering, issue #13), and also
+    // for a wild pick or anything harvested without having gone through that
+    // (see harvestPlant/harvestPottedPlant/pickWild) - the point is how many
+    // of this exact flower you have ever grown, not what you did with it
+    // afterward. Never resets and never shrinks, same "nothing here can be
+    // lost" guarantee as the rest of the save.
     function recordGrown(vk) {
       var e = state.inventory[vk];
       if (!e) e = state.inventory[vk] = { count: 0, firstAt: Date.now() };
@@ -3131,22 +3148,15 @@
       state.stats.grown++;
     }
 
-    // Marks a variant as discovered without crediting a grown count - called
-    // when one of your own plants blooms for the first time (see
-    // applyWatering), so the journal remembers everything you've ever grown,
-    // not just what you've harvested. Never overwrites an existing entry (and
-    // so never disturbs an earlier real firstAt or count) - it only creates
-    // one if this variant has truly never been seen before.
-    function discoverVariant(vk) {
-      if (state.inventory[vk]) return;
-      state.inventory[vk] = { count: 0, firstAt: Date.now() };
-    }
-
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
     // to Extract (seeds of this exact variant, right now) or Sell (clears the
     // tile for Petals via harvestValue). Either way the tile frees up for
-    // replanting and this variant's lifetime grown tally goes up by one (see
-    // recordGrown) - "harvesting" always removes the plant from the ground.
+    // replanting. The grown tally itself was already credited back when this
+    // plant first bloomed (see applyWatering) - grownCredited guards against
+    // counting it a second time here - so this only still calls recordGrown
+    // for the rare plant that reached bloom before that guard existed (an
+    // old save, backfilled on load - see backfillGrownCreditForBloomed).
+    // "Harvesting" always removes the plant from the ground either way.
     function harvestPlant(key, mode) {
       var p = state.plants[key];
       if (!p) return;
@@ -3155,7 +3165,7 @@
       var vk = variantKey(p.species, p.color || baseColorOf(p.species));
       var label = variantName(vk) + (isCluster ? ' cluster' : '');
       delete state.plants[key];
-      recordGrown(vk);
+      if (!p.grownCredited) recordGrown(vk);
 
       var value = 0;
       if (mode === 'sell') {
@@ -5707,8 +5717,20 @@
           planted++;
         }
       }
-      if (planted === 0) toast('Nothing to plant in that range');
-      else renderSeedToggle();
+      if (planted === 0) { toast('Nothing to plant in that range'); return; }
+      // The loop above only catches running out *mid*-box - a drag whose
+      // last planted tile was also the last seed in the pouch runs the loop
+      // to a normal finish instead of hitting that check, which used to
+      // leave the packet equipped with nothing left in it (issue #14): the
+      // toggle kept showing the now-empty variant selected with no way to
+      // plant another. Same re-check plantEquippedSeedAt already does after
+      // a single tap.
+      if (!(state.seeds[vk] > 0)) {
+        toast("You're out of that seed - open the Shop \u{1F338} to buy more");
+        unequipSeed();
+      } else {
+        renderSeedToggle();
+      }
     }
 
     // ---------------------------------------------------------------------
@@ -6889,7 +6911,7 @@
       state.plants[key] = {
         q: spot.q, r: spot.r, lat: c.lat, lng: c.lng, species: species, color: color,
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
-        reachedBloom: false, reachedFlourish: false,
+        reachedBloom: false, reachedFlourish: false, grownCredited: false,
         // The color is decided now but stays hidden until it blooms. Seed and
         // sprout artwork is colorless anyway, so nothing leaks, and the
         // reveal is the payoff the whole feature is built around.
@@ -8456,7 +8478,7 @@
       pot.plant = {
         species: v.species, color: v.color,
         plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
-        reachedBloom: false, reachedFlourish: false
+        reachedBloom: false, reachedFlourish: false, grownCredited: false
       };
       state.stats.planted++;
       saveState();
@@ -8561,7 +8583,7 @@
       var vk = variantKey(p.species, p.color);
       var label = variantName(vk) + (isCluster ? ' cluster' : '');
       pot.plant = null;
-      recordGrown(vk);
+      if (!p.grownCredited) recordGrown(vk);
 
       if (mode === 'sell') {
         var value = harvestValue(p, d.stage);

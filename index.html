@@ -661,11 +661,13 @@
     .stand-fert-label { font-size: 9.5px; font-weight: 800; color: #5a3d22; text-align: center; }
     .stand-fert-price { font-size: 8.5px; font-weight: 700; color: #a06a00; }
     .stand-fert-owned { font-size: 8px; font-weight: 700; color: #8a7550; margin-top: 4px; }
-    /* Sprinkler's own tile on the counter, own row (stand-row-4, hidden
-       until sprinklerUnlocked()) - a cool blue-grey gradient rather than the
-       sack's wheat gold, so the two never get mistaken for one another at a
-       glance. Same shape/sizing as .stand-fert-btn otherwise, so the two
-       equipment items still read as one family. */
+    /* Sprinkler's own tile on the counter, sharing stand-row-4 with the
+       Greenhouse tile below it rather than sitting on a stacked row of its
+       own - a cool blue-grey gradient rather than the sack's wheat gold, so
+       the two never get mistaken for one another at a glance. Same
+       shape/sizing as .stand-fert-btn otherwise, so the two equipment items
+       still read as one family. Renders as a disabled locked-teaser until
+       sprinklerUnlocked() - see renderShopRows. */
     .stand-sprinkler-btn {
       display: flex; flex-direction: column; align-items: center; gap: 3px; width: 86px;
       background: linear-gradient(180deg, #e4eef7, #b9cfe0); border: 2px solid #46607a;
@@ -676,11 +678,16 @@
     .stand-sprinkler-label { font-size: 9.5px; font-weight: 800; color: #2f4759; text-align: center; }
     .stand-sprinkler-price { font-size: 8.5px; font-weight: 700; color: #2f7ea6; }
     .stand-sprinkler-owned { font-size: 8px; font-weight: 700; color: #5a7387; margin-top: 4px; }
-    /* The Greenhouse's own tile, own row (stand-row-5, hidden once
-       state.greenhouseUnlocked) - a glasshouse green rather than the
-       sprinkler's cool blue or the sack's wheat gold, its own family member
-       again. Wider than the other two since "Greenhouse" alone is nearly as
-       long as the sprinkler's locked-teaser line. */
+    /* The Greenhouse's own tile, sharing stand-row-4 with the Sprinkler
+       tile above it rather than sitting on a stacked row of its own - both
+       are non-flower purchasable items, so they belong side by side the
+       same way the 7th crate and the fertilizer sack share stand-row-3 (see
+       GitHub issue #3). A glasshouse green rather than the sprinkler's cool
+       blue or the sack's wheat gold, its own family member again. Wider
+       than the other two since "Greenhouse" alone is nearly as long as the
+       sprinkler's locked-teaser line. Removed entirely once
+       state.greenhouseUnlocked (already bought, one-time purchase) - see
+       renderShopRows. */
     .stand-greenhouse-btn {
       display: flex; flex-direction: column; align-items: center; gap: 3px; width: 108px;
       background: linear-gradient(180deg, #e3f3e6, #b9dcc0); border: 2px solid #3d7a4e;
@@ -1480,12 +1487,15 @@
         <div id="stand-row-1" class="stand-row stand-row-crates"></div>
         <div id="stand-row-2" class="stand-row stand-row-crates"></div>
         <div id="stand-row-3" class="stand-row stand-row-last"></div>
-        <!-- Hidden until sprinklerUnlocked() (10 flowers extracted or sold) -
+        <!-- Sprinkler and Greenhouse share one row rather than each getting
+             its own stacked row - both are non-flower purchasable items, so
+             they sit side by side the same way the 7th crate and the
+             fertilizer sack share stand-row-3 above. The Sprinkler tile is a
+             disabled locked-teaser until sprinklerUnlocked() (10 flowers
+             extracted or sold); the Greenhouse tile disappears once
+             state.greenhouseUnlocked (already bought, one-time purchase) -
              see renderShopRows. -->
         <div id="stand-row-4" class="stand-row stand-row-last"></div>
-        <!-- Hidden once state.greenhouseUnlocked (already bought, one-time
-             purchase) - see renderShopRows. -->
-        <div id="stand-row-5" class="stand-row stand-row-last"></div>
       </div>
     </div>
   </div>
@@ -7441,15 +7451,19 @@
       document.getElementById('stand-row-2').innerHTML = crates.slice(3, 6).join('');
       document.getElementById('stand-row-3').innerHTML = crates.slice(6, 7).join('') + fert;
 
-      // The sprinkler gets its own row, hidden entirely until unlocked -
-      // unlike fertilizer (always for sale), this one is a locked teaser
-      // beforehand so a player working toward it can see what's coming and
-      // how close they are, the same transparency toolBlockedReason already
-      // gives every other "not yet" moment in the game.
-      var row4 = document.getElementById('stand-row-4');
+      // The Sprinkler and Greenhouse share one row (stand-row-4) instead of
+      // each getting its own stacked row - both are non-flower purchasable
+      // items, so they sit side by side the same way the 7th crate and the
+      // fertilizer sack share stand-row-3 above (see GitHub issue #3).
+      // Unlike fertilizer (always for sale), the sprinkler is a locked
+      // teaser beforehand so a player working toward it can see what's
+      // coming and how close they are, the same transparency
+      // toolBlockedReason already gives every other "not yet" moment in the
+      // game.
+      var sprinklerTile;
       if (!sprinklerUnlocked()) {
         var need = Math.max(0, SPRINKLER_UNLOCK_FLOWERS - state.stats.grown);
-        row4.innerHTML =
+        sprinklerTile =
           '<button class="stand-sprinkler-btn" disabled title="Grow and harvest ' + SPRINKLER_UNLOCK_FLOWERS +
           ' flowers to unlock">' +
           '<span class="stand-sprinkler-icon">' + sprinklerIconSVG(26) + '</span>' +
@@ -7459,7 +7473,7 @@
           '</span></button>';
       } else {
         var sprinklerCost = nextSprinklerCost();
-        row4.innerHTML =
+        sprinklerTile =
           '<button class="stand-sprinkler-btn"' + (state.currency >= sprinklerCost ? '' : ' disabled') +
           ' title="Sprinkler - ' + sprinklerCost + ' Petals" onclick="confirmBuySprinkler()">' +
           '<span class="stand-sprinkler-icon">' + sprinklerIconSVG(26) + '</span>' +
@@ -7470,16 +7484,17 @@
       }
 
       // The Greenhouse: same locked-teaser-then-buyable shape as the
-      // sprinkler row above, but a one-time purchase, not a repeating one -
+      // Sprinkler tile above, but a one-time purchase, not a repeating one -
       // once bought it disappears from the stand entirely (the menu entry
       // is where it lives from then on, same as the sprinkler moving to its
-      // own equipment toggle once owned).
-      var row5 = document.getElementById('stand-row-5');
+      // own equipment toggle once owned), leaving the Sprinkler tile alone
+      // in the shared row.
+      var greenhouseTile;
       if (state.greenhouseUnlocked) {
-        row5.innerHTML = '';
+        greenhouseTile = '';
       } else if (!greenhouseAvailableForPurchase()) {
         var greenhouseNeed = Math.max(0, GREENHOUSE_UNLOCK_FLOWERS - state.stats.grown);
-        row5.innerHTML =
+        greenhouseTile =
           '<button class="stand-greenhouse-btn" disabled title="Grow and harvest ' + GREENHOUSE_UNLOCK_FLOWERS +
           ' flowers to unlock">' +
           '<span class="stand-greenhouse-icon">\u{1F3E1}</span>' +
@@ -7488,7 +7503,7 @@
           '<span class="stand-greenhouse-owned">' + greenhouseNeed + ' more flower' +
           (greenhouseNeed === 1 ? '' : 's') + '</span></button>';
       } else {
-        row5.innerHTML =
+        greenhouseTile =
           '<button class="stand-greenhouse-btn"' + (state.currency >= GREENHOUSE_COST ? '' : ' disabled') +
           ' title="Greenhouse - ' + GREENHOUSE_COST + ' Petals" onclick="confirmBuyGreenhouse()">' +
           '<span class="stand-greenhouse-icon">\u{1F3E1}</span>' +
@@ -7496,6 +7511,8 @@
           '<span class="stand-greenhouse-price">' + GREENHOUSE_COST + ' \u{1F338}</span>' +
           '</button>';
       }
+
+      document.getElementById('stand-row-4').innerHTML = sprinklerTile + greenhouseTile;
     }
 
     // Nothing in the shop spends Petals on a single tap. The buy controls are

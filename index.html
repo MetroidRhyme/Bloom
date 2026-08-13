@@ -1055,6 +1055,11 @@
       background: transparent; border: 2px dashed rgba(90,61,34,0.3);
       box-shadow: none; color: #a49d90; transform: none;
     }
+    /* A starter color (white/red/yellow/blue), taped down but not yet
+       actually grown - same dimming language as the plain .color-grid's
+       own .missing treatment (see line ~1259), layered over the card
+       instead of replacing it, since a starter is never a real mystery. */
+    .color-cell.slot.notgrown { opacity: 0.4; filter: grayscale(70%); }
     .slot-unknown {
       display: inline-flex; align-items: center; justify-content: center;
       width: 30px; height: 30px; border-radius: 50%; font-size: 15px; font-weight: 800;
@@ -1280,16 +1285,6 @@
     }
     .journal-caption { font-size: 11.5px; font-weight: 700; color: var(--text-dim); text-align: center; margin: 0 0 10px; }
     .journal-hint { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0 0 4px; }
-    /* The lifetime tally at the foot of every page - one line per stat
-       rather than a bullet-run sentence, with each count in the same
-       handwritten style as a card's note, as if it were jotted onto the
-       page rather than printed. */
-    .journal-stats { margin: 4px 0 0; }
-    .journal-stats p { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0; }
-    .journal-stats .stat-num {
-      font-family: 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive, sans-serif;
-      font-size: 14px; font-weight: 700; color: var(--green-dark);
-    }
     /* One bordered block per color grown, so a Red and a Purple of the same
        species never look like one interchangeable pile. */
     .inv-variant {
@@ -5312,7 +5307,14 @@
         if (h.q !== pointerState.cell.q || h.r !== pointerState.cell.r) {
           if (!pointerState.moved) { pointerState.moved = true; cancelHold(); }
           if (!rangeGesture) startRangeSelection(pointerState.mode, pointerState.cell);
-          updateRangeSelection(h);
+          // Compared against rangeGesture.cur (the current drag tile), not
+          // pointerState.cell (the original anchor) - the latter never
+          // changes, so every pointermove event inside the same tile still
+          // counted as "moved to a new cell" and restarted the hold-ring
+          // (issue #9). Small touchscreen jitter fired this constantly,
+          // resetting the fill before it could ever complete. Only an
+          // actual move into a genuinely different tile should restart it.
+          if (h.q !== rangeGesture.cur.q || h.r !== rangeGesture.cur.r) updateRangeSelection(h);
           return;
         }
       }
@@ -7318,9 +7320,17 @@
         // reveal its name, tracked per species (not globally - finding
         // White on a Sunflower used to reveal the name "White" on every
         // other species' still-empty spot too).
-        var unlocked = discovered || STANDARD_COLORS.indexOf(c.id) >= 0;
+        var isStandard = STANDARD_COLORS.indexOf(c.id) >= 0;
+        var unlocked = discovered || isStandard;
         var label = unlocked ? c.name : '?';
+        // A starter color's card is never a mystery pocket - it's sold in
+        // the Shop already, so there's nothing to reveal by growing one -
+        // but showing it in full color before the player ever actually has
+        // grown one overstates progress that hasn't happened yet. Dimmed
+        // instead of blanked, same idea as .color-cell.missing elsewhere,
+        // until n (grown count) is above 0.
         var cls = 'color-cell slot' + (unlocked ? '' : ' blank') + (n > 0 ? ' held' : '') +
+          (isStandard && n === 0 ? ' notgrown' : '') +
           (vk === journalPick ? ' picked' : '');
         return '<div class="' + cls + '" title="' + (unlocked ? label : 'Not found yet') + '"' +
           (discovered ? ' onclick="pickJournalSpot(\'' + vk + '\')"' : '') + '>' +
@@ -7351,17 +7361,10 @@
         html += '<p class="journal-hint">Tap a flower you\'ve grown to see the count.</p>';
       }
 
-      // The lifetime tally lived on the contents page; it belongs somewhere,
-      // and the foot of any page is as good as a screen of its own. One
-      // line per stat rather than a bullet-run sentence.
-      var st = state.stats;
-      function statNum(n) { return '<span class="stat-num">' + n + '</span>'; }
-      html += '<div class="journal-stats">' +
-        '<p>Grown ' + statNum(st.grown) + ' all time</p>' +
-        '<p>Sold ' + statNum(st.sold) + ' for ' + statNum(st.earned) + ' Petals</p>' +
-        '<p>Extracted ' + statNum(st.extractedFlowers) + ' for ' + statNum(st.extracted) +
-        ' seeds</p></div>';
-
+      // The lifetime tally (issue #11) used to sit here as its own block -
+      // removed per the issue; each species page's own "found N of M
+      // colors" caption up top is the count that actually matters while
+      // you're looking at one species.
       document.getElementById('journal-body').innerHTML = html;
     }
 

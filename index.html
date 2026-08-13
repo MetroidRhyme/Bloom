@@ -4951,8 +4951,15 @@
         pickUpSprinkler(key);
         return;
       }
+      // A bare tap on empty, out-of-range ground does nothing by default, so
+      // it stays silent here - only worth a word when a sprinkler is
+      // actually equipped (the one action this handler can still take
+      // out-of-range-gated, since placeSprinklerAt has no range check of its
+      // own). An equipped seed never reaches this branch - see equippedSeed
+      // above - and resolveSeedTap has its own, correct "walk closer" toast
+      // for that case.
       if (!tileInRange) {
-        toast('Walk closer to plant a seed here \u{1F6B6}');
+        if (equippedSprinkler) toast('Walk closer to place a sprinkler here \u{1F6B6}');
         return;
       }
       if (equippedSprinkler) { placeSprinklerAt(h.q, h.r); return; }

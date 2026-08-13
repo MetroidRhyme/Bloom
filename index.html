@@ -154,6 +154,24 @@
     #sprinkler-toggle.active { color: #2f7ea6; background: rgba(74,163,214,0.18); }
     #sprinkler-toggle:active { transform: scale(0.92); }
 
+    /* Stacked directly above #recenter-btn on the same corner, sharing its
+       exact circular look (rather than .tool-btn's, which #sprinkler-toggle
+       borrows) - this and #recenter-btn are both plain "move the camera,
+       not the player" controls, so they read as one family of camera
+       buttons on the right, kept apart from the equip/place-mode buttons
+       on the left. Hidden the same way #sprinkler-toggle is (a .show class
+       flipped in renderFlowerCycleBtn) rather than always-visible-but-
+       disabled: there is nothing useful a disabled state would communicate
+       when there simply is no flower yet to jump to. */
+    #flower-cycle-btn {
+      position: fixed; right: 16px; bottom: 152px; z-index: 900;
+      width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--panel-border);
+      background: var(--panel-bg); box-shadow: var(--shadow); font-size: 20px; cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+    }
+    #flower-cycle-btn.show { display: flex; }
+    #flower-cycle-btn:active { background: rgba(0,0,0,0.06); }
+
     /* ================= TUTORIAL BANNER ================= */
     /* First-run only (see the TUTORIAL section in the script). Sits below
        the toolbox (which now hugs the top-left corner, see #tool-rail) so
@@ -1383,6 +1401,15 @@
   </div>
 
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
+
+  <!-- Stacked above #recenter-btn - see the CSS comment on #flower-cycle-btn
+       for why the two share a corner. A plain stateless button like
+       #recenter-btn (no equipped/active mode to track), so it is wired the
+       same simple inline-onclick way rather than addEventListener. Hidden
+       until at least one flower is planted (see renderFlowerCycleBtn,
+       called from updateHUD alongside renderSprinklerToggle) - nothing to
+       cycle to otherwise. -->
+  <button id="flower-cycle-btn" onclick="onCycleFlowers()" title="Next flower">&#x1F504;</button>
 
   <!-- Mirrors #recenter-btn on the opposite corner. Hidden until at least one
        sprinkler is owned unplaced (see renderSprinklerToggle) - the click
@@ -6521,6 +6548,7 @@
       // rather than chasing every buySeed/harvestPlant/plantSeedAt call site.
       renderSeedToggle();
       renderSprinklerToggle(); // same reasoning - its badge needs to track state.sprinklerInventory
+      renderFlowerCycleBtn(); // same reasoning again - its visibility tracks state.plants
       // A tool in hand takes over the status line entirely: while you're in a
       // mode, what that mode does is the only thing worth saying.
       if (activeTool) {
@@ -6627,6 +6655,75 @@
         var c = cellCenter(userCellQ, userCellR);
         map.panTo([c.lat, c.lng], { animate: true });
       }
+    }
+
+    // ---------------------------------------------------------------------
+    //  FLOWER CYCLE BUTTON
+    //  Answers issue "Navigation is difficult" - swiping/dragging back to a
+    //  distant flower to water it is tedious, so one tap jumps the camera
+    //  straight there instead. This only ever moves the map, never the
+    //  player - there is no geolocation trickery here, just panTo, exactly
+    //  like onRecenter() above (including its "don't touch zoom" restraint,
+    //  for the same reason: an unrequested zoom change is disorienting).
+    // ---------------------------------------------------------------------
+
+    // Ephemeral UI state, not save data - same treatment as equippedSprinkler
+    // above (a plain JS var, never touched by loadState/saveState). Holds
+    // the plant key most recently panned to, so repeated taps advance
+    // through the garden instead of snapping back to the first flower
+    // every time.
+    var flowerCycleKey = null;
+
+    // Shown/hidden the same way #sprinkler-toggle is - called from
+    // updateHUD() right alongside renderSprinklerToggle() so both stay in
+    // sync with the same state changes (planting, harvesting, boot).
+    function renderFlowerCycleBtn() {
+      var btn = document.getElementById('flower-cycle-btn');
+      btn.classList.toggle('show', Object.keys(state.plants).length > 0);
+    }
+
+    // Object.keys() order is an implementation detail that can shift as
+    // entries are added and removed, so the cycle order is pinned
+    // explicitly: oldest-planted first (falling back to the cell key
+    // itself as a tiebreaker, which also covers it for any legacy save
+    // whose plants predate plantedAt). That gives "the order you planted
+    // them in" as the cycle order, which is at least an order the player
+    // can predict, rather than an arbitrary shuffle of "q,r" strings.
+    function sortedPlantKeys() {
+      return Object.keys(state.plants).sort(function (a, b) {
+        var pa = state.plants[a], pb = state.plants[b];
+        return (pa.plantedAt || 0) - (pb.plantedAt || 0) || (a < b ? -1 : a > b ? 1 : 0);
+      });
+    }
+
+    // One tap = advance to the next planted flower and pan the camera to
+    // it, wrapping back to the first after the last. If the last flower
+    // shown was since harvested (indexOf returns -1 below), resume from
+    // the start of the list rather than erroring - -1 + 1 already lands on
+    // index 0, so no special-case is needed for that.
+    function onCycleFlowers() {
+      var keys = sortedPlantKeys();
+      if (!keys.length) return;
+      var idx = (keys.indexOf(flowerCycleKey) + 1) % keys.length;
+      flowerCycleKey = keys[idx];
+      var p = state.plants[flowerCycleKey];
+
+      // Same reasoning as map.on('dragstart') above: this is the player
+      // reaching for the camera themselves, so stop auto-following their
+      // GPS fix - otherwise the very next location update would yank the
+      // view right back to the player, undoing the jump before they even
+      // get a look at the flower.
+      state.following = false;
+      saveState();
+      map.panTo([p.lat, p.lng], { animate: true });
+
+      // Name the flower if it is safe to (a still-mystery cross keeps its
+      // identity hidden until it blooms - see renderPlantPanel), and always
+      // say "N of M" so the player can tell at a glance whether they have
+      // looped all the way back around.
+      var name = p.mystery ? 'Mystery Seedling'
+        : variantName(variantKey(p.species, p.color || baseColorOf(p.species)));
+      toast('\u{1F504} ' + name + ' - ' + (idx + 1) + ' of ' + keys.length);
     }
 
     // Wipes the whole save (garden, seeds, Petals, stats, and the welcome/

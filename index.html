@@ -154,23 +154,9 @@
     #sprinkler-toggle.active { color: #2f7ea6; background: rgba(74,163,214,0.18); }
     #sprinkler-toggle:active { transform: scale(0.92); }
 
-    /* Stacked directly above #recenter-btn on the same corner, sharing its
-       exact circular look (rather than .tool-btn's, which #sprinkler-toggle
-       borrows) - this and #recenter-btn are both plain "move the camera,
-       not the player" controls, so they read as one family of camera
-       buttons on the right, kept apart from the equip/place-mode buttons
-       on the left. Hidden the same way #sprinkler-toggle is (a .show class
-       flipped in renderFlowerCycleBtn) rather than always-visible-but-
-       disabled: there is nothing useful a disabled state would communicate
-       when there simply is no flower yet to jump to. */
-    #flower-cycle-btn {
-      position: fixed; right: 16px; bottom: 152px; z-index: 900;
-      width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--panel-border);
-      background: var(--panel-bg); box-shadow: var(--shadow); font-size: 20px; cursor: pointer;
-      display: none; align-items: center; justify-content: center;
-    }
-    #flower-cycle-btn.show { display: flex; }
-    #flower-cycle-btn:active { background: rgba(0,0,0,0.06); }
+    /* Flower-to-flower cycling (issue #15) lives on the plant panel itself
+       now, not a separate map button - see .plant-cycle-btn below and
+       cyclePlantPanel() in the script. */
 
     /* ================= TUTORIAL BANNER ================= */
     /* First-run only (see the TUTORIAL section in the script). Sits below
@@ -241,6 +227,23 @@
       position: absolute; top: 14px; right: 16px; width: 30px; height: 30px; border-radius: 50%;
       border: none; background: rgba(0,0,0,0.05); font-size: 17px; color: var(--text-dim); cursor: pointer;
     }
+    /* Step to the previous/next owned flower without leaving the panel
+       (issue #15) - replaces the old standalone map cycle button. Pinned to
+       the sheet's own left/right edges, vertically centered, rather than
+       floating over the map, so they read as part of this panel. Hidden
+       (same .show-class pattern as #sprinkler-toggle used to have) unless
+       there is more than one owned flower to step between - see
+       syncPlantCycleArrows(). Never shown for a wild flower's panel; wild
+       pickups aren't part of the cycle (see cyclePlantPanel). */
+    .plant-cycle-btn {
+      position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 34px;
+      border-radius: 50%; border: none; background: rgba(0,0,0,0.05); font-size: 18px;
+      color: var(--text-dim); cursor: pointer; display: none; align-items: center; justify-content: center;
+    }
+    .plant-cycle-btn.show { display: flex; }
+    .plant-cycle-btn:active { background: rgba(0,0,0,0.06); }
+    #plant-cycle-prev { left: 8px; }
+    #plant-cycle-next { right: 8px; }
     #plant-icon-big { display: flex; align-items: center; justify-content: center; margin: 4px auto 8px; }
     #plant-title { text-align: center; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
     #plant-meta { text-align: center; font-size: 12.5px; color: var(--text-dim); margin-bottom: 12px; }
@@ -1392,7 +1395,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.19.1</span>
+      <span id="game-version">v2.20.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1419,15 +1422,6 @@
   </div>
 
   <button id="recenter-btn" onclick="onRecenter()" title="Center on me">&#x1F3AF;</button>
-
-  <!-- Stacked above #recenter-btn - see the CSS comment on #flower-cycle-btn
-       for why the two share a corner. A plain stateless button like
-       #recenter-btn (no equipped/active mode to track), so it is wired the
-       same simple inline-onclick way rather than addEventListener. Hidden
-       until at least one flower is planted (see renderFlowerCycleBtn,
-       called from updateHUD alongside renderSprinklerToggle) - nothing to
-       cycle to otherwise. -->
-  <button id="flower-cycle-btn" onclick="onCycleFlowers()" title="Next flower">&#x1F504;</button>
 
   <!-- Mirrors #recenter-btn on the opposite corner. Hidden until at least one
        sprinkler is owned unplaced (see renderSprinklerToggle) - the click
@@ -1498,6 +1492,10 @@
   <div id="plant-panel">
     <div class="panel-handle"></div>
     <button id="panel-close-btn" onclick="closePlantPanel()">&times;</button>
+    <!-- Step to the previous/next owned flower in place (issue #15) - see
+         cyclePlantPanel() and syncPlantCycleArrows() in the script. -->
+    <button id="plant-cycle-prev" class="plant-cycle-btn" onclick="cyclePlantPanel(-1)" title="Previous flower">&#x2039;</button>
+    <button id="plant-cycle-next" class="plant-cycle-btn" onclick="cyclePlantPanel(1)" title="Next flower">&#x203A;</button>
     <div id="plant-icon-big"></div>
     <div id="plant-title">&nbsp;</div>
     <div id="plant-meta">&nbsp;</div>
@@ -1673,6 +1671,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.20.0', changes: [
+        'Flower-to-flower navigation moved into the flower details panel - ' +
+          'tap a flower, then use the arrows on either side of the panel ' +
+          'to step to the next or previous one you have planted. The map ' +
+          'follows along and stays centered on whichever flower you land ' +
+          'on once you close the panel, so the old standalone cycle ' +
+          'button by the recenter button is gone.'
+      ] },
       { version: 'v2.19.1', changes: [
         'The Flower Journal now credits a flower the moment you actually ' +
           'see it bloom, instead of only once you extract its seeds or ' +
@@ -6577,6 +6583,7 @@
     function closePlantPanel() {
       viewingKey = null;
       viewingWild = false;
+      syncPlantCycleArrows();
       document.getElementById('plant-panel').classList.remove('open');
     }
 
@@ -6627,6 +6634,7 @@
         ? hintTool('shear') + ' to extract 1-2 seeds, or ' + hintTool('sell') + ' to sell it for ' +
           SELL_SINGLE + ' \u{1F338}'
         : 'Walk over to pick it.';
+      syncPlantCycleArrows(); // always hides for a wild panel - see the !viewingWild check above
     }
 
     // Names a tool inline, with its own icon, so a hint in the panel points at
@@ -6743,6 +6751,7 @@
         !tileInRange ? 'Walk closer to tend it.' : hints.join('<br>');
 
       renderBreedButton(key, p, d, tileInRange);
+      syncPlantCycleArrows();
     }
 
     // The Cross button only appears when a cross is actually possible, and
@@ -7000,7 +7009,7 @@
       // rather than chasing every buySeed/harvestPlant/plantSeedAt call site.
       renderSeedToggle();
       renderSprinklerToggle(); // same reasoning - its badge needs to track state.sprinklerInventory
-      renderFlowerCycleBtn(); // same reasoning again - its visibility tracks state.plants
+      syncPlantCycleArrows(); // same reasoning again - the panel's arrows track state.plants too
       // A tool in hand takes over the status line entirely: while you're in a
       // mode, what that mode does is the only thing worth saying.
       if (activeTool) {
@@ -7110,29 +7119,15 @@
     }
 
     // ---------------------------------------------------------------------
-    //  FLOWER CYCLE BUTTON
-    //  Answers issue "Navigation is difficult" - swiping/dragging back to a
-    //  distant flower to water it is tedious, so one tap jumps the camera
-    //  straight there instead. This only ever moves the map, never the
-    //  player - there is no geolocation trickery here, just panTo, exactly
-    //  like onRecenter() above (including its "don't touch zoom" restraint,
-    //  for the same reason: an unrequested zoom change is disorienting).
+    //  FLOWER PANEL CYCLING  (issue #15)
+    //  Originally a standalone map button that jumped the camera to each
+    //  planted flower in turn (see the v2.18.0 CHANGELOG entry above) - that
+    //  worked the camera but never opened anything, so you still couldn't
+    //  see the flower's own details without a second tap. Folded into the
+    //  plant panel itself instead: the panel already shows one flower's
+    //  details, so left/right arrows on it step to the previous/next flower
+    //  in place, updating both the panel content and the camera together.
     // ---------------------------------------------------------------------
-
-    // Ephemeral UI state, not save data - same treatment as equippedSprinkler
-    // above (a plain JS var, never touched by loadState/saveState). Holds
-    // the plant key most recently panned to, so repeated taps advance
-    // through the garden instead of snapping back to the first flower
-    // every time.
-    var flowerCycleKey = null;
-
-    // Shown/hidden the same way #sprinkler-toggle is - called from
-    // updateHUD() right alongside renderSprinklerToggle() so both stay in
-    // sync with the same state changes (planting, harvesting, boot).
-    function renderFlowerCycleBtn() {
-      var btn = document.getElementById('flower-cycle-btn');
-      btn.classList.toggle('show', Object.keys(state.plants).length > 0);
-    }
 
     // Object.keys() order is an implementation detail that can shift as
     // entries are added and removed, so the cycle order is pinned
@@ -7148,34 +7143,64 @@
       });
     }
 
-    // One tap = advance to the next planted flower and pan the camera to
-    // it, wrapping back to the first after the last. If the last flower
-    // shown was since harvested (indexOf returns -1 below), resume from
-    // the start of the list rather than erroring - -1 + 1 already lands on
-    // index 0, so no special-case is needed for that.
-    function onCycleFlowers() {
-      var keys = sortedPlantKeys();
-      if (!keys.length) return;
-      var idx = (keys.indexOf(flowerCycleKey) + 1) % keys.length;
-      flowerCycleKey = keys[idx];
-      var p = state.plants[flowerCycleKey];
+    // Shown only while the panel is open on an owned flower (never a wild
+    // pickup - see openPlantPanel) and only when there is actually more
+    // than one to step between. Called from renderPlantPanel every time the
+    // panel's content changes and from updateHUD (alongside
+    // renderSprinklerToggle) so a flower harvested elsewhere while the
+    // panel happens to be open still hides the arrows correctly.
+    function syncPlantCycleArrows() {
+      var show = viewingKey !== null && !viewingWild && sortedPlantKeys().length > 1;
+      document.getElementById('plant-cycle-prev').classList.toggle('show', show);
+      document.getElementById('plant-cycle-next').classList.toggle('show', show);
+    }
 
+    // Offsets the pan target upward by half the sheet's own height before
+    // panning, rather than centering the flower on its raw lat/lng - dead
+    // center would land it right behind the bottom sheet that's showing its
+    // details, defeating the point of moving cycling into the panel in the
+    // first place (issue #15: "I should be able to see the flower on the
+    // main map that I'm looking at in the details page"). Container-point
+    // math rather than map.project/unproject, since it needs to stay
+    // correct relative to the *current* view regardless of zoom.
+    function panMapToPlant(p) {
+      // Adding (not subtracting) half the sheet's height here is the part
+      // worth double-checking if this ever needs touching again: the point
+      // fed to panTo becomes the new viewport *center*, so to land the
+      // flower above that center once the sheet covers the bottom, the
+      // pre-pan target has to sit *below* the flower on screen right now -
+      // add pushes it there. Centers the flower in whatever vertical strip
+      // is left uncovered above the sheet, regardless of viewport height.
+      var sheetPx = document.getElementById('plant-panel').offsetHeight || 0;
+      var target = map.containerPointToLatLng(
+        map.latLngToContainerPoint([p.lat, p.lng]).add([0, sheetPx / 2]));
       // Same reasoning as map.on('dragstart') above: this is the player
       // reaching for the camera themselves, so stop auto-following their
       // GPS fix - otherwise the very next location update would yank the
       // view right back to the player, undoing the jump before they even
-      // get a look at the flower.
+      // get a look at the flower. Left following-false is also what keeps
+      // the map sitting on the last flower viewed once the panel closes,
+      // rather than snapping back to the player.
       state.following = false;
       saveState();
-      map.panTo([p.lat, p.lng], { animate: true });
+      map.panTo(target, { animate: true });
+    }
 
-      // Name the flower if it is safe to (a still-mystery cross keeps its
-      // identity hidden until it blooms - see renderPlantPanel), and always
-      // say "N of M" so the player can tell at a glance whether they have
-      // looped all the way back around.
-      var name = p.mystery ? 'Mystery Seedling'
-        : variantName(variantKey(p.species, p.color || baseColorOf(p.species)));
-      toast('\u{1F504} ' + name + ' - ' + (idx + 1) + ' of ' + keys.length);
+    // One arrow tap = advance to the previous/next owned flower, wrapping
+    // around both ends, updating the panel in place and panning the camera
+    // there - see panMapToPlant above for why "there" isn't the flower's
+    // raw coordinates. If the flower being viewed was harvested by some
+    // other means while its panel was open (indexOf returns -1 below),
+    // resume from the start of the list rather than erroring.
+    function cyclePlantPanel(dir) {
+      var keys = sortedPlantKeys();
+      if (!keys.length) return;
+      var idx = keys.indexOf(viewingKey);
+      idx = idx === -1 ? 0 : (idx + dir + keys.length) % keys.length;
+      viewingKey = keys[idx];
+      panMapToPlant(state.plants[viewingKey]);
+      renderPlantPanel(viewingKey);
+      vibrate(10);
     }
 
     // Wipes the whole save (garden, seeds, Petals, stats, and the welcome/

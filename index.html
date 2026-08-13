@@ -4221,8 +4221,31 @@
     // so it sits in front of the stem's base, the same "something drawn last
     // occludes the very bottom of the stem" trick the outdoor ground mound
     // already uses (see groundNearRandom).
+    //
+    // The rim ellipse alone only reaches down to cy+ry=89.6 at its deepest
+    // (center) point, but every shared stem markup (sproutMarkup,
+    // BLOOM_STEM_MARKUP, CLUSTER_STEM_MARKUP) roots its path at literal
+    // y=92 with a round line cap on a stroke up to 4.2 wide - so the
+    // rendered stem actually paints down to roughly y=94, about 4-5 units
+    // past where the rim ellipse's own coverage ends. That gap used to show
+    // as a small blob of stem color on the pot's front wall, directly under
+    // the rim - "stems clipping through the top of the pot" - on every
+    // stage, made obviously visible once .pot-icon-art's scaleY stretch
+    // (see the GREENHOUSE PANEL CSS) scales that gap up along with
+    // everything else. Reordering stem-then-rim (already done) only
+    // occludes what the rim ellipse actually covers; it was never deep
+    // enough. This neck patch - opaque pot color first (to fully hide the
+    // stem, not just dim it), then the same darkened wash potBody's own
+    // neck-shadow band uses - closes that gap without touching the shared
+    // stem markup or the rim ellipse's own look. Narrow (rx=9) so it only
+    // ever covers the stem column (every stage roots within a couple units
+    // of x=50) and starts right at the rim ellipse's own lower edge so it
+    // reads as the rim's shadow continuing onto the neck, not a separate
+    // patch.
     function potRimFront() {
-      return '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + POT_COLOR_LIGHT + '"/>';
+      return '<ellipse cx="50" cy="86" rx="23" ry="3.6" fill="' + POT_COLOR_LIGHT + '"/>' +
+        '<ellipse cx="50" cy="92" rx="9" ry="3.4" fill="' + POT_COLOR + '"/>' +
+        '<ellipse cx="50" cy="92" rx="9" ry="3.4" fill="' + POT_COLOR_DARK + '" opacity="0.45"/>';
     }
 
     // Builds a potted plant at (species, color, stage) - stage 0 is pot +

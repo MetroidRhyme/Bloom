@@ -1419,7 +1419,6 @@
          and the GREENHOUSE section, same reasoning as menu-crossnotes-btn
          above. -->
     <button id="menu-greenhouse-btn" onclick="openGreenhouse()">Greenhouse</button>
-    <button onclick="openWildInfo()">Wild Flowers</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
   </div>
@@ -2329,8 +2328,8 @@
     var WILD_MIN_GAP = 5;            // min tile distance from each other AND from your own plants
     // At zoom 17 a phone shows roughly 370m x 730m, so at 800m most of a crop
     // starts off-screen. That is deliberate - walking to them is the point -
-    // and the Wild Flowers screen in the menu is what keeps it from reading
-    // as "nothing spawned".
+    // and the spawn toast (with nearest distance) is what keeps it from
+    // reading as "nothing spawned".
     var WILD_SPAWN_RADIUS_M = 800;
     var WILD_WILT_MS = 12 * HOUR;    // uncollected: starts looking wilted
     var WILD_GONE_MS = 18 * HOUR;    // ...and vanishes 6 hours after that
@@ -3549,9 +3548,9 @@
       return chosen;
     }
 
-    // Straight-line metres and a rough compass point, used by the Wild Flowers
-    // screen so "nothing appeared" can always be told apart from "it appeared
-    // 600m north of you". Equirectangular is plenty at sub-kilometre scale.
+    // Straight-line metres and a rough compass point, used by the wild-flower
+    // spawn toast so "nothing appeared" can always be told apart from "it
+    // appeared 600m north of you". Equirectangular is plenty at sub-kilometre scale.
     function metersBetween(a, b) {
       var dLat = (b.lat - a.lat) * 111111;
       var dLng = (b.lng - a.lng) * 111111 * Math.cos(a.lat * Math.PI / 180);
@@ -7655,47 +7654,6 @@
     function closeCrossNotes() {
       document.getElementById('notes-panel').classList.remove('open');
       syncToolRail();
-    }
-
-    // Answers "where are they, then?". Most of a day's wild flowers land
-    // off-screen on purpose - the whole point is to walk to them - so without
-    // a screen like this a successful spawn is indistinguishable from a failed
-    // one, since both leave the visible map unchanged.
-    function openWildInfo() {
-      toggleMenu();
-      resetModalChrome();
-      document.getElementById('modal-title').textContent = 'Wild Flowers \u{1F33C}';
-
-      var n = Object.keys(state.wild).length;
-      var near = nearestWild();
-      var html = '<p><b>' + n + '</b> wild ' + (n === 1 ? 'flower is' : 'flowers are') +
-        ' out on the map right now, of up to ' + WILD_MAX + '.</p>';
-
-      if (near) {
-        var nd = wildDerived(near.w, Date.now());
-        html += '<p>The nearest is a <b>' +
-          variantName(variantKey(near.w.species, near.w.color || baseColorOf(near.w.species))) +
-          '</b>, about <b>' +
-          Math.round(near.dist) + 'm</b> to the <b>' + near.dir + '</b>' +
-          (nd.wilted ? ', already wilting' : '') + ' - fades in <b>' + formatDuration(nd.goneIn) + '</b>.</p>';
-      } else if (n > 0) {
-        html += '<p>Waiting on GPS before it can tell you how far off they are.</p>';
-      }
-
-      if (n > 0) {
-        html += '<p style="color:var(--text-dim)">They can be up to ' + WILD_SPAWN_RADIUS_M +
-          'm away, so most start off-screen - zoom out and look for the glowing ones.</p>';
-      }
-      html += '<p style="color:var(--text-dim)">Wild flowers wilt after ' + (WILD_WILT_MS / HOUR) +
-        ' hours and vanish ' + ((WILD_GONE_MS - WILD_WILT_MS) / HOUR) + ' hours after that.</p>';
-      html += '<p style="color:var(--text-dim)">Today: ' + wildStatus + '</p>';
-
-      // Spawning is local and synchronous now, so it can't fail and there is
-      // nothing to retry - the day either ran or is still waiting on GPS.
-      document.getElementById('modal-ok-btn').textContent = 'Got it';
-      document.getElementById('modal-ok-btn').onclick = closeModal;
-      document.getElementById('modal-body').innerHTML = html;
-      document.getElementById('modal-overlay').classList.add('open');
     }
 
     // Modals normally show one full-width OK button; the breed picker hides it

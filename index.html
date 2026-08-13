@@ -4600,19 +4600,34 @@
       return L.divIcon({ html: html, iconSize: [w, w], iconAnchor: [w / 2, w / 2], className: '' });
     }
 
-    // A weed marker: a plain herb glyph on a small dull-green disc, smaller
-    // than the sprinkler's own disc and with no glow/pulse the way wild
-    // flowers get - it's meant to read as a minor, easy-to-ignore nuisance,
-    // not something worth the map's attention the way a wild bloom or a
-    // placed sprinkler is. \u{1F33F} (herb) rather than any flower glyph, per
-    // the issue - it should never be mistaken for something worth breeding.
-    function makeWeedIcon() {
+    // A single, bigger grass clump - the same clumpMarkup/CLUMP_SHAPE/
+    // jitterBlade machinery the ambient grass near flowers uses, just
+    // mounted in its own small standalone SVG instead of the flower
+    // canvas's 0-100 viewBox. Using a viewBox sized to fit the clump
+    // itself (rather than reusing the flower canvas's much larger
+    // coordinate space verbatim) is what makes the same fixed-size blade
+    // shapes read as a big clump here without touching CLUMP_SHAPE's own
+    // numbers. No disc, no dirt patch, no icon glyph - it's meant to read
+    // as a minor, easy-to-ignore nuisance (a clump of grass to pull), not
+    // something worth the map's attention the way a wild bloom or a
+    // placed sprinkler is - just a duller, scrubbier green than the lush
+    // ambient grass so it never reads as something worth breeding.
+    var WEED_CLUMP_SPOT = { bx: 15, by: 20, fill: '#6a7a42', fillCenter: '#82914f' };
+    function makeWeedIcon(w) {
       var px = plantIconBase();
       _iconBuiltPx = px;
-      var w = Math.round(px * 0.55);
-      var html = '<div style="' + discStyle('#e3ead4', w) + '">' +
-        '<span style="font-size:' + Math.round(w * 0.6) + 'px;line-height:1">\u{1F33F}</span></div>';
-      return L.divIcon({ html: html, iconSize: [w, w], iconAnchor: [w / 2, w / 2], className: '' });
+      var iw = Math.round(px * 0.7);
+      var vw = 30, vh = 26, ih = Math.round(iw * vh / vw);
+      // Seeded off the weed's own cell (distinct from any flower's ':' -less
+      // seed on the same cell key) so a given weed's clump shape stays put
+      // across re-renders (zoomend, pluck-fx cleanup, etc.) instead of
+      // reshuffling on every rebuild.
+      var rng = mulberry32(dailyStockSeed(cellKey(w.q, w.r) + ':weed'));
+      var markup = clumpMarkup(rng, WEED_CLUMP_SPOT, 'wind-grass-front');
+      var windDelay = windDelayFor(w.q, w.r);
+      var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + iw + '" height="' + ih +
+        '" style="display:block;--wind-delay:' + windDelay.toFixed(2) + 's">' + markup + '</svg>';
+      return L.divIcon({ html: html, iconSize: [iw, ih], iconAnchor: [iw / 2, ih / 2], className: '' });
     }
 
     // ---------------------------------------------------------------------
@@ -4780,7 +4795,7 @@
       Object.keys(state.weeds).forEach(function (key) {
         var w = state.weeds[key];
         seen[key] = true;
-        var icon = makeWeedIcon();
+        var icon = makeWeedIcon(w);
         if (weedMarkers[key]) weedMarkers[key].setIcon(icon);
         else weedMarkers[key] = L.marker([w.lat, w.lng], { icon: icon, interactive: false, zIndexOffset: 85 }).addTo(map);
       });

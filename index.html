@@ -3268,9 +3268,18 @@
     // against re-starting a plant that's already mid-flight; each plant
     // only ever advances one stage per completed watering, same as a real
     // watering visit (applyWatering sets readyAt relative to *now*, not to
-    // the missed threshold), so there is no way to bank multiple stages by
-    // leaving a sprinkler running offline - it simply resumes the instant
-    // the game is open again.
+    // the missed threshold).
+    //
+    // That one-stage-per-tick behavior only describes what happens while
+    // this interval is actually running, though - it is NOT how a real
+    // offline gap (the tab closed, or backgrounded long enough to be
+    // throttled/suspended) is handled. Multiple stages ARE banked across an
+    // absence like that: catchUpSprinklersOffline (below) replays this same
+    // wilted-or-ready check across the whole gap in one shot at resume
+    // time, before this interval ever gets a chance to tick again, so a
+    // sprinkler left running for days catches an adjacent plant all the way
+    // up to MAX_STAGE (water permitting) rather than resuming at one stage
+    // per visit like it used to.
     var SPRINKLER_TICK_MS = 1000;
     function tickSprinklers() {
       if (!Object.keys(state.sprinklers).length) return;
@@ -3288,6 +3297,99 @@
           startSprinklerWatering(pkey, s);
         });
       });
+    }
+
+    // ---------------------------------------------------------------------
+    //  OFFLINE SPRINKLER CATCH-UP  (issue #8)
+    //  tickSprinklers (above) only ever advances a plant one stage per
+    //  completed watering because it's built to run *live*, every
+    //  SPRINKLER_TICK_MS, while the tab is open - it was never meant to
+    //  replay a gap, just to notice "ready or wilted right now" once a
+    //  second. This is the offline counterpart: called once at the top of
+    //  every real "resume" (a fresh page load, and the visibilitychange
+    //  listener's real-gap branch - see both call sites), before anything
+    //  else reads plant state, in particular before the welcome-back tour
+    //  builds its stops from recomputePlant.
+    //
+    //  Same timestamp-derived philosophy as recomputePlant (see the GROWTH
+    //  ENGINE section above): a plant's own lastWateredAt/readyAt/stage
+    //  already pin down exactly where a continuously-running sprinkler
+    //  would have left it the instant the tab was backgrounded (live
+    //  ticking keeps them current right up to that moment), so no separate
+    //  "gap started here" timestamp needs to be threaded in - the plant's
+    //  own fields already are one. Replaying the same wilted-or-ready check
+    //  tickSprinklers uses, forward from those stored fields to right now,
+    //  applying applyWatering at each instant a real sprinkler would have
+    //  fired, reproduces exactly the end state a session left open the
+    //  whole time would have reached. Bypasses the droplet animation
+    //  entirely (calls applyWatering directly, not
+    //  startSprinklerWatering/finishSprinklerWatering) - replaying a
+    //  multi-day gap one droplet burst at a time makes no sense, so this
+    //  resolves the final state in one shot and lets the normal render
+    //  paths pick it up, same as any other state mutation.
+    function catchUpSprinklersOffline() {
+      if (!Object.keys(state.sprinklers).length) return;
+      var now = Date.now();
+
+      // Same reachability tickSprinklers checks (a per-sprinkler neighbor
+      // scan), collapsed to a plain set of plant keys first: once a plant
+      // is adjacent to any placed sprinkler at all, which one (or how many)
+      // doesn't change the simulation below - watering it at a given
+      // instant is the same event no matter how many sprinklers would have
+      // triggered it, so there's no need to actually iterate per-sprinkler
+      // for the catch-up itself.
+      var reachedKeys = {};
+      Object.keys(state.sprinklers).forEach(function (skey) {
+        var s = state.sprinklers[skey];
+        CELL_NEIGHBORS.forEach(function (d) {
+          var pkey = cellKey(s.q + d[0], s.r + d[1]);
+          if (state.plants[pkey]) reachedKeys[pkey] = true;
+        });
+      });
+
+      var changed = false;
+      Object.keys(reachedKeys).forEach(function (pkey) {
+        var p = state.plants[pkey];
+        // `stage < MAX_STAGE` alone terminates this under the real game
+        // constants: readyAt is always far closer than the 48h wilt clock
+        // while a plant still has stages left (STAGE_READY_MS is 1.5h,
+        // WATER_DURATION_MS is 48h), so a plant that isn't already maxed
+        // reaches MAX_STAGE in at most MAX_STAGE passes regardless of how
+        // long the gap was. The iteration cap is purely defensive - a
+        // corrupted save or a future constant change (stageReadyMs()
+        // somehow returning 0, or exceeding WATER_DURATION_MS) is the only
+        // way this would otherwise spin, and this guarantees it can't.
+        var guard = 0;
+        while (p.stage < MAX_STAGE && guard++ < 1000) {
+          var wiltAt = p.lastWateredAt + WATER_DURATION_MS;
+          var nextEvent = Math.min(wiltAt, p.readyAt);
+          if (nextEvent > now) break; // nothing more a sprinkler would have done yet
+          applyWatering(p, nextEvent);
+          changed = true;
+        }
+        // A plant that reached MAX_STAGE (during the gap, or already
+        // before it) has nothing left to grow, but a running sprinkler
+        // would still have kept topping it off every time it crossed the
+        // wilt threshold - live tickSprinklers re-waters a maxed plant the
+        // moment it notices it's wilted (ready is permanently false once
+        // maxed, but wilted alone is still enough to trigger a visit), so
+        // in practice a maxed plant beside a running sprinkler is never
+        // actually seen wilted. Match that by refreshing the wilt clock
+        // straight to now instead of looping every WATER_DURATION_MS for
+        // however many cycles fit in the gap - none of those intermediate
+        // wilted/rewatered flickers were ever visible to anyone while the
+        // tab was closed, so there's nothing to actually replay.
+        if (p.stage >= MAX_STAGE && (now - p.lastWateredAt) >= WATER_DURATION_MS) {
+          p.lastWateredAt = now;
+          changed = true;
+        }
+      });
+
+      if (!changed) return;
+      saveState();
+      renderPlants();
+      updateHUD();
+      if (viewingKey && reachedKeys[viewingKey]) renderPlantPanel(viewingKey);
     }
 
     // ---- Sprinkler watering animation --------------------------------------
@@ -6200,8 +6302,10 @@
       var lastSeen = state.lastSeenAt;
       if (!lastSeen || Date.now() - lastSeen < WB_TOUR_MIN_AWAY_MS) return;
       var goneWild = collectGoneWild(Date.now()); // must run before tickPlants() sweeps its answer away
+      // Full offline catch-up first, before tickPlants()/buildAndStartWelcomeBackTour
+      // read any plant state below - see catchUpSprinklersOffline's own comment.
+      catchUpSprinklersOffline();
       tickPlants();
-      tickSprinklers();
       maybeSpawnWild();
       buildAndStartWelcomeBackTour(lastSeen, goneWild);
       state.lastSeenAt = Date.now();
@@ -6354,8 +6458,10 @@
       var lastSeen = state.lastSeenAt;
       var goneWild = collectGoneWild(Date.now());
 
+      // Full offline catch-up first, before tickPlants()/buildAndStartWelcomeBackTour
+      // read any plant state below - see catchUpSprinklersOffline's own comment.
+      catchUpSprinklersOffline();
       tickPlants();
-      tickSprinklers(); // catches up any adjacent plant that came ready/wilted while closed
       // Needs a real fix before it can ask "what paths are near here?", so it
       // hangs off the lock rather than off init. No-ops if today already ran.
       maybeSpawnWild();
@@ -8701,8 +8807,8 @@
     initToolRail();             // draw the three tool icons once
     syncFertUnlockUI();         // show Crossing Notes/fert sack right away for an already-unlocked save
     syncGreenhouseUnlockUI();   // show the Greenhouse menu entry right away for an already-unlocked save
+    catchUpSprinklersOffline(); // bank any stages a placed sprinkler earned while fully closed
     tickPlants();               // recompute any growth/wilt accrued while closed
-    tickSprinklers();           // catch up anything sprinklers should have watered while closed
     renderWild();               // wild flowers persist across sessions until picked
     renderSprinklers();         // placed sprinklers persist across sessions until picked back up
     renderWeeds();              // weeds persist across sessions until plucked, same as wild flowers

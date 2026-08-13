@@ -2366,7 +2366,7 @@
     // carry species/color/breeding value that weeds were never meant to have,
     // and sharing the dict would mean every wild-flower code path (panel,
     // journal, rarity) would need an "unless it's a weed" branch forever.
-    var WEED_MAX = 6;                 // a handful at once, never a second board to manage
+    var WEED_MAX = 30;                // issue #6: 5x the original 6 - now a steady scatter
     var WEED_MIN_GAP = 3;             // min tile distance from each other AND from plants/wild/sprinklers
     // Deliberately tighter than WILD_SPAWN_RADIUS_M (800m) - weeds are meant
     // to be noticed underfoot on an ordinary walk, not a destination worth
@@ -2375,9 +2375,9 @@
     // How often a spawn-check is even allowed to run (see maybeSpawnWeeds).
     // Wild flowers reset once a day and hand out a whole crop at once; weeds
     // top themselves back up to WEED_MAX a couple hours at a time instead, so
-    // the map never goes from "empty" to "6 weeds" in one visible jump and
-    // this reads as ambient background texture, not a second daily event to
-    // watch for.
+    // the map never goes from "empty" to "WEED_MAX weeds" in one visible jump
+    // and this reads as ambient background texture, not a second daily event
+    // to watch for.
     var WEED_SPAWN_INTERVAL_MS = 2 * HOUR;
 
     // ---------------------------------------------------------------------
@@ -3662,6 +3662,18 @@
       var lngScale = 111111 * Math.cos(origin.lat * Math.PI / 180);
       var chosen = [];
 
+      // attempts scales with `needed` (not a fixed count), so the issue #6
+      // bump from WEED_MAX 6 to 30 already carries a proportional retry
+      // budget for free - 1200 attempts at needed=6, 6000 at needed=30, same
+      // ~200-per-slot ratio either way. Checked the actual odds too: a cell
+      // is CELL_LAT_DEG ~20m across, WEED_MIN_GAP=3 excludes a Chebyshev
+      // radius of 2 around every avoid entry (a ~5x5-cell, ~100m x 100m
+      // block, ~10,000 sq m), and WEED_SPAWN_RADIUS_M=700 gives a disc of
+      // pi*700^2 =~1.54M sq m. Even fully packed with all 30 weeds already
+      // placed (worst case, ignoring plants/wild/sprinklers on top), that is
+      // 30 * 10,000 =~300,000 sq m excluded, ~19% of the disc - each dart
+      // still lands clean roughly 80% of the time, so 200 tries for that
+      // last slot is overkill, not a shortfall. No change needed here.
       var attempts = needed * 200;
       for (var a = 0; a < attempts && chosen.length < needed; a++) {
         // sqrt of a uniform gives an even spread over the disc's *area*; same
@@ -7142,9 +7154,9 @@
         'they\'re worth going out for today. Once in a while one turns up in a rare color you\'d ' +
         'otherwise have to breed - a bonus, not a shortcut around breeding, since which color and which ' +
         'flower is entirely down to chance.</p>' +
-        '<p><b>Weeds</b> \u{1F33F} - a small handful turn up around you too, topping back up every couple ' +
-        'hours. Tap one while you\'re close enough and it\'s plucked on the spot for 1 Petal - no walk ' +
-        'required to notice them, just something to clear as you pass.</p>' +
+        '<p><b>Weeds</b> \u{1F33F} - plenty turn up around you too, topping back up every couple hours. ' +
+        'Tap one while you\'re close enough and it\'s plucked on the spot for 1 Petal - no walk required ' +
+        'to notice them, just something to clear as you pass.</p>' +
         '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
         'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +

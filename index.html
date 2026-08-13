@@ -1395,7 +1395,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.20.0</span>
+      <span id="game-version">v2.20.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1671,6 +1671,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.20.1', changes: [
+        'Tapping bare ground out of walking range no longer says "walk ' +
+          'closer to plant a seed" when nothing is actually equipped - it ' +
+          'now stays quiet, since a bare tap was never going to plant ' +
+          'anything anyway. Walking up with a sprinkler in hand still gets ' +
+          'a heads-up.'
+      ] },
       { version: 'v2.20.0', changes: [
         'Flower-to-flower navigation moved into the flower details panel - ' +
           'tap a flower, then use the arrows on either side of the panel ' +

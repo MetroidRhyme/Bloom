@@ -51,8 +51,11 @@ the answer to.
 
 ```
 mcp__github__list_issues(owner: "MetroidRhyme", repo: "Bloom", state: "OPEN",
-  fields: ["number","title","body","labels","comments","created_at","updated_at"])
+  fields: ["number","title","body","user","labels","comments","created_at","updated_at"])
 ```
+
+Include `user` in the fields - it's how stage 2 tells whether an issue was
+opened by the repo owner (see the auto-approval rule below).
 
 Read every open issue's title and body. For any issue that touches actual
 game behavior (which is most of them - this is a single-file game, see
@@ -82,6 +85,21 @@ Don't skip this even when an issue looks obviously worth fixing to you -
 "obviously worth it" is still a judgment the user gets to make, not one to
 make on their behalf because the answer seems clear from where you're
 sitting.
+
+**Exception: issues opened by MetroidRhyme are auto-approved.** MetroidRhyme
+is the repo owner and the person this pipeline is run for - an issue with
+`user.login == "MetroidRhyme"` is already a decision that it's worth
+building, the same as if they'd typed "build issue #N" directly. Skip the
+stage-2 approval question for these and treat them as approved; still
+summarize what the issue asks for and what you found in the code (that part
+never gets skipped), just without the "should we build this" question
+attached. An issue filed by anyone else (a player report, a collaborator)
+still goes through the normal approval question.
+
+This exception only ever answers "should we build this" - it does not
+touch stage 3. An auto-approved issue can still need a real "how should
+this be built" question if it has genuine design ambiguity; auto-approval
+buys it a green light, not a blank check on specifics.
 
 ## 3. Confirm exactly how to build each approved one
 

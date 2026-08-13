@@ -177,12 +177,15 @@ couldn't have caught.
 Push first, then close - a closed issue pointing at a commit that isn't
 live yet is worse than a closed issue with no comment at all.
 
-Push per this repo's normal workflow: commit and push directly to `main`,
-no PRs, no branches - *unless* the session you're in was given different
-git-branch instructions for this particular piece of work (check for that
-before assuming `main` is the right target; a session working on a
-designated feature branch should stay on it unless told to promote to
-`main`).
+Always push to `main` once the user has approved shipping - no PRs, no
+branches left unmerged. This holds even in a session that was given
+different git-branch instructions for developing the change (e.g. a
+designated feature branch for this particular piece of work): do the
+work on that branch as instructed, but the moment the user has approved
+it, fast-forward or merge that branch into `main` and push `main` -
+don't stop at "pushed to the feature branch" and leave it there. The
+user's approval is what triggers the push to `main`; branch instructions
+only ever govern where the work happens *before* that point.
 
 For each issue that actually got shipped this round:
 

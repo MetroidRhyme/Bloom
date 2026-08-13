@@ -1397,7 +1397,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.18.0</span>
+      <span id="game-version">v2.18.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1678,6 +1678,15 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.18.1', changes: [
+        'Double-tapping no longer zooms the page or the map on iOS - ' +
+          'zoom is pinch-only now, so a quick double-tap can not be ' +
+          'mistaken for a map gesture.',
+        'A lot more weeds turn up around you now - up to five times as ' +
+          'many as before.',
+        'Removed the Wild Flowers menu screen - wild flowers themselves ' +
+          'still spawn and behave exactly the same.'
+      ] },
       { version: 'v2.18.0', changes: [
         'New: weeds. A small handful sprout around the map from time to ' +
           'time - tap one when you are in range to pluck it (with a quick ' +

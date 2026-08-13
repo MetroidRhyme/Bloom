@@ -522,6 +522,23 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.25);
     }
 
+    /* Weed pluck (see playWeedPluckFx): a one-shot pop-up-and-fade of the
+       herb glyph and its Petal payout, right where the weed stood. No drift
+       toward a target the way a sprinkler droplet has, since there's nothing
+       for it to travel to - it just needs to read as "something happened
+       here" for the WEED_PLUCK_FX_MS it's on screen. */
+    .weed-pluck-fx {
+      position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+      white-space: nowrap; font-size: 15px; font-weight: 700; color: var(--green-dark);
+      text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+      animation: weed-pluck-pop 650ms ease-out forwards;
+    }
+    @keyframes weed-pluck-pop {
+      0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+      25%  { opacity: 1; transform: translate(-50%, -70%) scale(1.1); }
+      100% { opacity: 0; transform: translate(-50%, -130%) scale(1); }
+    }
+
     /* ================= SHOP PANEL ================= */
     /* Full-screen takeover rather than a bottom sheet - stepping up to the
        stand should feel like leaving the map for a moment, not peeking at a
@@ -2289,6 +2306,30 @@
     var WILD_RARE_COLORS = COLORS.filter(function (c) { return c.tier === 1; })
       .map(function (c) { return c.id; });
 
+    // ---- Weeds -------------------------------------------------------------
+    // A much smaller, much simpler sibling of wild flowers - see issue #2.
+    // Weeds are NOT a second collectible economy: no species, no color, no
+    // journal entry, no growth. A weed is just a tile-blocking nuisance that
+    // pays 1 Petal the instant you tap it while in range, with a quick pluck
+    // animation, then it's gone. Deliberately its own state/constants/
+    // functions rather than a type flag bolted onto state.wild - wild flowers
+    // carry species/color/breeding value that weeds were never meant to have,
+    // and sharing the dict would mean every wild-flower code path (panel,
+    // journal, rarity) would need an "unless it's a weed" branch forever.
+    var WEED_MAX = 6;                 // a handful at once, never a second board to manage
+    var WEED_MIN_GAP = 3;             // min tile distance from each other AND from plants/wild/sprinklers
+    // Deliberately tighter than WILD_SPAWN_RADIUS_M (800m) - weeds are meant
+    // to be noticed underfoot on an ordinary walk, not a destination worth
+    // detouring for the way a wild bloom is.
+    var WEED_SPAWN_RADIUS_M = 700;
+    // How often a spawn-check is even allowed to run (see maybeSpawnWeeds).
+    // Wild flowers reset once a day and hand out a whole crop at once; weeds
+    // top themselves back up to WEED_MAX a couple hours at a time instead, so
+    // the map never goes from "empty" to "6 weeds" in one visible jump and
+    // this reads as ambient background texture, not a second daily event to
+    // watch for.
+    var WEED_SPAWN_INTERVAL_MS = 2 * HOUR;
+
     // ---------------------------------------------------------------------
     //  STATE & PERSISTENCE
     //  Small, single-blob save (unlike Porter's many-key layout) since
@@ -2495,6 +2536,14 @@
         plants: {},
         wild: {},            // cell key -> wild flower, scattered daily
         lastWildDay: null,   // local YYYY-MM-DD of the last spawn
+        // cell key -> { q, r, lat, lng, spawnedAt }, one entry per weed -
+        // see the WEEDS section for maybeSpawnWeeds/pluckWeedAt. No stage,
+        // color, or species - a weed is either on the map or it isn't.
+        weeds: {},
+        // Timestamp (ms) of the last weed spawn-check, gating
+        // WEED_SPAWN_INTERVAL_MS the same way lastWildDay gates the daily
+        // wild crop, just on a rolling cooldown instead of a calendar day.
+        lastWeedSpawnAt: null,
         // cell key -> { q, r, lat, lng, placedAt }, one entry per placed
         // sprinkler - see tickSprinklers for what "placed" actually does.
         sprinklers: {},
@@ -2659,6 +2708,15 @@
           plants: plants,
           wild: wild,
           lastWildDay: parsed.lastWildDay || null,
+          // Brand new with this feature - a pre-existing save simply has no
+          // weeds yet, same treatment as sprinklers/greenhouse got when they
+          // were introduced. lastWeedSpawnAt falling back to null (rather
+          // than "now") is deliberate: it makes maybeSpawnWeeds() run its
+          // very first check immediately on this player's next load instead
+          // of making them wait out a full WEED_SPAWN_INTERVAL_MS for a
+          // feature they've never seen before.
+          weeds: parsed.weeds || {},
+          lastWeedSpawnAt: typeof parsed.lastWeedSpawnAt === 'number' ? parsed.lastWeedSpawnAt : null,
           visited: visited,
           // Brand new with this feature - a pre-existing save simply starts
           // with an empty today-set, same backfill treatment as `visited`
@@ -2763,6 +2821,7 @@
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
+        weeds: state.weeds, lastWeedSpawnAt: state.lastWeedSpawnAt,
         visited: state.visited,
         todayAccessible: state.todayAccessible, todayAccessibleDay: state.todayAccessibleDay,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
@@ -3075,8 +3134,15 @@
       });
       if (vanished > 0) saveState();
 
+      // Weeds have no per-tick decay of their own (see the WEEDS section) -
+      // this just gives maybeSpawnWeeds() a heartbeat to check its cooldown
+      // against, reusing tickPlants' existing once-a-minute cadence instead
+      // of registering a second setInterval for the same idea.
+      maybeSpawnWeeds();
+
       renderPlants();
       renderWild();
+      renderWeeds();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
       // Keep an open Greenhouse fresh the same way an open plant panel is
@@ -3525,6 +3591,71 @@
       } else {
         wildStatus = 'Nowhere free to scatter any - your flowers cover the area.';
       }
+    }
+
+    // ---- Weeds (spawn) -----------------------------------------------------
+    // Deliberately parallel to pickWildSpots above, not a shared helper - the
+    // wild version prioritizes state.visited (proven-reachable ground) which
+    // matters for a once-a-day crop meant to pull a player out on a walk;
+    // weeds are a much smaller, much more frequent trickle where that extra
+    // bookkeeping isn't worth it. A plain dart-throw against the same
+    // avoid-list shape (cellDist + WEED_MIN_GAP) is plenty.
+    function pickWeedSpots(needed) {
+      if (!state.userPos) return [];
+      var avoid = [];
+      Object.keys(state.plants).forEach(function (k) { avoid.push(state.plants[k]); });
+      Object.keys(state.wild).forEach(function (k) { avoid.push(state.wild[k]); });
+      Object.keys(state.sprinklers).forEach(function (k) { avoid.push(state.sprinklers[k]); });
+      Object.keys(state.weeds).forEach(function (k) { avoid.push(state.weeds[k]); });
+
+      var origin = state.userPos;
+      var lngScale = 111111 * Math.cos(origin.lat * Math.PI / 180);
+      var chosen = [];
+
+      var attempts = needed * 200;
+      for (var a = 0; a < attempts && chosen.length < needed; a++) {
+        // sqrt of a uniform gives an even spread over the disc's *area*; same
+        // reasoning as pickWildSpots's own fallback loop.
+        var ang = Math.random() * Math.PI * 2;
+        var dist = Math.sqrt(Math.random()) * WEED_SPAWN_RADIUS_M;
+        var h = latLngToCell(
+          origin.lat + (dist * Math.cos(ang)) / 111111,
+          origin.lng + (dist * Math.sin(ang)) / lngScale
+        );
+        var ok = true;
+        for (var j = 0; j < avoid.length; j++) {
+          if (cellDist(h.q, h.r, avoid[j].q, avoid[j].r) < WEED_MIN_GAP) { ok = false; break; }
+        }
+        if (!ok) continue;
+        chosen.push(h);
+        avoid.push(h);
+      }
+      return chosen;
+    }
+
+    // Called from tickPlants() - a rolling cooldown (WEED_SPAWN_INTERVAL_MS)
+    // rather than wild flowers' once-per-calendar-day gate, so weeds trickle
+    // back in a couple hours after being cleared instead of requiring a
+    // fresh day. Stamps lastWeedSpawnAt even when nothing actually spawned
+    // (board already full, or no free tile found) - same reasoning as
+    // maybeSpawnWild stamping lastWildDay regardless of outcome - so a full
+    // board doesn't retry every single tick until something clears.
+    function maybeSpawnWeeds() {
+      if (!state.userPos) return;
+      var now = Date.now();
+      if (state.lastWeedSpawnAt && now - state.lastWeedSpawnAt < WEED_SPAWN_INTERVAL_MS) return;
+      state.lastWeedSpawnAt = now;
+
+      var needed = WEED_MAX - Object.keys(state.weeds).length;
+      if (needed <= 0) { saveState(); return; }
+
+      var spots = pickWeedSpots(needed);
+      spots.forEach(function (h) {
+        var c = cellCenter(h.q, h.r);
+        state.weeds[cellKey(h.q, h.r)] = { q: h.q, r: h.r, lat: c.lat, lng: c.lng, spawnedAt: now };
+      });
+      saveState();
+      renderWeeds();
     }
 
     // ---------------------------------------------------------------------
@@ -4278,6 +4409,21 @@
       return L.divIcon({ html: html, iconSize: [w, w], iconAnchor: [w / 2, w / 2], className: '' });
     }
 
+    // A weed marker: a plain herb glyph on a small dull-green disc, smaller
+    // than the sprinkler's own disc and with no glow/pulse the way wild
+    // flowers get - it's meant to read as a minor, easy-to-ignore nuisance,
+    // not something worth the map's attention the way a wild bloom or a
+    // placed sprinkler is. \u{1F33F} (herb) rather than any flower glyph, per
+    // the issue - it should never be mistaken for something worth breeding.
+    function makeWeedIcon() {
+      var px = plantIconBase();
+      _iconBuiltPx = px;
+      var w = Math.round(px * 0.55);
+      var html = '<div style="' + discStyle('#e3ead4', w) + '">' +
+        '<span style="font-size:' + Math.round(w * 0.6) + 'px;line-height:1">\u{1F33F}</span></div>';
+      return L.divIcon({ html: html, iconSize: [w, w], iconAnchor: [w / 2, w / 2], className: '' });
+    }
+
     // ---------------------------------------------------------------------
     //  MAP
     // ---------------------------------------------------------------------
@@ -4434,11 +4580,28 @@
         if (!seen[key]) { map.removeLayer(sprinklerMarkers[key]); delete sprinklerMarkers[key]; }
       });
     }
+    // Sits below everything else (85) - a weed is the least important thing
+    // that can occupy a tile, and in the vanishingly rare case one overlaps
+    // scenery from an adjacent tile it should never hide a real flower.
+    var weedMarkers = {};
+    function renderWeeds() {
+      var seen = {};
+      Object.keys(state.weeds).forEach(function (key) {
+        var w = state.weeds[key];
+        seen[key] = true;
+        var icon = makeWeedIcon();
+        if (weedMarkers[key]) weedMarkers[key].setIcon(icon);
+        else weedMarkers[key] = L.marker([w.lat, w.lng], { icon: icon, interactive: false, zIndexOffset: 85 }).addTo(map);
+      });
+      Object.keys(weedMarkers).forEach(function (key) {
+        if (!seen[key]) { map.removeLayer(weedMarkers[key]); delete weedMarkers[key]; }
+      });
+    }
 
     // Rebuild every icon at the new zoom's size once a zoom gesture settles -
     // see plantIconBase()/makePlantIcon above for why this is what actually
     // makes zooming in grow the flowers instead of them snapping back.
-    map.on('zoomend', function () { renderPlants(); renderWild(); renderSprinklers(); });
+    map.on('zoomend', function () { renderPlants(); renderWild(); renderSprinklers(); renderWeeds(); });
 
     // Live in-between-frames fix for the gap 'zoomend' alone leaves: CSS-scale
     // each marker's inner content div (never the marker element itself, which
@@ -4466,12 +4629,44 @@
       apply(plantMarkers);
       apply(wildMarkers);
       apply(sprinklerMarkers);
+      apply(weedMarkers);
     }
     map.on('zoom', function () {
       if (_iconRescalePending) return;
       _iconRescalePending = true;
       requestAnimationFrame(function () { _iconRescalePending = false; rescalePlantIcons(); });
     });
+
+    // ---- Weeds (interaction) -----------------------------------------------
+    // A quick pop-and-fade of the herb glyph plus a floating "+1" right where
+    // the weed was standing - addFx (defined further down, in SCREEN-SPACE
+    // EFFECTS) is a plain function declaration so it's already callable here
+    // regardless of source order. Auto-removed after WEED_PLUCK_FX_MS, same
+    // pattern as every other one-shot effect on this layer.
+    var WEED_PLUCK_FX_MS = 650;
+    function playWeedPluckFx(w) {
+      addFx('<div class="weed-pluck-fx">\u{1F33F} +1 \u{1F338}</div>', w.lat, w.lng, '', WEED_PLUCK_FX_MS);
+    }
+
+    // The whole interaction, per the issue: tap it (from any of the three tap
+    // entry points - see map.on('click'), resolveSeedTap, resolveToolTap),
+    // it's gone, and you're 1 Petal richer. No hold-to-confirm (there's
+    // nothing here worth protecting from an accidental tap the way selling a
+    // grown flower is), no panel, no journal entry - callers are responsible
+    // for the in-range check (same division of labor as pickUpSprinkler),
+    // this just does the pluck itself.
+    function pluckWeedAt(key) {
+      var w = state.weeds[key];
+      if (!w) return;
+      delete state.weeds[key];
+      state.currency += 1;
+      saveState();
+      renderWeeds();
+      updateCurrencyPill();
+      playWeedPluckFx(w);
+      toast('\u{1F33F} Plucked a weed - +1 \u{1F338}');
+      vibrate(15);
+    }
 
     // Empty ground within range plants immediately, but only with a seed
     // already equipped from the pouch (see plantEquippedSeedAt) - a bare tap
@@ -4501,6 +4696,15 @@
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var tileInRange = inRange(h.q, h.r);
+      // A weed just plucks on a plain tap in range - no panel, no tool, no
+      // hold-and-confirm, exactly the "you just tap them" the issue asked
+      // for. Checked ahead of the sprinkler/plant-a-seed branches below
+      // since a weed tile is never also a sprinkler or empty ground.
+      if (state.weeds[key]) {
+        if (!tileInRange) { toast('Walk closer to reach this weed \u{1F6B6}'); return; }
+        pluckWeedAt(key);
+        return;
+      }
       // A placed sprinkler always picks up on a tap, the same "act on what's
       // here" priority an occupied plant/wild tile already gets above -
       // moving it is an action, though, so it still needs the same walk-up
@@ -5037,6 +5241,19 @@
     }
 
     function resolveToolTap(ps) {
+      // A weed plucks on a plain tap no matter what tool happens to be
+      // equipped - toolTargetAt() only knows about plants/wild (see its own
+      // comment), so a weed tile always falls through to ps.target === null
+      // otherwise, and would land in the "empty ground" branch below with a
+      // "put the tool away to plant here" message that makes no sense for a
+      // tile that was never plantable to begin with.
+      var weedKey = cellKey(ps.cell.q, ps.cell.r);
+      if (state.weeds[weedKey]) {
+        if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
+        if (!inRange(ps.cell.q, ps.cell.r)) { toast('Walk closer to reach this weed \u{1F6B6}'); return; }
+        pluckWeedAt(weedKey);
+        return;
+      }
       if (!ps.target) {
         // Empty ground. Only worth a word inside planting range, where the tap
         // was probably meant to plant something - otherwise stay quiet.
@@ -5064,6 +5281,14 @@
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var tileInRange = inRange(ps.cell.q, ps.cell.r);
+      // A weed plucks the same way here as it does with nothing equipped -
+      // an equipped seed only ever plants on genuinely empty ground, so a
+      // weed tile is never a valid plant target anyway.
+      if (state.weeds[key]) {
+        if (!tileInRange) { toast('Walk closer to reach this weed \u{1F6B6}'); return; }
+        pluckWeedAt(key);
+        return;
+      }
       if (state.sprinklers[key]) {
         if (!tileInRange) { toast('Walk closer to move this sprinkler \u{1F6B6}'); return; }
         pickUpSprinkler(key);
@@ -6774,6 +6999,9 @@
         'they\'re worth going out for today. Once in a while one turns up in a rare color you\'d ' +
         'otherwise have to breed - a bonus, not a shortcut around breeding, since which color and which ' +
         'flower is entirely down to chance.</p>' +
+        '<p><b>Weeds</b> \u{1F33F} - a small handful turn up around you too, topping back up every couple ' +
+        'hours. Tap one while you\'re close enough and it\'s plucked on the spot for 1 Petal - no walk ' +
+        'required to notice them, just something to clear as you pass.</p>' +
         '<p><b>No pressure</b> - after a couple of days without water a flower starts to look wilted, and ' +
         'that\'s all it is: a look. Flowers never die, never get removed, and keep becoming ready to grow ' +
         'no matter how long you\'ve been away. One drink perks a wilted one right back up.</p>' +
@@ -8347,6 +8575,7 @@
     tickSprinklers();           // catch up anything sprinklers should have watered while closed
     renderWild();               // wild flowers persist across sessions until picked
     renderSprinklers();         // placed sprinklers persist across sessions until picked back up
+    renderWeeds();              // weeds persist across sessions until plucked, same as wild flowers
     updateHUD();
     updateCurrencyPill();
     setInterval(tickPlants, 60000);

@@ -1392,7 +1392,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.18.1</span>
+      <span id="game-version">v2.19.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1673,6 +1673,21 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.19.0', changes: [
+        'Sprinklers now keep watering while you are away - when you get ' +
+          'back, any of their flowers that would have been watered in the ' +
+          'meantime pick up right where they would have been, instead of ' +
+          'sitting untouched until your next visit.',
+        'Weeds are now a bigger tuft of grass to spot and pull, instead of ' +
+          'a small icon.',
+        'Dragging and holding to water, shear, or sell a whole area no ' +
+          'longer resets the fill ring from small finger movements - it ' +
+          'only restarts if you actually move to a different tile.',
+        'The Flower Journal no longer shows your lifetime totals at the ' +
+          'bottom of the page.',
+        'A starter color (white, red, yellow, blue) now stays greyed out ' +
+          'in the Flower Journal until you have actually grown one.'
+      ] },
       { version: 'v2.18.1', changes: [
         'Double-tapping no longer zooms the page or the map on iOS - ' +
           'zoom is pinch-only now, so a quick double-tap can not be ' +

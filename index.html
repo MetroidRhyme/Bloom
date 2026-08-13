@@ -1395,7 +1395,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.20.1</span>
+      <span id="game-version">v2.20.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1671,6 +1671,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.20.2', changes: [
+        'Tapping bare ground you can reach no longer nags about seeds -' +
+          ' "you\'re out of seeds" and "tap the seed pouch" are gone from' +
+          ' a plain tap on empty ground. Nothing happens there unless you' +
+          ' actually have something equipped, same as it already worked' +
+          ' out of range.'
+      ] },
       { version: 'v2.20.1', changes: [
         'Tapping bare ground out of walking range no longer says "walk ' +
           'closer to plant a seed" when nothing is actually equipped - it ' +
@@ -4970,8 +4977,11 @@
         return;
       }
       if (equippedSprinkler) { placeSprinklerAt(h.q, h.r); return; }
-      if (totalSeedCount() === 0) { toast("You're out of seeds - open the Shop \u{1F338} to buy more"); return; }
-      toast('Tap the seed pouch to choose what to plant \u{1F331}');
+      // Nothing equipped - a bare tap on empty ground never does anything on
+      // its own, in range or out of it (see the out-of-range branch above),
+      // so stay quiet here too instead of nagging about seeds the player
+      // hasn't chosen to use yet. Tapping the pouch itself still tells you
+      // when you're out (see onSeedPointerDown) - that's a different tap.
     });
 
     // ---------------------------------------------------------------------

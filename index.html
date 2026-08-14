@@ -1405,7 +1405,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.21.1</span>
+      <span id="game-version">v2.22.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1681,6 +1681,18 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.22.0', changes: [
+        'More battery savings: your position now updates every 5 seconds ' +
+          'instead of continuously, which should ease off the phone\'s GPS ' +
+          'radio noticeably on long walks. A tile is much wider than the ' +
+          'ground you cover in 5 seconds at a walking pace, so this ' +
+          'shouldn\'t be noticeable in play.',
+        'Large gardens are now dramatically lighter on the map: only ' +
+          'flowers, wild blooms, sprinklers and weeds actually near what ' +
+          'you can currently see get drawn, instead of every single one ' +
+          'you\'ve ever planted across every walk. A big lifetime garden ' +
+          'now pans, zooms, and ticks just as smoothly as a brand new one.'
+      ] },
       { version: 'v2.21.1', changes: [
         'Battery/heat fix: the map was quietly rebuilding every flower, ' +
           'wild bloom and weed icon once a minute even when nothing about ' +
@@ -4759,6 +4771,27 @@
     var GRID_MIN_ZOOM = 17;
     var GRID_MAX_CELLS = 3000; // safety cap in case the viewport math overshoots
 
+    // Shared by renderGridMesh below and by the marker-culling render
+    // functions further down (renderPlants/renderWild/renderSprinklers/
+    // renderWeeds) - both need "which cells does the current viewport
+    // actually cover, plus some padding around the edges," just with a
+    // different amount of padding for their own purposes (see each call
+    // site's own comment). padFrac is a fraction of one viewport's
+    // width/height, same units L.LatLngBounds.pad() takes.
+    function viewportCellBounds(padFrac) {
+      var vb = map.getBounds().pad(padFrac);
+      var corners = [
+        latLngToCell(vb.getSouth(), vb.getWest()), latLngToCell(vb.getNorth(), vb.getEast()),
+        latLngToCell(vb.getSouth(), vb.getEast()), latLngToCell(vb.getNorth(), vb.getWest())
+      ];
+      return {
+        minQ: Math.min.apply(null, corners.map(function (c) { return c.q; })) - 1,
+        maxQ: Math.max.apply(null, corners.map(function (c) { return c.q; })) + 1,
+        minR: Math.min.apply(null, corners.map(function (c) { return c.r; })) - 1,
+        maxR: Math.max.apply(null, corners.map(function (c) { return c.r; })) + 1
+      };
+    }
+
     var _gridRedrawPending = false;
     function scheduleGridRedraw() {
       if (_gridRedrawPending) return;
@@ -4781,15 +4814,8 @@
       ctx.clearRect(b.min.x, b.min.y, sz.x, sz.y);
       if (map.getZoom() < GRID_MIN_ZOOM) return;
 
-      var vb = map.getBounds().pad(0.25);
-      var corners = [
-        latLngToCell(vb.getSouth(), vb.getWest()), latLngToCell(vb.getNorth(), vb.getEast()),
-        latLngToCell(vb.getSouth(), vb.getEast()), latLngToCell(vb.getNorth(), vb.getWest())
-      ];
-      var minQ = Math.min.apply(null, corners.map(function (c) { return c.q; })) - 1;
-      var maxQ = Math.max.apply(null, corners.map(function (c) { return c.q; })) + 1;
-      var minR = Math.min.apply(null, corners.map(function (c) { return c.r; })) - 1;
-      var maxR = Math.max.apply(null, corners.map(function (c) { return c.r; })) + 1;
+      var vc = viewportCellBounds(0.25);
+      var minQ = vc.minQ, maxQ = vc.maxQ, minR = vc.minR, maxR = vc.maxR;
       if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_CELLS) return;
 
       // Re-validated against localDayKey() here too, same guard inRange()
@@ -4832,6 +4858,45 @@
     }
     map.on('moveend zoomend viewreset resize', scheduleGridRedraw);
 
+    // Viewport virtualization: a marker only ever gets built for a plant/
+    // wild bloom/sprinkler/weed whose tile falls within the current map
+    // viewport (plus MARKER_VIEWPORT_PAD of slack around the edges, so
+    // panning doesn't pop new ones in right at the screen edge). A walking
+    // game's whole point is that the garden accumulates across however much
+    // real-world ground the player has ever covered - a lifetime garden of
+    // thousands of flowers scattered across a city is entirely normal, but
+    // at most a couple dozen of those are ever near enough to the player to
+    // be on screen at once. Before this, every render function built and
+    // kept a real Leaflet marker (a DOM node holding a full inline SVG, plus
+    // several infinitely-animating wind-sway groups inside it - see
+    // buildNewVisual) for literally every entry in state.plants/wild/
+    // sprinklers/weeds forever, whether it was visible or a hundred miles
+    // off screen. Measured cost of that: with 1500 plants spread across a
+    // realistic play area, a single full rebuild (which a zoom gesture
+    // triggers unconditionally, since the icon's pixel size changes) took
+    // over 2 seconds of main-thread work, and left 1500+ DOM nodes with
+    // 9000+ concurrently-animating child elements sitting in the page for
+    // the life of the session - regardless of how few of them a player could
+    // actually see. Bounding "how much gets built" by the viewport instead
+    // of by lifetime garden size fixes both: cost now tracks what's on
+    // screen, which stays small and roughly constant no matter how large the
+    // garden grows.
+    //
+    // A generous pad (MARKER_VIEWPORT_PAD, well beyond the grid mesh's own
+    // 0.25 - see viewportCellBounds above) trades a little of that saving
+    // for smoother edges: a flower a player is about to pan into view is
+    // usually already built by the time it's actually visible. This is a
+    // plain filter over every entry in state.* on every call (moveend/
+    // zoomend, and every existing render call site - planting, watering,
+    // harvesting, etc.), but that's just cheap numeric comparisons, not the
+    // expensive part (see the icon-key caching comment that used to sit
+    // here, still true for whatever's in view) - it costs low single-digit
+    // ms even at several thousand entries.
+    var MARKER_VIEWPORT_PAD = 0.5;
+    function inMarkerViewport(vc, q, r) {
+      return q >= vc.minQ && q <= vc.maxQ && r >= vc.minR && r <= vc.maxR;
+    }
+
     // Every plant/wild/weed marker below is keyed not just by cell but by an
     // "_iconKey" fingerprint of everything that could change how it looks
     // (species/color/stage/wilted/ready/px). tickPlants calls renderPlants/
@@ -4848,9 +4913,10 @@
     var plantMarkers = {};
     function renderPlants() {
       var seen = {};
-      var now = Date.now(), px = plantIconBase();
+      var now = Date.now(), px = plantIconBase(), vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(state.plants).forEach(function (key) {
         var p = state.plants[key];
+        if (!inMarkerViewport(vc, p.q, p.r)) return; // off screen - leave unbuilt (or torn down below if it already existed)
         seen[key] = true;
         var d = recomputePlant(p, now);
         var iconKey = p.species + '|' + p.color + '|' + d.stage + '|' + d.wilted + '|' + d.ready + '|' + px;
@@ -4871,9 +4937,10 @@
     var wildMarkers = {};
     function renderWild() {
       var seen = {};
-      var now = Date.now(), px = plantIconBase();
+      var now = Date.now(), px = plantIconBase(), vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(state.wild).forEach(function (key) {
         var w = state.wild[key];
+        if (!inMarkerViewport(vc, w.q, w.r)) return;
         seen[key] = true;
         var d = wildDerived(w, now);
         var iconKey = w.species + '|' + w.color + '|' + d.wilted + '|' + px;
@@ -4895,8 +4962,10 @@
     var sprinklerMarkers = {};
     function renderSprinklers() {
       var seen = {};
+      var vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(state.sprinklers).forEach(function (key) {
         var s = state.sprinklers[key];
+        if (!inMarkerViewport(vc, s.q, s.r)) return;
         seen[key] = true;
         var icon = makeSprinklerIcon();
         if (sprinklerMarkers[key]) sprinklerMarkers[key].setIcon(icon);
@@ -4912,9 +4981,10 @@
     var weedMarkers = {};
     function renderWeeds() {
       var seen = {};
-      var px = plantIconBase();
+      var px = plantIconBase(), vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(state.weeds).forEach(function (key) {
         var w = state.weeds[key];
+        if (!inMarkerViewport(vc, w.q, w.r)) return;
         seen[key] = true;
         // A weed's look never changes over its lifetime (see makeWeedIcon -
         // it's seeded purely off q,r), so px is the only thing that can ever
@@ -4934,10 +5004,25 @@
       });
     }
 
-    // Rebuild every icon at the new zoom's size once a zoom gesture settles -
-    // see plantIconBase()/makePlantIcon above for why this is what actually
-    // makes zooming in grow the flowers instead of them snapping back.
-    map.on('zoomend', function () { renderPlants(); renderWild(); renderSprinklers(); renderWeeds(); });
+    // Rebuilds every visible marker at the new zoom's icon size once a zoom
+    // gesture settles (see plantIconBase()/makePlantIcon above for why this
+    // is what actually makes zooming in grow the flowers instead of them
+    // snapping back), and - together with 'moveend' - is also what brings
+    // newly-panned-into-view markers to life / tears down ones that just
+    // scrolled out (see the viewport-virtualization comment above
+    // MARKER_VIEWPORT_PAD). RAF-debounced the same way scheduleGridRedraw
+    // is, and bound to the same event list, since both are answering the
+    // same "the viewport just changed" question.
+    var _markerRenderPending = false;
+    function scheduleMarkerRender() {
+      if (_markerRenderPending) return;
+      _markerRenderPending = true;
+      requestAnimationFrame(function () {
+        _markerRenderPending = false;
+        renderPlants(); renderWild(); renderSprinklers(); renderWeeds();
+      });
+    }
+    map.on('moveend zoomend viewreset resize', scheduleMarkerRender);
 
     // Live in-between-frames fix for the gap 'zoomend' alone leaves: CSS-scale
     // each marker's inner content div (never the marker element itself, which
@@ -6504,14 +6589,49 @@
       saveState();
     });
 
-    // The actual permission request - split out so both the normal startup
-    // path and the primer's "Allow Location" button (see openGpsPrimer) and
-    // retryLocation() can all trigger it the same way.
-    function requestLocation() {
-      navigator.geolocation.watchPosition(onLocationUpdate, onLocationError, {
+    // Battery: polled on an interval rather than a continuous
+    // watchPosition() subscription. watchPosition asks the OS to keep the
+    // GPS radio in a continuously-active high-accuracy session for as long
+    // as it's open - on a walking game left running for hours that's one of
+    // the single biggest battery/heat costs on the phone. A plain fix every
+    // GPS_POLL_MS instead lets the radio power back down between polls the
+    // same way any other on-demand location request does, at the cost of
+    // noticing a tile change up to GPS_POLL_MS late - a real tradeoff, but
+    // one a walking pace (a tile is CELL_LAT_DEG/CELL_LNG_DEG wide, well
+    // over the ~10-15m a person covers in 5s at a stroll) doesn't actually
+    // feel.
+    var GPS_POLL_MS = 5000;
+    var _gpsPollTimer = null, _gpsStarted = false;
+    function pollLocation() {
+      navigator.geolocation.getCurrentPosition(onLocationUpdate, onLocationError, {
         enableHighAccuracy: true, maximumAge: 3000, timeout: 15000
       });
     }
+    // The actual permission request - split out so both the normal startup
+    // path and the primer's "Allow Location" button (see openGpsPrimer) and
+    // retryLocation() can all trigger it the same way. Clears any prior
+    // timer first so a retry (permission granted after an initial denial)
+    // can never stack a second interval on top of the first.
+    function requestLocation() {
+      _gpsStarted = true;
+      if (_gpsPollTimer) clearInterval(_gpsPollTimer);
+      pollLocation(); // don't make the very first lock wait out a full interval
+      if (!document.hidden) _gpsPollTimer = setInterval(pollLocation, GPS_POLL_MS);
+    }
+    // Nothing GPS-driven is visible while the tab/app is backgrounded (same
+    // reasoning as the CSS .bg-paused rule above), so polling stops
+    // entirely rather than just continuing to spend battery unseen - and
+    // picks back up with one immediate fix, not a stale position left over
+    // from before, the moment it's visible again.
+    document.addEventListener('visibilitychange', function () {
+      if (!_gpsStarted) return; // still on the GPS primer, or geolocation unsupported
+      if (document.hidden) {
+        if (_gpsPollTimer) { clearInterval(_gpsPollTimer); _gpsPollTimer = null; }
+      } else if (!_gpsPollTimer) {
+        pollLocation();
+        _gpsPollTimer = setInterval(pollLocation, GPS_POLL_MS);
+      }
+    });
 
     if (!navigator.geolocation) {
       document.getElementById('gps-status').textContent = 'NO GPS';
@@ -6630,8 +6750,9 @@
       document.getElementById('hud-status-line').textContent = msgs[err.code] || err.message;
       // code 1 = permission denied is the one case with no automatic
       // recovery - codes 2/3 (position unavailable / timeout) resolve on
-      // their own as watchPosition keeps retrying, so only 1 needs a way
-      // back in. See retryLocation()/onLocationUpdate for how this clears.
+      // their own as the next poll comes around (see pollLocation's
+      // interval), so only 1 needs a way back in. See retryLocation()/
+      // onLocationUpdate for how this clears.
       if (err.code === 1) document.getElementById('gps-denied-banner').classList.add('open');
     }
 

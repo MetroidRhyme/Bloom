@@ -1386,6 +1386,16 @@
         transition-duration: 0.01ms !important;
       }
     }
+    /* Wind sway, pulses and glows (see ANIMATIONS above) run continuously
+       and infinitely by design - ambient life on the map. None of that is
+       visible while the tab/app is backgrounded, so there's nothing to lose
+       by pausing every animation the instant it isn't - see the
+       visibilitychange listener in the script that toggles this class. An
+       infinite ambient loop has no "correct" phase to preserve, so resuming
+       partway through reads exactly the same as never having paused it. */
+    body.bg-paused *, body.bg-paused *::before, body.bg-paused *::after {
+      animation-play-state: paused !important;
+    }
   </style>
 </head>
 <body>
@@ -1395,7 +1405,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.21.0</span>
+      <span id="game-version">v2.21.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1671,6 +1681,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.21.1', changes: [
+        'Battery/heat fix: the map was quietly rebuilding every flower, ' +
+          'wild bloom and weed icon once a minute even when nothing about ' +
+          'them had actually changed, and kept the ambient wind-sway ' +
+          'animations running while the app was backgrounded. Both now sit ' +
+          'idle unless something is really different or visible, which ' +
+          'should mean noticeably less battery drain and heat on long walks.'
+      ] },
       { version: 'v2.21.0', changes: [
         'Opening the game away from your garden now drops you on one of ' +
           'your own flowers instead of stranding you at your current ' +
@@ -4814,15 +4832,35 @@
     }
     map.on('moveend zoomend viewreset resize', scheduleGridRedraw);
 
+    // Every plant/wild/weed marker below is keyed not just by cell but by an
+    // "_iconKey" fingerprint of everything that could change how it looks
+    // (species/color/stage/wilted/ready/px). tickPlants calls renderPlants/
+    // renderWild/renderWeeds once a minute forever, but a plant's actual
+    // appearance only changes on a real stage-up or wilt/ready threshold
+    // crossing - stretches of many minutes/hours where nothing visible
+    // happened are by far the common case. Rebuilding the full SVG markup
+    // (grass clumps, defs, gradients - see buildNewVisual) and forcing
+    // Leaflet to swap the marker's icon (a real DOM node replace) for every
+    // planted flower on every one of those ticks was pure waste: same pixels
+    // in, same pixels out. Skipping the rebuild when the fingerprint hasn't
+    // moved is invisible to the player - the rendered result is byte-
+    // identical either way - it just stops burning CPU/battery on it.
     var plantMarkers = {};
     function renderPlants() {
       var seen = {};
+      var now = Date.now(), px = plantIconBase();
       Object.keys(state.plants).forEach(function (key) {
         var p = state.plants[key];
         seen[key] = true;
-        var icon = makePlantIcon(p);
-        if (plantMarkers[key]) plantMarkers[key].setIcon(icon);
-        else plantMarkers[key] = L.marker([p.lat, p.lng], { icon: icon, interactive: false, zIndexOffset: 100 }).addTo(map);
+        var d = recomputePlant(p, now);
+        var iconKey = p.species + '|' + p.color + '|' + d.stage + '|' + d.wilted + '|' + d.ready + '|' + px;
+        var m = plantMarkers[key];
+        if (m) {
+          if (m._iconKey !== iconKey) { m.setIcon(makePlantIcon(p)); m._iconKey = iconKey; }
+        } else {
+          m = plantMarkers[key] = L.marker([p.lat, p.lng], { icon: makePlantIcon(p), interactive: false, zIndexOffset: 100 }).addTo(map);
+          m._iconKey = iconKey;
+        }
       });
       Object.keys(plantMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(plantMarkers[key]); delete plantMarkers[key]; }
@@ -4833,12 +4871,19 @@
     var wildMarkers = {};
     function renderWild() {
       var seen = {};
+      var now = Date.now(), px = plantIconBase();
       Object.keys(state.wild).forEach(function (key) {
         var w = state.wild[key];
         seen[key] = true;
-        var icon = makeWildIcon(w);
-        if (wildMarkers[key]) wildMarkers[key].setIcon(icon);
-        else wildMarkers[key] = L.marker([w.lat, w.lng], { icon: icon, interactive: false, zIndexOffset: 90 }).addTo(map);
+        var d = wildDerived(w, now);
+        var iconKey = w.species + '|' + w.color + '|' + d.wilted + '|' + px;
+        var m = wildMarkers[key];
+        if (m) {
+          if (m._iconKey !== iconKey) { m.setIcon(makeWildIcon(w)); m._iconKey = iconKey; }
+        } else {
+          m = wildMarkers[key] = L.marker([w.lat, w.lng], { icon: makeWildIcon(w), interactive: false, zIndexOffset: 90 }).addTo(map);
+          m._iconKey = iconKey;
+        }
       });
       Object.keys(wildMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(wildMarkers[key]); delete wildMarkers[key]; }
@@ -4867,12 +4912,22 @@
     var weedMarkers = {};
     function renderWeeds() {
       var seen = {};
+      var px = plantIconBase();
       Object.keys(state.weeds).forEach(function (key) {
         var w = state.weeds[key];
         seen[key] = true;
-        var icon = makeWeedIcon(w);
-        if (weedMarkers[key]) weedMarkers[key].setIcon(icon);
-        else weedMarkers[key] = L.marker([w.lat, w.lng], { icon: icon, interactive: false, zIndexOffset: 85 }).addTo(map);
+        // A weed's look never changes over its lifetime (see makeWeedIcon -
+        // it's seeded purely off q,r), so px is the only thing that can ever
+        // move this key - same "skip the rebuild when nothing changed"
+        // reasoning as renderPlants/renderWild above.
+        var iconKey = px + '';
+        var m = weedMarkers[key];
+        if (m) {
+          if (m._iconKey !== iconKey) { m.setIcon(makeWeedIcon(w)); m._iconKey = iconKey; }
+        } else {
+          m = weedMarkers[key] = L.marker([w.lat, w.lng], { icon: makeWeedIcon(w), interactive: false, zIndexOffset: 85 }).addTo(map);
+          m._iconKey = iconKey;
+        }
       });
       Object.keys(weedMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(weedMarkers[key]); delete weedMarkers[key]; }
@@ -6265,6 +6320,17 @@
     var rangeArea = null, viewingKey = null, viewingWild = false;
     var userCellQ = null, userCellR = null;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Battery: pause every ambient CSS animation (wind sway, wild-flower
+    // pulse, signature-color glow) the instant the tab/app is backgrounded -
+    // see the .bg-paused rule up in ANIMATIONS. Nothing it affects is ever
+    // visible while hidden, so this is pure savings, not a tradeoff: it just
+    // stops the compositor from doing continuous work for a screen nobody
+    // can see.
+    if (document.hidden) document.body.classList.add('bg-paused');
+    document.addEventListener('visibilitychange', function () {
+      document.body.classList.toggle('bg-paused', document.hidden);
+    });
 
     // -----------------------------------------------------------------------
     //  WELCOME-BACK TOUR

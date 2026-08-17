@@ -1333,6 +1333,15 @@
     @keyframes wild-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.12); } }
     .wild-glow { animation: wild-pulse 2.8s ease-in-out infinite; }
 
+    /* Rain ring center marker (see renderRainRings) - a plain pulsing
+       raindrop, reusing the same `pulse` keyframe above rather than
+       inventing a near-identical one. */
+    .rain-ring-drop {
+      font-size: 20px; line-height: 1; text-align: center;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+      opacity: 0.85; animation: pulse 2.4s ease-in-out infinite;
+    }
+
     /* Signature colors only (see COLORS `species`). These are drawn inside the
        flower's own SVG, so the same markup glows in a 26px bookmark and a
        110px map marker with no extra elements around it.
@@ -1405,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.22.0</span>
+      <span id="game-version">v2.23.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1633,6 +1642,19 @@
 
     var PLANT_RANGE = 2;   // how close (in tiles, 8-directional) you must be to plant or water
 
+    // Basic elemental magic, step one: a RAIN RING. Eight blue flowers (any
+    // species - only the color matters) planted in the 8 tiles immediately
+    // around one empty tile, all grown to a full cluster, keep every plant in
+    // a square RAIN_RING_RADIUS tiles out from that empty center tile
+    // watered on their own - including the ring's own eight blue flowers -
+    // for as long as the ring stays intact. See the RAIN RINGS section
+    // (below catchUpSprinklersOffline) for the actual detection/watering
+    // logic. There is deliberately no in-game hint that this exists yet
+    // (spellbook/tutorial copy is a later feature) - the only tell is
+    // whatever a player can actually see happen on the map.
+    var RAIN_RING_COLOR = 'blue';
+    var RAIN_RING_RADIUS = 2;   // Chebyshev distance from the center tile that gets rained on - a 5x5 block
+
     // Full water drains to empty over 2 days, at which point the flower starts
     // *looking* wilted. That is the entire consequence: wilting is cosmetic.
     // Plants cannot die and are never removed from the ground, so going away
@@ -1681,6 +1703,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.23.0', changes: [
+        'Something new is possible in how you arrange your flowers - the ' +
+          'game won\'t tell you what, so keep an eye on your garden and see ' +
+          'for yourself.'
+      ] },
       { version: 'v2.22.0', changes: [
         'More battery savings: your position now updates every 5 seconds ' +
           'instead of continuously, which should ease off the phone\'s GPS ' +
@@ -3090,6 +3117,11 @@
         reachedBloom: false, reachedFlourish: false, grownCredited: false
       };
       state.stats.planted++;
+      // A plant just landed on this tile - the only way that matters to a
+      // rain ring is if this tile WAS an active ring's empty center (see
+      // RAIN RINGS, above catchUpSprinklersOffline). It can't complete or
+      // join one itself: it starts at stage 0, and MAX_STAGE is required.
+      refreshRainRingCandidates(candidateRingCentersAround(q, r));
       saveState();
       renderPlants();
       updateHUD();
@@ -3140,6 +3172,14 @@
           if (!state.fertReady) {
             state.fertReady = true;
             maybeStartFertTutorial();
+          }
+          // This flower just reached a full cluster for the first time -
+          // the one moment a RAIN RING can newly complete (see the RAIN
+          // RINGS section above catchUpSprinklersOffline). Only worth
+          // checking at all if it's the right color; candidateRingCentersAround
+          // covers every center this plant could possibly be a spoke of.
+          if (colorOfPlant(p) === RAIN_RING_COLOR) {
+            refreshRainRingCandidates(candidateRingCentersAround(p.q, p.r));
           }
         }
         // A bred seedling opening is the payoff of the whole crossing loop, so
@@ -3225,6 +3265,10 @@
       var vk = variantKey(p.species, p.color || baseColorOf(p.species));
       var label = variantName(vk) + (isCluster ? ' cluster' : '');
       delete state.plants[key];
+      // This tile just went empty - either it was a ring's own now-broken
+      // spoke, or it was blocking a candidate center that can now form (see
+      // RAIN RINGS, above catchUpSprinklersOffline).
+      refreshRainRingCandidates(candidateRingCentersAround(p.q, p.r));
       if (!p.grownCredited) recordGrown(vk);
 
       var value = 0;
@@ -3470,6 +3514,214 @@
       renderPlants();
       updateHUD();
       if (viewingKey && reachedKeys[viewingKey]) renderPlantPanel(viewingKey);
+    }
+
+    // ---------------------------------------------------------------------
+    //  RAIN RINGS  (basic elemental magic - see RAIN_RING_RADIUS above)
+    //
+    //  `rainRings` is NOT part of `state` - unlike state.sprinklers (a
+    //  player-placed object, the only source of truth for where it is),
+    //  a ring is entirely a function of what's already sitting in
+    //  state.plants, so persisting a second copy would just be one more
+    //  thing that could drift out of sync with the real garden. Instead
+    //  it's rebuilt into this plain in-memory cache once at load
+    //  (recomputeRainRingsFull, called from INIT) and kept current for the
+    //  rest of the session by refreshRainRingCandidates - called from every
+    //  place state.plants can actually change: plantSeedAt, doBreed,
+    //  harvestPlant, and (the one that lets a ring complete in the first
+    //  place) applyWatering's own stage-reaches-MAX_STAGE block. Since
+    //  every watering path in the game - a manual tap, a sprinkler, and
+    //  a rain ring itself - funnels through that one applyWatering, a
+    //  ring completing (or another plant growing into blue-cluster range
+    //  because THIS ring watered it) is caught automatically with no extra
+    //  wiring at each of those call sites.
+    var rainRings = {}; // centerKey ("q,r") -> { q, r, lat, lng }
+
+    // A ring is valid at (cq, cr) iff that tile itself is empty AND all 8
+    // neighbors are blue flowers already grown to a full cluster. Species
+    // doesn't matter (any of the 8 can be a different kind of flower) - only
+    // color and stage do.
+    function isRainRingComplete(cq, cr) {
+      if (state.plants[cellKey(cq, cr)]) return false; // center tile must stay empty
+      for (var i = 0; i < CELL_NEIGHBORS.length; i++) {
+        var d = CELL_NEIGHBORS[i];
+        var p = state.plants[cellKey(cq + d[0], cr + d[1])];
+        if (!p || colorOfPlant(p) !== RAIN_RING_COLOR || p.stage < MAX_STAGE) return false;
+      }
+      return true;
+    }
+
+    // Every tile whose ring-membership could possibly have changed because
+    // of something happening AT (q, r): (q, r) itself (it may have just
+    // become empty/occupied, i.e. could now be a center) plus its 8
+    // neighbors (it may have just become/stopped being one of THEIR
+    // spokes). Nothing further out than that can ever be affected by a
+    // single-tile change, since a ring only ever looks at its own center
+    // and its own 8 neighbors.
+    function candidateRingCentersAround(q, r) {
+      var list = [{ q: q, r: r }];
+      CELL_NEIGHBORS.forEach(function (d) { list.push({ q: q + d[0], r: r + d[1] }); });
+      return list;
+    }
+
+    // Re-tests a batch of candidate centers against the real garden and
+    // adds/removes them from `rainRings` to match, redrawing the map markers
+    // once at the end if anything actually changed. Cheap regardless of
+    // garden size - bounded by the (tiny) list of candidates passed in, not
+    // by the whole plant count.
+    function refreshRainRingCandidates(centers) {
+      var changed = false;
+      centers.forEach(function (c) {
+        var key = cellKey(c.q, c.r);
+        var was = !!rainRings[key];
+        var valid = isRainRingComplete(c.q, c.r);
+        if (valid && !was) {
+          var ll = cellCenter(c.q, c.r);
+          rainRings[key] = { q: c.q, r: c.r, lat: ll.lat, lng: ll.lng };
+          changed = true;
+        } else if (!valid && was) {
+          delete rainRings[key];
+          changed = true;
+        }
+      });
+      if (changed) renderRainRings();
+      return changed;
+    }
+
+    // Full rebuild from scratch - only ever needed once, at boot (see INIT),
+    // to seed `rainRings` from whatever a returning player already has
+    // planted (an old save can easily already contain a qualifying ring).
+    // From then on refreshRainRingCandidates keeps it current incrementally,
+    // so nothing else needs to call this. Still cheap even here: only a
+    // blue flower already at MAX_STAGE can ever be a ring's spoke, so this
+    // walks the (usually tiny) set of those, not the whole garden.
+    function recomputeRainRingsFull() {
+      var candidates = {};
+      Object.keys(state.plants).forEach(function (key) {
+        var p = state.plants[key];
+        if (colorOfPlant(p) !== RAIN_RING_COLOR || p.stage < MAX_STAGE) return;
+        CELL_NEIGHBORS.forEach(function (d) {
+          var ck = cellKey(p.q + d[0], p.r + d[1]);
+          candidates[ck] = { q: p.q + d[0], r: p.r + d[1] };
+        });
+      });
+      rainRings = {};
+      Object.keys(candidates).forEach(function (ck) {
+        var c = candidates[ck];
+        if (isRainRingComplete(c.q, c.r)) rainRings[ck] = { q: c.q, r: c.r, lat: cellCenter(c.q, c.r).lat, lng: cellCenter(c.q, c.r).lng };
+      });
+    }
+
+    // Live tick, same cadence/shape as tickSprinklers: for every active
+    // ring, water (or top off) anything within RAIN_RING_RADIUS tiles of its
+    // center that's wilted or ready, straight through applyWatering with no
+    // per-flower animation - this is meant to read as ambient weather over
+    // a whole area, not a series of individual watering-can visits. A ring
+    // growing one of its own neighbors' neighbors into a fresh blue cluster
+    // (and so completing a second ring) is picked up for free by
+    // applyWatering's own hook - nothing extra to do here for that.
+    var RAIN_TICK_MS = 1000;
+    function tickRainRings() {
+      var keys = Object.keys(rainRings);
+      if (!keys.length) return;
+      var now = Date.now();
+      var changed = false;
+      keys.forEach(function (rk) {
+        var ring = rainRings[rk];
+        if (!ring) return; // a ring earlier in this same pass grew a spoke that broke this one
+        for (var dq = -RAIN_RING_RADIUS; dq <= RAIN_RING_RADIUS; dq++) {
+          for (var dr = -RAIN_RING_RADIUS; dr <= RAIN_RING_RADIUS; dr++) {
+            var p = state.plants[cellKey(ring.q + dq, ring.r + dr)];
+            if (!p) continue;
+            var wilted = (now - p.lastWateredAt) >= WATER_DURATION_MS;
+            var ready = p.stage < MAX_STAGE && now >= p.readyAt;
+            if (!wilted && !ready) continue;
+            applyWatering(p, now);
+            changed = true;
+          }
+        }
+      });
+      if (!changed) return;
+      saveState();
+      renderPlants();
+      updateHUD();
+      if (viewingKey) renderPlantPanel(viewingKey);
+    }
+
+    // Offline counterpart, same spirit as catchUpSprinklersOffline (see its
+    // own comment for the general reasoning) - called right after that one,
+    // so a ring that only just completed because a sprinkler grew its last
+    // spoke during the same gap is already registered in `rainRings` by the
+    // time this runs. Iterates a snapshot of the rings active at the start
+    // of the gap; a ring that only comes into existence THROUGH this pass's
+    // own catch-up (this ring's watering grows another ring's last spoke)
+    // catches up for real on the very next live tickRainRings a second
+    // later instead of within this same pass - a rare enough chain for a
+    // basic first version of this spell not to chase any further.
+    function catchUpRainRingsOffline() {
+      var ringKeys = Object.keys(rainRings);
+      if (!ringKeys.length) return;
+      var now = Date.now();
+      var changed = false;
+      ringKeys.forEach(function (rk) {
+        var ring = rainRings[rk];
+        if (!ring) return;
+        for (var dq = -RAIN_RING_RADIUS; dq <= RAIN_RING_RADIUS; dq++) {
+          for (var dr = -RAIN_RING_RADIUS; dr <= RAIN_RING_RADIUS; dr++) {
+            var p = state.plants[cellKey(ring.q + dq, ring.r + dr)];
+            if (!p) continue;
+            var guard = 0;
+            while (p.stage < MAX_STAGE && guard++ < 1000) {
+              var wiltAt = p.lastWateredAt + WATER_DURATION_MS;
+              var nextEvent = Math.min(wiltAt, p.readyAt);
+              if (nextEvent > now) break;
+              applyWatering(p, nextEvent);
+              changed = true;
+            }
+            if (p.stage >= MAX_STAGE && (now - p.lastWateredAt) >= WATER_DURATION_MS) {
+              p.lastWateredAt = now;
+              changed = true;
+            }
+          }
+        }
+      });
+      if (!changed) return;
+      saveState();
+      renderPlants();
+      updateHUD();
+      if (viewingKey) renderPlantPanel(viewingKey);
+    }
+
+    // A raindrop over the empty center tile plus a translucent square
+    // outlining the whole zone it's keeping watered - cellRingLatLngs is the
+    // same square-boundary helper the plant-range preview (rangeArea) uses.
+    // Both are plain Leaflet vector/marker layers keyed by lat/lng, so -
+    // unlike the pixel-sized plant/wild/sprinkler icons - they reposition
+    // themselves on pan/zoom for free and need no rescale/viewport-cull
+    // handling of their own.
+    var rainRingLayers = {}; // centerKey -> { marker, area }
+    function renderRainRings() {
+      var seen = {};
+      Object.keys(rainRings).forEach(function (key) {
+        var ring = rainRings[key];
+        seen[key] = true;
+        if (rainRingLayers[key]) return; // already drawn, and a ring's own look never changes while active
+        var icon = L.divIcon({
+          html: '<div class="rain-ring-drop">\u{1F4A7}</div>',
+          iconSize: [26, 26], iconAnchor: [13, 13], className: ''
+        });
+        var marker = L.marker([ring.lat, ring.lng], { icon: icon, interactive: false, zIndexOffset: 80 }).addTo(map);
+        var area = L.polygon(cellRingLatLngs(ring.q, ring.r, RAIN_RING_RADIUS), {
+          color: '#4aa3d6', weight: 1.5, fillColor: '#4aa3d6', fillOpacity: 0.12, interactive: false
+        }).addTo(map);
+        rainRingLayers[key] = { marker: marker, area: area };
+      });
+      Object.keys(rainRingLayers).forEach(function (key) {
+        if (seen[key]) return;
+        map.removeLayer(rainRingLayers[key].marker);
+        map.removeLayer(rainRingLayers[key].area);
+        delete rainRingLayers[key];
+      });
     }
 
     // ---- Sprinkler watering animation --------------------------------------
@@ -6581,7 +6833,11 @@
       var goneWild = collectGoneWild(Date.now()); // must run before tickPlants() sweeps its answer away
       // Full offline catch-up first, before tickPlants()/buildAndStartWelcomeBackTour
       // read any plant state below - see catchUpSprinklersOffline's own comment.
+      // Rain-ring catch-up runs right after: it needs `rainRings` to already
+      // reflect anything a sprinkler just grew into a completed ring during
+      // this same gap.
       catchUpSprinklersOffline();
+      catchUpRainRingsOffline();
       tickPlants();
       maybeSpawnWild();
       buildAndStartWelcomeBackTour(lastSeen, goneWild);
@@ -6807,6 +7063,7 @@
       // Full offline catch-up first, before tickPlants()/buildAndStartWelcomeBackTour
       // read any plant state below - see catchUpSprinklersOffline's own comment.
       catchUpSprinklersOffline();
+      catchUpRainRingsOffline();
       tickPlants();
       // Needs a real fix before it can ask "what paths are near here?", so it
       // hangs off the lock rather than off init. No-ops if today already ran.
@@ -7214,6 +7471,11 @@
       };
       state.stats.planted++;
       state.stats.bred++;
+      // Same reasoning as plantSeedAt's own hook - a seedling planted
+      // straight onto a currently-active ring's empty center breaks it, and
+      // (unlike plantSeedAt) that's the only way this new tile can matter to
+      // a ring, since it starts at stage 0 either way.
+      refreshRainRingCandidates(candidateRingCentersAround(spot.q, spot.r));
 
       saveState();
       renderPlants();
@@ -9173,11 +9435,14 @@
     initToolRail();             // draw the three tool icons once
     syncFertUnlockUI();         // show Crossing Notes/fert sack right away for an already-unlocked save
     syncGreenhouseUnlockUI();   // show the Greenhouse menu entry right away for an already-unlocked save
+    recomputeRainRingsFull();   // seed rain rings from whatever's already planted - see its own comment
     catchUpSprinklersOffline(); // bank any stages a placed sprinkler earned while fully closed
+    catchUpRainRingsOffline();  // then bank whatever an already-active rain ring earned the same way
     tickPlants();               // recompute any growth/wilt accrued while closed
     renderWild();               // wild flowers persist across sessions until picked
     renderSprinklers();         // placed sprinklers persist across sessions until picked back up
     renderWeeds();              // weeds persist across sessions until plucked, same as wild flowers
+    renderRainRings();          // rain rings persist across sessions too, same as sprinklers
     updateHUD();
     updateCurrencyPill();
     setInterval(tickPlants, 60000);
@@ -9186,6 +9451,7 @@
     // SPRINKLER_ANIM_DELAY_MS), not on the same minute-long cadence the
     // player's own badges refresh on.
     setInterval(tickSprinklers, SPRINKLER_TICK_MS);
+    setInterval(tickRainRings, RAIN_TICK_MS);
   </script>
 </body>
 </html>

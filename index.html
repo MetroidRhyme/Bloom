@@ -1417,7 +1417,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.24.0</span>
+      <span id="game-version">v2.25.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1706,6 +1706,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.25.0', changes: [
+        'Planted the wrong seed by accident? The shears now work on a seed ' +
+          'or sprout that hasn\'t bloomed yet, too - it will not give the ' +
+          'usual seed bonus, just hands back the exact one you planted, so ' +
+          'a mis-tap is never stuck in the ground.',
+        'That mark from last update reads a bit clearer now, and it never ' +
+          'sits on top of anything you plant near it.'
+      ] },
       { version: 'v2.24.0', changes: [
         'Whatever you noticed last update now has a mark on the map when ' +
           'it\'s active, and it\'s doing more than just sitting there.'
@@ -3264,12 +3272,34 @@
     // for the rare plant that reached bloom before that guard existed (an
     // old save, backfilled on load - see backfillGrownCreditForBloomed).
     // "Harvesting" always removes the plant from the ground either way.
+    //
+    // mode 'extract' also covers a second, much plainer case: shearing a
+    // plant that hasn't even bloomed yet (see toolBlockedReason, which no
+    // longer blocks shears on stage < 2). That's not a real harvest - there
+    // is nothing here to extract seeds FROM - it's a plain undo for an
+    // accidental plant, so it just hands back the one seed that planted it
+    // and stops, before any of the real harvest bookkeeping below (seed
+    // yield roll, extracted/sold stats, grown credit) even runs.
     function harvestPlant(key, mode) {
       var p = state.plants[key];
       if (!p) return;
       var d = recomputePlant(p, Date.now());
-      var isCluster = d.stage >= MAX_STAGE;
       var vk = variantKey(p.species, p.color || baseColorOf(p.species));
+
+      if (mode !== 'sell' && d.stage < 2 && !p.mystery) {
+        delete state.plants[key];
+        refreshRainRingCandidates(candidateRingCentersAround(p.q, p.r));
+        state.seeds[vk] = (state.seeds[vk] || 0) + 1;
+        saveState();
+        renderPlants();
+        updateHUD();
+        closePlantPanel();
+        vibrate(20);
+        toast('\u{1F331} Undone - got your ' + variantName(vk) + ' seed back');
+        return 0;
+      }
+
+      var isCluster = d.stage >= MAX_STAGE;
       var label = variantName(vk) + (isCluster ? ' cluster' : '');
       delete state.plants[key];
       // This tile just went empty - either it was a ring's own now-broken
@@ -3782,12 +3812,16 @@
     // Fragments of the same linework "branching out" from the rune to mark
     // how far it reaches: a dashed square (no fill - a flat color wash reads
     // as a highlight, not a rune), an etched right-angle bracket at each of
-    // the 4 corners, and a short outward tick capped with a small diamond at
-    // each of the 4 edge midpoints. All in real lat/lng (like cellRingLatLngs
-    // already used for the plant-range preview), not pixel-sized markers, so
-    // they reproject for free on pan/zoom with no rescale handling needed.
+    // the 4 corners, and a small diamond at each of the 4 edge midpoints -
+    // plus a faint lattice across the whole interior (see renderRainRings)
+    // showing every tile actually in range. Every glyph sits ON the
+    // boundary line itself, never past it, so a flower planted in the tile
+    // just outside the watered zone can never end up overlapping one. All
+    // in real lat/lng (like cellRingLatLngs already used for the plant-
+    // range preview), not pixel-sized markers, so they reproject for free
+    // on pan/zoom with no rescale handling needed.
     function rainBoundaryGeometry(centerQ, centerR, N) {
-      var half = N + 0.5, arm = 0.62, tickLen = 0.55, capD = 0.16;
+      var half = N + 0.5, arm = 0.62, capD = 0.16;
       function ll(qOff, rOff) { return [(centerR + rOff) * CELL_LAT_DEG, (centerQ + qOff) * CELL_LNG_DEG]; }
 
       var square = [ll(-half, -half), ll(half, -half), ll(half, half), ll(-half, half)]; // BL, BR, TR, TL
@@ -3802,23 +3836,44 @@
       bracket(half, half, -1, -1);   // TR: west and south
       bracket(-half, half, 1, -1);   // TL: east and south
 
+      // Edge-midpoint diamonds touch the boundary line but never cross it -
+      // not out past it on a tick, the way an earlier version had them, and
+      // not simply centered on the line either (a diamond shape centered
+      // exactly on a point straddles both sides of it - its outward corner
+      // would still poke out past the line just as much as a tick did). The
+      // center is shifted inward by the diamond's own half-width first, so
+      // the single corner that would otherwise be the one poking outward
+      // lands exactly on the line instead, and the rest of the shape sits
+      // inside the zone. This is the actual fix for "a flower planted in
+      // the very next tile outside the watered zone can overlap one".
       var diamonds = [];
-      function edgeTick(qOff, rOff, dq, dr) {
-        var tipLL = ll(qOff + dq * tickLen, rOff + dr * tickLen);
-        lines.push([ll(qOff, rOff), tipLL]);
+      function edgeDiamond(qOff, rOff, inQ, inR) {
+        var p = ll(qOff + inQ * capD, rOff + inR * capD);
         diamonds.push([
-          [tipLL[0] + capD * CELL_LAT_DEG, tipLL[1]],
-          [tipLL[0], tipLL[1] + capD * CELL_LNG_DEG],
-          [tipLL[0] - capD * CELL_LAT_DEG, tipLL[1]],
-          [tipLL[0], tipLL[1] - capD * CELL_LNG_DEG]
+          [p[0] + capD * CELL_LAT_DEG, p[1]],
+          [p[0], p[1] + capD * CELL_LNG_DEG],
+          [p[0] - capD * CELL_LAT_DEG, p[1]],
+          [p[0], p[1] - capD * CELL_LNG_DEG]
         ]);
       }
-      edgeTick(0, -half, 0, -1); // bottom mid, ticking further south
-      edgeTick(0, half, 0, 1);   // top mid, ticking further north
-      edgeTick(-half, 0, -1, 0); // left mid, ticking further west
-      edgeTick(half, 0, 1, 0);   // right mid, ticking further east
+      edgeDiamond(0, -half, 0, 1);  // bottom mid, nudged inward (north)
+      edgeDiamond(0, half, 0, -1);  // top mid, nudged inward (south)
+      edgeDiamond(-half, 0, 1, 0);  // left mid, nudged inward (east)
+      edgeDiamond(half, 0, -1, 0);  // right mid, nudged inward (west)
 
-      return { square: square, lines: lines, diamonds: diamonds };
+      // Lattice: every internal tile edge inside the zone (the boundary
+      // square above already covers the outermost ones), so the individual
+      // tiles a player can actually plant in are visibly laid out rather
+      // than left to guesswork against the ambient grid mesh elsewhere on
+      // the map. 2N lines each direction - the edges between N+1's worth of
+      // rows/columns, minus the two outer ones the square already draws.
+      var lattice = [];
+      for (var off = -N + 0.5; off < N; off += 1) {
+        lattice.push([ll(off, -half), ll(off, half)]); // vertical
+        lattice.push([ll(-half, off), ll(half, off)]); // horizontal
+      }
+
+      return { square: square, lines: lines, diamonds: diamonds, lattice: lattice };
     }
 
     // px is sized the same way every other plant-adjacent icon is
@@ -3828,7 +3883,7 @@
     // live in-gesture and settled-zoom halves of that. The boundary layers
     // never need a rebuild call here at all (real lat/lng geometry, not
     // pixel icons), only teardown when a ring itself goes away.
-    var rainRingLayers = {}; // centerKey -> { marker, area, lines, diamonds }
+    var rainRingLayers = {}; // centerKey -> { marker, lattice, area, lines, diamonds }
     function renderRainRings() {
       var seen = {};
       var basePx = plantIconBase();
@@ -3851,6 +3906,14 @@
         }).addTo(map);
         marker._iconKey = iconKey;
         var geo = rainBoundaryGeometry(ring.q, ring.r, RAIN_RING_RADIUS);
+        // Added before the boundary/rune layers below so it sits under them
+        // (Leaflet stacks same-pane vector layers in add order) - a faint
+        // tile-by-tile grid across the whole watered zone, distinct from the
+        // ambient map mesh, so it is obvious at a glance which tiles are
+        // actually in range to plant in.
+        var lattice = L.polyline(geo.lattice, {
+          color: RAIN_RUNE_LINE, weight: 1, opacity: 0.28, interactive: false
+        }).addTo(map);
         var area = L.polygon(geo.square, {
           color: RAIN_RUNE_LINE, weight: 1.4, fill: false, dashArray: '5 6', opacity: 0.55, interactive: false
         }).addTo(map);
@@ -3860,12 +3923,13 @@
         var diamonds = L.polygon(geo.diamonds, {
           color: RAIN_RUNE_GLOW, weight: 0, fillColor: RAIN_RUNE_GLOW, fillOpacity: 0.85, interactive: false
         }).addTo(map);
-        rainRingLayers[key] = { marker: marker, area: area, lines: lines, diamonds: diamonds };
+        rainRingLayers[key] = { marker: marker, lattice: lattice, area: area, lines: lines, diamonds: diamonds };
       });
       Object.keys(rainRingLayers).forEach(function (key) {
         if (seen[key]) return;
         var l = rainRingLayers[key];
-        map.removeLayer(l.marker); map.removeLayer(l.area); map.removeLayer(l.lines); map.removeLayer(l.diamonds);
+        map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.area);
+        map.removeLayer(l.lines); map.removeLayer(l.diamonds);
         delete rainRingLayers[key];
       });
     }
@@ -6010,9 +6074,20 @@
         if (!breedPartnersFor(target.key).length) return 'No flourishing neighbour of the same species ready to cross with';
         return null;
       }
-      // Shears and $ both need something worth taking. Wild flowers always are.
+      // $ needs something worth taking - wild flowers always are, a planted
+      // one needs to actually be in bloom. Shears are different: on a plant
+      // that hasn't bloomed yet they're a plain undo (see harvestPlant)
+      // instead of a real harvest, so they're never blocked on stage at
+      // all - only the inRange check above still applies. Mystery seedlings
+      // (a deliberate cross, started from the Breed button - never an
+      // accidental tap) are the one exception: undoing one would hand back
+      // a "seed" of a still-hidden color, spoiling the reveal for nothing,
+      // and no seed was spent to plant it in the first place - it stays
+      // gated like sell until it blooms.
       if (target.kind === 'wild') return null;
-      if (recomputePlant(o, Date.now()).stage < 2) return 'Not in bloom yet - it needs more water first';
+      if ((tool === 'sell' || o.mystery) && recomputePlant(o, Date.now()).stage < 2) {
+        return 'Not in bloom yet - it needs more water first';
+      }
       return null;
     }
 
@@ -7470,6 +7545,9 @@
         var yieldText = d.stage >= MAX_STAGE ? '2-4 seeds' : '1-2 seeds';
         hints.push(hintTool('shear') + ' to extract ' + yieldText + ', or ' + hintTool('sell') + ' to sell for ' +
           harvestValue(p, d.stage) + ' \u{1F338}');
+      } else if (!p.mystery) {
+        // Not a real harvest yet, just an escape hatch - see harvestPlant.
+        hints.push('Planted the wrong thing? ' + hintTool('shear') + ' to undo it and get the seed back');
       }
       document.getElementById('panel-hint').innerHTML =
         !hints.length ? 'Nothing to do here yet - it is still growing.' :

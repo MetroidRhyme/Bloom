@@ -530,13 +530,14 @@
       100% { opacity: 0; transform: translateY(30px) scale(1); }
     }
 
-    /* A sprinkler's own droplets (see playSprinklerDroplets) - same teardrop
-       shape as .water-drop for visual continuity, but positioned via a live
-       JS transform every frame rather than a fixed CSS keyframe, since each
-       one's path (sprinkler -> a random burst point -> the flower) is
-       different every time. left/top stay at 0 - the transform is the only
-       thing that ever moves it, matching the fx-layer's own coordinate
-       space (map.latLngToContainerPoint). */
+    /* An automatic watering droplet (see playWaterDroplets - shared by
+       sprinklers and rain rings alike) - same teardrop shape as .water-drop
+       for visual continuity, but positioned via a live JS transform every
+       frame rather than a fixed CSS keyframe, since each one's path (source
+       -> a random burst point -> the flower) is different every time.
+       left/top stay at 0 - the transform is the only thing that ever moves
+       it, matching the fx-layer's own coordinate space
+       (map.latLngToContainerPoint). */
     .sprinkler-drop {
       position: absolute; left: 0; top: 0; width: 6px; height: 8px;
       background: var(--blue); opacity: 0; border-radius: 50% 50% 55% 55% / 62% 62% 40% 40%;
@@ -1333,14 +1334,16 @@
     @keyframes wild-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.12); } }
     .wild-glow { animation: wild-pulse 2.8s ease-in-out infinite; }
 
-    /* Rain ring center marker (see renderRainRings) - a plain pulsing
-       raindrop, reusing the same `pulse` keyframe above rather than
-       inventing a near-identical one. */
-    .rain-ring-drop {
-      font-size: 20px; line-height: 1; text-align: center;
-      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
-      opacity: 0.85; animation: pulse 2.4s ease-in-out infinite;
-    }
+    /* Rain ring rune (see buildRainRuneSVG/renderRainRings) - only the outer
+       ring (circle + compass star + tick marks + diamonds) spins; the inner
+       dashed circle and the raindrop itself hold still, so the symbol reads
+       as "a spell actively running" without the whole glyph being too busy
+       to look at. transform-box is deliberately left unset, same reasoning
+       as .wind-grass-back/.wind-stem above - the default already resolves
+       against the SVG's own viewBox coordinates, which is what the fixed
+       "60px 60px" origin below assumes. */
+    @keyframes runeSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .rain-rune-spin { animation: runeSpin 18s linear infinite; transform-origin: 60px 60px; }
 
     /* Signature colors only (see COLORS `species`). These are drawn inside the
        flower's own SVG, so the same markup glows in a 26px bookmark and a
@@ -1414,7 +1417,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.23.0</span>
+      <span id="game-version">v2.24.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1703,6 +1706,10 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.24.0', changes: [
+        'Whatever you noticed last update now has a mark on the map when ' +
+          'it\'s active, and it\'s doing more than just sitting there.'
+      ] },
       { version: 'v2.23.0', changes: [
         'Something new is possible in how you arrange your flowers - the ' +
           'game won\'t tell you what, so keep an eye on your garden and see ' +
@@ -3388,7 +3395,7 @@
     // plant that newly qualifies, it hands off to startSprinklerWatering
     // (below) and moves on - the actual watering happens at the end of that
     // plant's own animation, not here, so a garden full of sprinklers
-    // doesn't all water in perfect lockstep. sprinklerAnimKeys is the guard
+    // doesn't all water in perfect lockstep. autoWaterAnimKeys is the guard
     // against re-starting a plant that's already mid-flight; each plant
     // only ever advances one stage per completed watering, same as a real
     // watering visit (applyWatering sets readyAt relative to *now*, not to
@@ -3412,7 +3419,7 @@
         var s = state.sprinklers[skey];
         CELL_NEIGHBORS.forEach(function (d) {
           var pkey = cellKey(s.q + d[0], s.r + d[1]);
-          if (sprinklerAnimKeys[pkey]) return; // already on its way to this one
+          if (autoWaterAnimKeys[pkey]) return; // already on its way to this one
           var p = state.plants[pkey];
           if (!p) return;
           var wilted = (now - p.lastWateredAt) >= WATER_DURATION_MS;
@@ -3447,10 +3454,12 @@
     //  fired, reproduces exactly the end state a session left open the
     //  whole time would have reached. Bypasses the droplet animation
     //  entirely (calls applyWatering directly, not
-    //  startSprinklerWatering/finishSprinklerWatering) - replaying a
+    //  startSprinklerWatering/finishAutoWatering) - replaying a
     //  multi-day gap one droplet burst at a time makes no sense, so this
     //  resolves the final state in one shot and lets the normal render
-    //  paths pick it up, same as any other state mutation.
+    //  paths pick it up, same as any other state mutation. The rain-ring
+    //  counterpart, catchUpRainRingsOffline (see RAIN RINGS, above), takes
+    //  the exact same shortcut for the exact same reason.
     function catchUpSprinklersOffline() {
       if (!Object.keys(state.sprinklers).length) return;
       var now = Date.now();
@@ -3612,40 +3621,39 @@
       });
     }
 
-    // Live tick, same cadence/shape as tickSprinklers: for every active
-    // ring, water (or top off) anything within RAIN_RING_RADIUS tiles of its
-    // center that's wilted or ready, straight through applyWatering with no
-    // per-flower animation - this is meant to read as ambient weather over
-    // a whole area, not a series of individual watering-can visits. A ring
-    // growing one of its own neighbors' neighbors into a fresh blue cluster
-    // (and so completing a second ring) is picked up for free by
-    // applyWatering's own hook - nothing extra to do here for that.
+    // Live tick, same cadence/shape as tickSprinklers, and - now that the
+    // ring has a rune to actually spawn from - the same droplet-flight
+    // animation too: for every active ring, hand any wilted-or-ready plant
+    // within RAIN_RING_RADIUS tiles of its center to startRainWatering
+    // (below, alongside the sprinkler animation it shares its machinery
+    // with) rather than mutating it here directly. Purely detection, same
+    // division of labor as tickSprinklers - the actual state change and
+    // its save/render happen once each droplet lands, in finishAutoWatering.
+    // A ring growing one of its own neighbors' neighbors into a fresh blue
+    // cluster (and so completing a second ring) is picked up for free by
+    // applyWatering's own hook at that point - nothing extra to do here
+    // for that.
     var RAIN_TICK_MS = 1000;
     function tickRainRings() {
       var keys = Object.keys(rainRings);
       if (!keys.length) return;
       var now = Date.now();
-      var changed = false;
       keys.forEach(function (rk) {
         var ring = rainRings[rk];
         if (!ring) return; // a ring earlier in this same pass grew a spoke that broke this one
         for (var dq = -RAIN_RING_RADIUS; dq <= RAIN_RING_RADIUS; dq++) {
           for (var dr = -RAIN_RING_RADIUS; dr <= RAIN_RING_RADIUS; dr++) {
-            var p = state.plants[cellKey(ring.q + dq, ring.r + dr)];
+            var pkey = cellKey(ring.q + dq, ring.r + dr);
+            if (autoWaterAnimKeys[pkey]) continue; // already on its way to this one
+            var p = state.plants[pkey];
             if (!p) continue;
             var wilted = (now - p.lastWateredAt) >= WATER_DURATION_MS;
             var ready = p.stage < MAX_STAGE && now >= p.readyAt;
             if (!wilted && !ready) continue;
-            applyWatering(p, now);
-            changed = true;
+            startRainWatering(pkey, ring);
           }
         }
       });
-      if (!changed) return;
-      saveState();
-      renderPlants();
-      updateHUD();
-      if (viewingKey) renderPlantPanel(viewingKey);
     }
 
     // Offline counterpart, same spirit as catchUpSprinklersOffline (see its
@@ -3692,82 +3700,244 @@
       if (viewingKey) renderPlantPanel(viewingKey);
     }
 
-    // A raindrop over the empty center tile plus a translucent square
-    // outlining the whole zone it's keeping watered - cellRingLatLngs is the
-    // same square-boundary helper the plant-range preview (rangeArea) uses.
-    // Both are plain Leaflet vector/marker layers keyed by lat/lng, so -
-    // unlike the pixel-sized plant/wild/sprinkler icons - they reposition
-    // themselves on pan/zoom for free and need no rescale/viewport-cull
-    // handling of their own.
-    var rainRingLayers = {}; // centerKey -> { marker, area }
+    // ---- Rune marker (the empty center tile) -------------------------------
+    // An 8-point compass star (two squares 45deg apart - deliberately not a
+    // 5-fold shape, so it never reads as a pentagram) inside two plain
+    // circles, alternating tick marks around the rim, small diamond glyphs
+    // at the star's points, and a lined raindrop at the center - the exact
+    // design signed off on in the standalone preview. Colors are inlined
+    // literals rather than the page's CSS custom properties: this markup
+    // gets serialized into a divIcon's `html` string and re-parsed by
+    // Leaflet outside the page's normal cascade, so a var(--x) reference
+    // here would just fail to resolve.
+    var RAIN_RUNE_LINE = '#8ecff0';
+    var RAIN_RUNE_GLOW = '#9fe0ff';
+    var RAIN_RUNE_BACKING = '#16324a';
+    var RAIN_RUNE_DROP_TOP = '#eaf9ff';
+    var RAIN_RUNE_DROP_MID = '#6fc4ee';
+    var RAIN_RUNE_DROP_END = '#2f7ea8';
+    function polarPoint(cx, cy, r, deg) {
+      var rad = (deg - 90) * Math.PI / 180;
+      return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+    }
+    function runeSquarePoints(cx, cy, r, rotDeg) {
+      var pts = [];
+      for (var i = 0; i < 4; i++) pts.push(polarPoint(cx, cy, r, rotDeg + i * 90));
+      return pts.map(function (p) { return p.x.toFixed(2) + ',' + p.y.toFixed(2); }).join(' ');
+    }
+    // idSuffix keeps each ring's gradient <defs> ids unique - divIcon markup
+    // gets inserted into the live page DOM as real sibling elements, so two
+    // simultaneous rings sharing one id would be invalid HTML (harmless here
+    // since both gradients are identical, but not something to rely on).
+    function buildRainRuneSVG(px, idSuffix) {
+      var cx = 60, cy = 60, rOuter = 54, rTickOuter = 60, rTickShort = 57, rInner = 32, rDiamond = 43;
+      var ticks = '';
+      for (var i = 0; i < 16; i++) {
+        var deg = i * 22.5, long = (i % 2 === 0);
+        var from = polarPoint(cx, cy, rOuter, deg), to = polarPoint(cx, cy, long ? rTickOuter : rTickShort, deg);
+        ticks += '<line x1="' + from.x.toFixed(2) + '" y1="' + from.y.toFixed(2) + '" x2="' + to.x.toFixed(2) +
+          '" y2="' + to.y.toFixed(2) + '" stroke="' + RAIN_RUNE_LINE + '" stroke-width="' + (long ? 1.6 : 1) +
+          '" stroke-linecap="round" opacity="' + (long ? 0.9 : 0.55) + '"/>';
+      }
+      var diamonds = '';
+      for (var j = 0; j < 8; j++) {
+        var dp = polarPoint(cx, cy, rDiamond, j * 45);
+        diamonds += '<rect x="' + (dp.x - 2.6).toFixed(2) + '" y="' + (dp.y - 2.6).toFixed(2) +
+          '" width="5.2" height="5.2" transform="rotate(45 ' + dp.x.toFixed(2) + ' ' + dp.y.toFixed(2) + ')" ' +
+          'fill="' + RAIN_RUNE_GLOW + '" opacity="0.85"/>';
+      }
+      var gid = 'rr' + idSuffix;
+      return '<svg viewBox="0 0 120 120" width="' + px + '" height="' + px + '">' +
+        '<defs>' +
+          '<radialGradient id="glow-' + gid + '" cx="50%" cy="50%" r="50%">' +
+            '<stop offset="0%" stop-color="' + RAIN_RUNE_GLOW + '" stop-opacity="0.55"/>' +
+            '<stop offset="100%" stop-color="' + RAIN_RUNE_GLOW + '" stop-opacity="0"/>' +
+          '</radialGradient>' +
+          '<radialGradient id="drop-' + gid + '" cx="35%" cy="30%" r="75%">' +
+            '<stop offset="0%" stop-color="' + RAIN_RUNE_DROP_TOP + '"/>' +
+            '<stop offset="55%" stop-color="' + RAIN_RUNE_DROP_MID + '"/>' +
+            '<stop offset="100%" stop-color="' + RAIN_RUNE_DROP_END + '"/>' +
+          '</radialGradient>' +
+        '</defs>' +
+        '<circle cx="60" cy="60" r="58" fill="' + RAIN_RUNE_BACKING + '" opacity="0.55"/>' +
+        '<circle cx="60" cy="60" r="70" fill="url(#glow-' + gid + ')"/>' +
+        '<g class="rain-rune-spin">' +
+          '<circle cx="60" cy="60" r="' + rOuter + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.4" opacity="0.85"/>' +
+          '<polygon points="' + runeSquarePoints(cx, cy, 46, 0) + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
+          '<polygon points="' + runeSquarePoints(cx, cy, 46, 45) + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
+          ticks + diamonds +
+        '</g>' +
+        '<circle cx="60" cy="60" r="' + rInner + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.2" stroke-dasharray="3 4" opacity="0.8"/>' +
+        '<path d="M60 38 C69 51 78 62 78 71 C78 82 70 89 60 89 C50 89 42 82 42 71 C42 62 51 51 60 38 Z" ' +
+          'fill="url(#drop-' + gid + ')" stroke="' + RAIN_RUNE_DROP_TOP + '" stroke-width="1" opacity="0.97"/>' +
+      '</svg>';
+    }
+    function makeRainRuneIcon(px, idSuffix) {
+      return L.divIcon({
+        html: buildRainRuneSVG(px, idSuffix), iconSize: [px, px], iconAnchor: [px / 2, px / 2], className: ''
+      });
+    }
+
+    // ---- Boundary glyphs (the edge of the 5x5 zone) ------------------------
+    // Fragments of the same linework "branching out" from the rune to mark
+    // how far it reaches: a dashed square (no fill - a flat color wash reads
+    // as a highlight, not a rune), an etched right-angle bracket at each of
+    // the 4 corners, and a short outward tick capped with a small diamond at
+    // each of the 4 edge midpoints. All in real lat/lng (like cellRingLatLngs
+    // already used for the plant-range preview), not pixel-sized markers, so
+    // they reproject for free on pan/zoom with no rescale handling needed.
+    function rainBoundaryGeometry(centerQ, centerR, N) {
+      var half = N + 0.5, arm = 0.62, tickLen = 0.55, capD = 0.16;
+      function ll(qOff, rOff) { return [(centerR + rOff) * CELL_LAT_DEG, (centerQ + qOff) * CELL_LNG_DEG]; }
+
+      var square = [ll(-half, -half), ll(half, -half), ll(half, half), ll(-half, half)]; // BL, BR, TR, TL
+
+      var lines = [];
+      function bracket(qOff, rOff, armQSign, armRSign) {
+        lines.push([ll(qOff, rOff), ll(qOff, rOff + armRSign * arm)]);
+        lines.push([ll(qOff, rOff), ll(qOff + armQSign * arm, rOff)]);
+      }
+      bracket(-half, -half, 1, 1);   // BL: arms point inward - east and north
+      bracket(half, -half, -1, 1);   // BR: west and north
+      bracket(half, half, -1, -1);   // TR: west and south
+      bracket(-half, half, 1, -1);   // TL: east and south
+
+      var diamonds = [];
+      function edgeTick(qOff, rOff, dq, dr) {
+        var tipLL = ll(qOff + dq * tickLen, rOff + dr * tickLen);
+        lines.push([ll(qOff, rOff), tipLL]);
+        diamonds.push([
+          [tipLL[0] + capD * CELL_LAT_DEG, tipLL[1]],
+          [tipLL[0], tipLL[1] + capD * CELL_LNG_DEG],
+          [tipLL[0] - capD * CELL_LAT_DEG, tipLL[1]],
+          [tipLL[0], tipLL[1] - capD * CELL_LNG_DEG]
+        ]);
+      }
+      edgeTick(0, -half, 0, -1); // bottom mid, ticking further south
+      edgeTick(0, half, 0, 1);   // top mid, ticking further north
+      edgeTick(-half, 0, -1, 0); // left mid, ticking further west
+      edgeTick(half, 0, 1, 0);   // right mid, ticking further east
+
+      return { square: square, lines: lines, diamonds: diamonds };
+    }
+
+    // px is sized the same way every other plant-adjacent icon is
+    // (plantIconBase(), the current on-screen width of one tile), so the
+    // rune scales with zoom exactly like a flower or sprinkler would - see
+    // the rescalePlantIcons()/scheduleMarkerRender() hookups below for the
+    // live in-gesture and settled-zoom halves of that. The boundary layers
+    // never need a rebuild call here at all (real lat/lng geometry, not
+    // pixel icons), only teardown when a ring itself goes away.
+    var rainRingLayers = {}; // centerKey -> { marker, area, lines, diamonds }
     function renderRainRings() {
       var seen = {};
+      var basePx = plantIconBase();
+      _iconBuiltPx = basePx; // same bookkeeping makeSprinklerIcon does with its own unscaled px
+      var px = Math.round(basePx * 0.92);
       Object.keys(rainRings).forEach(function (key) {
         var ring = rainRings[key];
         seen[key] = true;
-        if (rainRingLayers[key]) return; // already drawn, and a ring's own look never changes while active
-        var icon = L.divIcon({
-          html: '<div class="rain-ring-drop">\u{1F4A7}</div>',
-          iconSize: [26, 26], iconAnchor: [13, 13], className: ''
-        });
-        var marker = L.marker([ring.lat, ring.lng], { icon: icon, interactive: false, zIndexOffset: 80 }).addTo(map);
-        var area = L.polygon(cellRingLatLngs(ring.q, ring.r, RAIN_RING_RADIUS), {
-          color: '#4aa3d6', weight: 1.5, fillColor: '#4aa3d6', fillOpacity: 0.12, interactive: false
+        var existing = rainRingLayers[key];
+        var iconKey = px + '';
+        if (existing) {
+          if (existing.marker._iconKey !== iconKey) {
+            existing.marker.setIcon(makeRainRuneIcon(px, key.replace(/[^a-zA-Z0-9]/g, '_')));
+            existing.marker._iconKey = iconKey;
+          }
+          return;
+        }
+        var marker = L.marker([ring.lat, ring.lng], {
+          icon: makeRainRuneIcon(px, key.replace(/[^a-zA-Z0-9]/g, '_')), interactive: false, zIndexOffset: 80
         }).addTo(map);
-        rainRingLayers[key] = { marker: marker, area: area };
+        marker._iconKey = iconKey;
+        var geo = rainBoundaryGeometry(ring.q, ring.r, RAIN_RING_RADIUS);
+        var area = L.polygon(geo.square, {
+          color: RAIN_RUNE_LINE, weight: 1.4, fill: false, dashArray: '5 6', opacity: 0.55, interactive: false
+        }).addTo(map);
+        var lines = L.polyline(geo.lines, {
+          color: RAIN_RUNE_LINE, weight: 1.6, opacity: 0.75, lineCap: 'round', interactive: false
+        }).addTo(map);
+        var diamonds = L.polygon(geo.diamonds, {
+          color: RAIN_RUNE_GLOW, weight: 0, fillColor: RAIN_RUNE_GLOW, fillOpacity: 0.85, interactive: false
+        }).addTo(map);
+        rainRingLayers[key] = { marker: marker, area: area, lines: lines, diamonds: diamonds };
       });
       Object.keys(rainRingLayers).forEach(function (key) {
         if (seen[key]) return;
-        map.removeLayer(rainRingLayers[key].marker);
-        map.removeLayer(rainRingLayers[key].area);
+        var l = rainRingLayers[key];
+        map.removeLayer(l.marker); map.removeLayer(l.area); map.removeLayer(l.lines); map.removeLayer(l.diamonds);
         delete rainRingLayers[key];
       });
     }
 
-    // ---- Sprinkler watering animation --------------------------------------
-    // A placed sprinkler doesn't reach out and touch a flower the way a
-    // watering-can tap does, so the state change needs its own signal, the
-    // same reasoning waterWithCan already applies to a manual tap: play the
-    // animation, then apply the real mutation once it lands, so the
-    // animation reads as the cause of the watering rather than decoration
-    // tacked on after the fact. A beat passes first (SPRINKLER_ANIM_DELAY_MS
-    // - "the sprinkler noticed"), then a handful of droplets burst outward
-    // from the sprinkler in random directions and curve back in to converge
-    // on the flower.
+    // ---- Automatic watering animation (sprinklers AND rain rings) ----------
+    // Neither a placed sprinkler nor a rain ring's rune reaches out and
+    // touches a flower the way a watering-can tap does, so the state change
+    // needs its own signal, the same reasoning waterWithCan already applies
+    // to a manual tap: play the animation, then apply the real mutation once
+    // it lands, so the animation reads as the cause of the watering rather
+    // than decoration tacked on after the fact. A beat passes first
+    // (SPRINKLER_ANIM_DELAY_MS - "it noticed"), then a handful of droplets
+    // burst outward from the source in random directions and curve back in
+    // to converge on the flower. This machinery was sprinkler-only until the
+    // rain ring got its own rune to spawn droplets from (see RAIN RINGS,
+    // above) - the SPRINKLER_ prefix on the shared timing constants below is
+    // legacy from that, not a sign this is still sprinkler-specific.
     var SPRINKLER_ANIM_DELAY_MS = 1000; // the pause between "needs water" and the droplets launching
     var SPRINKLER_DROPLET_COUNT = 4;
     var SPRINKLER_DROPLET_MS = 750;     // flight time per droplet, burst-out to landing
-    // Plant key -> true while that plant has a sprinkler watering event in
-    // flight (the delay, or the droplets themselves) - guards tickSprinklers
-    // from starting a second one on top of it before the first lands.
-    var sprinklerAnimKeys = {};
+    // Plant key -> true while that plant has ANY auto-watering event in
+    // flight (a sprinkler's or a rain ring's - the delay, or the droplets
+    // themselves) - guards tickSprinklers/tickRainRings from starting a
+    // second one on top of it before the first lands, and keeps a plant in
+    // range of both a sprinkler and a rain ring from getting double-watered
+    // in the same moment.
+    var autoWaterAnimKeys = {};
 
     function startSprinklerWatering(pkey, sprinkler) {
-      sprinklerAnimKeys[pkey] = true;
+      autoWaterAnimKeys[pkey] = true;
       // Reduced motion collapses every animation to 0.01ms elsewhere in the
       // game, so there's nothing to wait out here either - straight to the
       // result, same as waterWithCan's own reduceMotion branch.
-      if (reduceMotion) { delete sprinklerAnimKeys[pkey]; finishSprinklerWatering(pkey); return; }
+      if (reduceMotion) { delete autoWaterAnimKeys[pkey]; finishAutoWatering(pkey); return; }
       setTimeout(function () {
         var p = state.plants[pkey];
-        if (!p) { delete sprinklerAnimKeys[pkey]; return; } // harvested during the delay
-        playSprinklerDroplets(sprinkler, pkey, function (landed) {
-          delete sprinklerAnimKeys[pkey];
-          if (landed) finishSprinklerWatering(pkey);
+        if (!p) { delete autoWaterAnimKeys[pkey]; return; } // harvested during the delay
+        playWaterDroplets(sprinkler, pkey, function (landed) {
+          delete autoWaterAnimKeys[pkey];
+          if (landed) finishAutoWatering(pkey);
+        });
+      }, SPRINKLER_ANIM_DELAY_MS);
+    }
+
+    // Same shape as startSprinklerWatering, sourced from a rain ring's
+    // center tile (see tickRainRings, above) instead of a placed sprinkler -
+    // the rune sitting there is the "sprinkler head" for this spell.
+    function startRainWatering(pkey, ring) {
+      autoWaterAnimKeys[pkey] = true;
+      if (reduceMotion) { delete autoWaterAnimKeys[pkey]; finishAutoWatering(pkey); return; }
+      setTimeout(function () {
+        var p = state.plants[pkey];
+        if (!p) { delete autoWaterAnimKeys[pkey]; return; }
+        playWaterDroplets(ring, pkey, function (landed) {
+          delete autoWaterAnimKeys[pkey];
+          if (landed) finishAutoWatering(pkey);
         });
       }, SPRINKLER_ANIM_DELAY_MS);
     }
 
     // Drives SPRINKLER_DROPLET_COUNT droplets along their own quadratic
-    // Bezier curve each frame: sprinkler -> a random outward point (the
-    // "burst") -> the flower (the "home in"). Recomputes both endpoints'
-    // screen position every frame (map.latLngToContainerPoint) rather than
-    // caching them once, so a pan or zoom mid-flight doesn't leave the
-    // droplets drifting off their real targets - same reasoning the fx-layer
-    // comment already gives for repositioning on 'move zoom'. Calls back
-    // with false (no watering applied) if the flower was harvested out from
-    // under the animation before it landed.
-    function playSprinklerDroplets(sprinkler, plantKey, onDone) {
+    // Bezier curve each frame: source -> a random outward point (the
+    // "burst") -> the flower (the "home in"). `source` just needs a
+    // lat/lng - a placed sprinkler and a rain ring's center both qualify.
+    // Recomputes both endpoints' screen position every frame
+    // (map.latLngToContainerPoint) rather than caching them once, so a pan
+    // or zoom mid-flight doesn't leave the droplets drifting off their real
+    // targets - same reasoning the fx-layer comment already gives for
+    // repositioning on 'move zoom'. Calls back with false (no watering
+    // applied) if the flower was harvested out from under the animation
+    // before it landed.
+    function playWaterDroplets(source, plantKey, onDone) {
       var layer = document.getElementById('fx-layer');
       var drops = [];
       for (var i = 0; i < SPRINKLER_DROPLET_COUNT; i++) {
@@ -3785,7 +3955,7 @@
       function frame(now) {
         var p = state.plants[plantKey];
         if (!p) { drops.forEach(function (d) { d.el.remove(); }); onDone(false); return; }
-        var s = map.latLngToContainerPoint([sprinkler.lat, sprinkler.lng]);
+        var s = map.latLngToContainerPoint([source.lat, source.lng]);
         var e = map.latLngToContainerPoint([p.lat, p.lng]);
         var allDone = true;
         drops.forEach(function (d) {
@@ -3809,9 +3979,11 @@
     }
 
     // The actual mutation, applied once the droplets land - same worker
-    // waterPlant uses, just with its own messaging (no vibrate; a sprinkler
-    // acting on its own isn't something to buzz the player's phone over).
-    function finishSprinklerWatering(pkey) {
+    // waterPlant uses, just with its own messaging (no vibrate; an automatic
+    // watering source acting on its own isn't something to buzz the
+    // player's phone over). Shared by both a landed sprinkler droplet and a
+    // landed rain-ring droplet.
+    function finishAutoWatering(pkey) {
       var p = state.plants[pkey];
       if (!p) return;
       var now = Date.now();
@@ -5271,7 +5443,7 @@
       _markerRenderPending = true;
       requestAnimationFrame(function () {
         _markerRenderPending = false;
-        renderPlants(); renderWild(); renderSprinklers(); renderWeeds();
+        renderPlants(); renderWild(); renderSprinklers(); renderWeeds(); renderRainRings();
       });
     }
     map.on('moveend zoomend viewreset resize', scheduleMarkerRender);
@@ -5303,6 +5475,16 @@
       apply(wildMarkers);
       apply(sprinklerMarkers);
       apply(weedMarkers);
+      // rainRingLayers isn't a flat key->marker map like the others (each
+      // entry also carries its boundary polygon/lines/diamonds, which are
+      // real lat/lng geometry and need no rescaling here at all - Leaflet
+      // reprojects those on its own), so it gets its own one-line loop
+      // instead of going through apply().
+      Object.keys(rainRingLayers).forEach(function (key) {
+        var el = rainRingLayers[key].marker.getElement();
+        var c = el && el.firstElementChild;
+        if (c) c.style.transform = t;
+      });
     }
     map.on('zoom', function () {
       if (_iconRescalePending) return;

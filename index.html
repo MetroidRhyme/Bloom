@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.34.0</span>
+      <span id="game-version">v2.34.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1823,6 +1823,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.34.1', changes: [
+        'Fixed the seed pouch color flyout for species with a lot of ' +
+          'owned colors - it used to run straight off the left edge of ' +
+          'the screen, leaving rarer colors impossible to tap. It now ' +
+          'wraps into extra rows so every owned color stays on-screen.'
+      ] },
       { version: 'v2.34.0', changes: [
         'New Spell Book page in the menu (Cheat Mode only) - a diagram and ' +
           'plain-English description of every basic magic formation ' +
@@ -7537,7 +7543,23 @@
         return '<button class="tool-btn seed-petal" data-key="' + it.key + '" title="' + it.title +
           '" onclick="onSeedPetalTap(\'' + it.key + '\')">' + it.iconHtml + seedCountBadgeHtml(it.count) + '</button>';
       }).join('');
-      var slots = vks.map(function (k, i) { return { dx: -(i + 1) * SEED_COLOR_ROW, dy: rowDy }; });
+      // A single row running left off SEED_ROW's own row would march a
+      // deep color list straight off the left edge of the screen - a
+      // species with a lot of owned colors could have its rarer (higher
+      // dx) ones permanently unreachable. Wrap into as many rows as fit
+      // horizontally instead, then stack those wrapped rows in whichever
+      // vertical direction actually has room, so every owned color stays
+      // on-screen and tappable no matter how many there are.
+      var railRight = 12;   // matches #seed-rail's own `right` in CSS
+      var petalW = 40;
+      var maxCols = Math.max(1, Math.floor((window.innerWidth - railRight - petalW) / SEED_COLOR_ROW));
+      var wrapRowH = 44;
+      var wrapRows = Math.ceil(vks.length / maxCols);
+      var growUp = rowDy + (wrapRows - 1) * wrapRowH + petalW > window.innerHeight - 90;
+      var slots = vks.map(function (k, i) {
+        var col = i % maxCols, wrow = Math.floor(i / maxCols);
+        return { dx: -(col + 1) * SEED_COLOR_ROW, dy: rowDy + (growUp ? -wrow : wrow) * wrapRowH };
+      });
       animatePetalsOpen('seed-color-petals', slots, rowDy);
     }
 

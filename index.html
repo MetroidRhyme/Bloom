@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.35.3</span>
+      <span id="game-version">v2.36.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1841,6 +1841,16 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.36.0', changes: [
+        'The grow rune now has its own info panel, just like the rain ' +
+          'rune\'s - tap any of its four center tiles (with or without a ' +
+          'seed equipped) to see how much longer it\'s active and what it ' +
+          'does. A rune\'s own ground - the rain rune\'s empty center tile, ' +
+          'and the grow rune\'s 2x2 patch - can no longer be planted over ' +
+          'at all, whether by a single tap or a dragged sweep of seeds; ' +
+          'previously a direct tap could still plant there and snuff the ' +
+          'rune out.'
+      ] },
       { version: 'v2.35.3', changes: [
         'Removed the fine grid lines that used to fill the grow rune\'s ' +
           'whole 10-tile boundary - at that size they read as a second, ' +
@@ -4715,6 +4725,24 @@
       return Math.round(stageReadyMs() / (growRuneSpeedupActiveAt(q, r, now) ? GROW_RUNE_MULTIPLIER : 1));
     }
 
+    // Is (q, r) one of the four tiles of a currently-active grow rune's own
+    // 2x2 origin block? growRunes is keyed by that block's own top-left
+    // anchor, not by every tile it covers, so every anchor whose footprint
+    // could include (q, r) needs checking - the same growAnchorsAround
+    // helper checkGrowBlocksAround itself uses to find a block touching a
+    // given tile. Returns { key, entry }, or null. See runeAt (below
+    // renderGrowRunes) for the combined rain-rune-or-grow-rune lookup every
+    // planting/tap call site actually uses.
+    function growRuneAt(q, r) {
+      var anchors = growAnchorsAround(q, r);
+      for (var i = 0; i < anchors.length; i++) {
+        var rk = cellKey(anchors[i][0], anchors[i][1]);
+        var entry = state.growRunes[rk];
+        if (entry && isGrowRuneActiveEntry(entry, Date.now())) return { key: rk, entry: entry };
+      }
+      return null;
+    }
+
     // ---- Rune marker (the resolved 2x2's own center) -----------------------
     // Deliberately built the same way buildRainRuneSVG is - the outer glow,
     // the circle-and-compass-star collar, the 16 rim ticks, the 8 star-point
@@ -4933,6 +4961,53 @@
         delete growRuneLayers[key];
       });
       if (pruned) saveState();
+    }
+
+    // ---- Grow rune info panel ------------------------------------------
+    // Same reusable #modal-overlay treatment rainRuneModalBody/
+    // openRainRunePanel already give the rain rune - see that pair's own
+    // comment for why a bespoke panel isn't needed here either.
+    function growRuneModalBody(entry) {
+      var now = Date.now();
+      var remain = entry.activatedAt + GROW_RUNE_MS - now;
+      var body = '<p>Left behind when a 2x2 block of matching flowers completed here. For ' +
+        (GROW_RUNE_MS / HOUR) + ' hours, everything within ' + GROW_PULSE_RADIUS + ' tiles grows ' +
+        GROW_RUNE_MULTIPLIER + 'x faster. This 2x2 patch is the rune\'s own ground - it can\'t be planted ' +
+        'on again until the rune fades.</p>';
+      body += '<p><b>Active</b> - ' + GROW_RUNE_MULTIPLIER + 'x growth for another <b>' +
+        formatDuration(Math.max(0, remain)) + '</b>.</p>';
+      return body;
+    }
+    function openGrowRunePanel(key) {
+      var entry = state.growRunes[key];
+      if (!entry || !isGrowRuneActiveEntry(entry, Date.now())) return;
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Grow Rune';
+      document.getElementById('modal-body').innerHTML = growRuneModalBody(entry);
+      var ok = document.getElementById('modal-ok-btn');
+      ok.textContent = 'Got it \u{1F331}';
+      ok.onclick = closeModal;
+      document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    // ---- Rune lookup shared by every planting/tap call site ---------------
+    // Both rune-producing spells (RAIN RINGS, above; GROW SPELL, this
+    // section) leave ground that reads as "occupied" the same way a plant,
+    // wild flower, or sprinkler tile does: never a valid seed target, and
+    // always tappable for its own info panel regardless of distance. One
+    // shared lookup covers both so map.on('click'), resolveSeedTap, and
+    // applyRangeSeedAction below only ever need one check instead of two
+    // near-identical ones.
+    function runeAt(q, r) {
+      var key = cellKey(q, r);
+      if (rainRings[key]) return { kind: 'rain', key: key };
+      var g = growRuneAt(q, r);
+      if (g) return { kind: 'grow', key: g.key };
+      return null;
+    }
+    function openRunePanel(rune) {
+      if (rune.kind === 'rain') openRainRunePanel(rune.key);
+      else openGrowRunePanel(rune.key);
     }
 
     // One-time sweep for whatever's already sitting fully grown in an
@@ -6840,9 +6915,11 @@
       if (state.plants[key]) { openPlantPanel(key); return; }
       if (state.wild[key]) { openPlantPanel(key, true); return; }
       // A rune's info panel is browsable the same distance-free way a
-      // plant/wild panel is - only actually watering it (see toolTargetAt/
-      // waterRuneWithCan above) needs the walk-up range check.
-      if (rainRings[key]) { openRainRunePanel(key); return; }
+      // plant/wild panel is - only actually watering the rain rune (see
+      // toolTargetAt/waterRuneWithCan above) needs the walk-up range check;
+      // the grow rune doesn't respond to any tool at all.
+      var rune = runeAt(h.q, h.r);
+      if (rune) { openRunePanel(rune); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var tileInRange = inRange(h.q, h.r);
       // A weed just plucks on a plain tap in range - no panel, no tool, no
@@ -7500,6 +7577,14 @@
       var key = cellKey(ps.cell.q, ps.cell.r);
       if (state.plants[key]) { openPlantPanel(key); return; }
       if (state.wild[key]) { openPlantPanel(key, true); return; }
+      // A rune is occupied ground the same as a plant/wild tile above - an
+      // equipped seed never plants through it, it just opens the rune's own
+      // panel instead, same as a bare tap does (see map.on('click')). This
+      // is also what actually stops a single deliberate tap from planting
+      // over and snuffing out a rune - applyRangeSeedAction's own drag-box
+      // sweep has its own, separate check for the same reason.
+      var rune = runeAt(ps.cell.q, ps.cell.r);
+      if (rune) { openRunePanel(rune); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var tileInRange = inRange(ps.cell.q, ps.cell.r);
       // A weed plucks the same way here as it does with nothing equipped -
@@ -7696,16 +7781,16 @@
             return;
           }
           var key = cellKey(q, r);
-          // A rain ring's own center tile is deliberately empty ground (see
-          // isRainRingComplete) - it never shows up in state.plants, so
+          // A rune's own ground is deliberately empty (see isRainRingComplete
+          // and resolveGrowBlock) - it never shows up in state.plants, so
           // without this it looked exactly like any other bare tile to a
           // dragged box and got planted over, snuffing out an already-
           // completed spell as collateral damage from a sweep that was
-          // aimed at the empty ground around it, not at the rune itself.
-          // Skipped only here, not in plantSeedAt/plantEquippedSeedAt - a
-          // single deliberate tap right on the rune is still a real choice
-          // a player can make (and does break the ring, same as today).
-          if (state.plants[key] || state.wild[key] || state.sprinklers[key] || rainRings[key]) continue;
+          // aimed at the empty ground around it, not at the rune itself. A
+          // single deliberate tap on the same tile is blocked the same way,
+          // via runeAt in resolveSeedTap/map.on('click') - a rune's ground
+          // is never a valid plant target, dragged over or tapped directly.
+          if (state.plants[key] || state.wild[key] || state.sprinklers[key] || runeAt(q, r)) continue;
           plantSeedAt(q, r, vk);
           planted++;
         }

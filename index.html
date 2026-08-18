@@ -109,6 +109,14 @@
        syncGreenhouseUnlockUI() in the GREENHOUSE section. */
     #menu-dropdown button#menu-greenhouse-btn { display: none; position: relative; }
     body.greenhouse-unlocked #menu-dropdown button#menu-greenhouse-btn { display: block; }
+    /* Same gate, same reasoning, for the Spell Book - see renderCheatToggle's
+       body.cheat-mode toggle in the CHEAT MODE section. Unlike Crossing
+       Notes/Greenhouse this one can also go back to hidden (turning Cheat
+       Mode back off), which the other two never do - display: none is
+       reapplied any time the class comes off, same as it would for a fresh
+       save that never turned Cheat Mode on at all. */
+    #menu-dropdown button#menu-spellbook-btn { display: none; }
+    body.cheat-mode #menu-dropdown button#menu-spellbook-btn { display: block; }
     /* How many pots are ready to grow or wilted right now (see
        greenhouseReadyCount) - same filled-pill language as the seed pouch's
        own count badge, just blue for "water" rather than green for
@@ -903,7 +911,7 @@
        every rule below with the journal - same aged-paper/spine page, same
        slide-up sheet - since it's the same "page in a book" object, just a
        different collection. */
-    #journal-panel, #milestones-panel {
+    #journal-panel, #milestones-panel, #spellbook-panel {
       position: fixed; inset: 0; z-index: 1100;
       background:
         repeating-linear-gradient(180deg, transparent 0 27px, rgba(120,90,50,0.11) 27px 28px),
@@ -915,17 +923,17 @@
       transform: translateY(105%);
       transition: transform 0.28s ease;
     }
-    #journal-panel.open, #milestones-panel.open { transform: translateY(0); }
-    #journal-panel::before, #milestones-panel::before {
+    #journal-panel.open, #milestones-panel.open, #spellbook-panel.open { transform: translateY(0); }
+    #journal-panel::before, #milestones-panel::before, #spellbook-panel::before {
       content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 16px;
       background: linear-gradient(90deg, rgba(90,61,34,0.45), rgba(90,61,34,0));
     }
-    #journal-close-btn, #milestones-close-btn {
+    #journal-close-btn, #milestones-close-btn, #spellbook-close-btn {
       position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 16px;
       width: 32px; height: 32px; border-radius: 50%; z-index: 3;
       border: none; background: rgba(0,0,0,0.16); color: #fff; font-size: 18px; cursor: pointer;
     }
-    #journal-heading, #milestones-heading {
+    #journal-heading, #milestones-heading, #spellbook-heading {
       flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 8px;
       font-size: 19px; font-weight: 800; color: #4a3218; margin: 0 0 6px; text-align: center;
       padding: 0 22px 0 30px;
@@ -943,10 +951,39 @@
        scrollable axis. 'hidden' still clips the tape/shadow overflow the
        padding doesn't catch, same as 'auto' did - it just never offers a
        scrollbar or lets a gesture drag it. */
-    #journal-body, #milestones-body {
+    #journal-body, #milestones-body, #spellbook-body {
       flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
       padding: 4px 22px 18px 30px;
     }
+
+    /* ================= SPELL BOOK ================= */
+    /* Cheat-mode-only reference page (see openSpellbook/menu-spellbook-btn) -
+       one card per basic-magic formation, same aged-paper page as the
+       journal/milestones above. */
+    .spellbook-intro { margin: 0 0 20px; line-height: 22px; font-size: 13px; color: var(--text-dim); text-align: center; }
+    .spell-card { margin: 0 0 26px; }
+    .spell-card:last-child { margin-bottom: 0; }
+    .spell-card-head {
+      font-size: 15px; font-weight: 800; color: #4a3218; margin: 0 0 10px; text-align: center;
+    }
+    /* The formation's planting layout, built from real buildPlantVisual()
+       renders (see spellCell/spellRuneCell in the script) rather than a
+       drawn illustration - what you'd actually see on the map, just small
+       and without the map underneath. .zone gets its border color set
+       inline from the script (LOKI_ZONE_ACTIVE_COLOR/SCRY_ZONE_ACTIVE_COLOR)
+       so it can never drift from the color the real boundary renders in. */
+    .spell-diagram {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      margin: 0 auto 10px; padding: 10px; border-radius: 10px; width: fit-content;
+      background: rgba(90,61,34,0.06);
+    }
+    .spell-diagram.zone { border: 2px dashed #8a8a8a; background: rgba(90,61,34,0.03); }
+    .spell-row { display: flex; justify-content: center; gap: 3px; }
+    .spell-cell {
+      width: 34px; height: 38px; display: flex; align-items: flex-end; justify-content: center;
+    }
+    .spell-cell.empty { border: 1px dashed rgba(90,61,34,0.25); border-radius: 4px; height: 34px; margin-bottom: 4px; }
+    .spell-card p { margin: 0; line-height: 22px; font-size: 13.5px; color: var(--text); }
 
     /* ================= MILESTONES (STICKER BOOK) ================= */
     /* One row per track: an icon/label/blurb header, then always exactly
@@ -1414,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.33.0</span>
+      <span id="game-version">v2.34.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1436,6 +1473,10 @@
          and the GREENHOUSE section, same reasoning as menu-crossnotes-btn
          above. -->
     <button id="menu-greenhouse-btn" onclick="openGreenhouse()">Greenhouse</button>
+    <!-- Cheat Mode only - see renderCheatToggle()'s body.cheat-mode toggle
+         and the SPELL BOOK section of the script. Starts hidden in the
+         markup itself, same reasoning as menu-crossnotes-btn above. -->
+    <button id="menu-spellbook-btn" onclick="openSpellbook()">Spell Book</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
   </div>
@@ -1600,6 +1641,16 @@
     <button id="howto-close-btn" onclick="closeHowToPlay()">&times;</button>
     <div id="howto-heading">How to Play</div>
     <div id="howto-body"></div>
+  </div>
+
+  <!-- Cheat-mode-only reference page - see openSpellbook() and the SPELL
+       BOOK section of the script. Same aged-paper page chrome as the
+       journal/milestones panels above (shared CSS selectors) - it's the
+       same "page in a book" object, just a different collection. -->
+  <div id="spellbook-panel">
+    <button id="spellbook-close-btn" onclick="closeSpellbook()">&times;</button>
+    <div id="spellbook-heading">Spell Book</div>
+    <div id="spellbook-body"></div>
   </div>
 
   <div id="modal-overlay">
@@ -1772,6 +1823,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.34.0', changes: [
+        'New Spell Book page in the menu (Cheat Mode only) - a diagram and ' +
+          'plain-English description of every basic magic formation ' +
+          'discovered so far: the Rain Ring, the Grow Spell, Loki\'s ' +
+          'Control, and Scry.'
+      ] },
       { version: 'v2.33.0', changes: [
         'New basic magic: Scry. Same four-corners-of-an-area shape as ' +
           'Loki\'s Control, one tier up (third-tier flowers), but the ' +
@@ -6578,7 +6635,7 @@
     // full-screen panel opens or closes, rather than a display toggle
     // duplicated across six functions.
     var FULLSCREEN_PANELS = ['shop-panel', 'journal-panel', 'milestones-panel', 'notes-panel', 'howto-panel',
-      'greenhouse-panel'];
+      'greenhouse-panel', 'spellbook-panel'];
     function fullscreenPanelOpen() {
       return FULLSCREEN_PANELS.some(function (id) {
         return document.getElementById(id).classList.contains('open');
@@ -8222,7 +8279,7 @@
     }
 
     function openPlantPanel(key, isWild) {
-      closeShop(); closeJournal(); closeCrossNotes(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
+      closeShop(); closeJournal(); closeCrossNotes(); closeGreenhouse(); closeSpellbook(); // only one full-screen/bottom-sheet panel open at a time
       viewingKey = key;
       viewingWild = !!isWild;
       renderPlantPanel(key);
@@ -8934,7 +8991,7 @@
     // phone's viewport in the old modal, which had no scroll of its own.
     function openHowToPlay() {
       toggleMenu();
-      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeGreenhouse(); // only one full-screen panel at a time
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeGreenhouse(); closeSpellbook(); // only one full-screen panel at a time
       var s = state.stats;
       document.getElementById('howto-body').innerHTML =
         '<p><b>Plant</b> - tap the seed pouch (top right) and every species you hold seeds of drops down ' +
@@ -9021,6 +9078,161 @@
       syncToolRail();
     }
 
+    // ---------------------------------------------------------------------
+    //  SPELL BOOK (see menu-spellbook-btn and renderCheatToggle's
+    //  body.cheat-mode toggle) - a read-only reference page for the basic
+    //  elemental magic above (RAIN RINGS, GROW SPELL, LOKI'S CONTROL, and
+    //  the CORNER ZONES/SCRY section). It doesn't detect or grant anything
+    //  itself - just a diagram of each formation's planting layout (built
+    //  from the same buildPlantVisual() art the map itself renders, not a
+    //  drawn illustration), the spell's rune/sigil, and a player-facing
+    //  description of what it does. Gated behind Cheat Mode rather than
+    //  shipping as a real in-game hint - see the "no in-game hint" line on
+    //  the RAIN RING comment up top; this stays a dev/testing reference,
+    //  not a tutorial the normal game teaches.
+    // ---------------------------------------------------------------------
+    var SPELLBOOK_CELL_PX = 34;
+
+    // One diagram cell: either a flourishing (MAX_STAGE) flower rendered at
+    // spell-book scale, or (speciesKey falsy) a dashed "empty ground" tile.
+    // q/r are just diagram-position seeds for buildNewVisual's grass-tuft/
+    // wind-delay randomness (see buildPlantVisual) - not real tile
+    // coordinates, so a little variety between cells beats every cell
+    // sharing the exact same tuft.
+    function spellCell(speciesKey, colorId, q, r) {
+      if (!speciesKey) return '<div class="spell-cell empty"></div>';
+      var v = buildPlantVisual(speciesFor(speciesKey), colorFor(colorId), MAX_STAGE, false,
+        SPELLBOOK_CELL_PX, q || 0, r || 0);
+      return '<div class="spell-cell">' + v.html + '</div>';
+    }
+    function spellRuneCell(html) { return '<div class="spell-cell">' + html + '</div>'; }
+    function spellRow(cells) { return '<div class="spell-row">' + cells.join('') + '</div>'; }
+
+    // Eight species, one of each, all Blue, ringed around the center tile
+    // that becomes the rune - see the RAIN RING comment up top. The center
+    // cell reuses the exact in-game rune glyph (buildRainRuneSVG) rather
+    // than a stand-in icon.
+    function rainRingDiagram() {
+      var sp = SPECIES.map(function (s) { return s.key; });
+      var rune = spellRuneCell(buildRainRuneSVG(SPELLBOOK_CELL_PX, 'spellbook'));
+      return '<div class="spell-diagram">' +
+        spellRow([spellCell(sp[0], 'blue', -1, -1), spellCell(sp[1], 'blue', 0, -1), spellCell(sp[2], 'blue', 1, -1)]) +
+        spellRow([spellCell(sp[7], 'blue', -1, 0), rune, spellCell(sp[3], 'blue', 1, 0)]) +
+        spellRow([spellCell(sp[6], 'blue', -1, 1), spellCell(sp[5], 'blue', 0, 1), spellCell(sp[4], 'blue', 1, 1)]) +
+      '</div>';
+    }
+
+    // A 2x2 block of one exact species+color - any tier-1 color works, this
+    // just shows one example (the first in tierColors(GROW_TIER)).
+    function growSpellDiagram() {
+      var color = tierColors(GROW_TIER)[0].id;
+      return '<div class="spell-diagram">' +
+        spellRow([spellCell('tulip', color, 0, 0), spellCell('tulip', color, 1, 0)]) +
+        spellRow([spellCell('tulip', color, 0, 1), spellCell('tulip', color, 1, 1)]) +
+      '</div>';
+    }
+
+    // Shared by Loki's Control and Scry - four 2x2 corner blocks of one
+    // tier. Deliberately drawn with a different color per corner AND all
+    // four species mixed within each corner, so the picture never implies a
+    // match requirement that isn't actually there (see the CORNER ZONES
+    // comment: corners don't have to match each other, or even match within
+    // one block - only the grow spell's exact recipe does that). Compressed
+    // to one empty row/column of "gap" between the corners rather than
+    // drawn to real ZONE_MIN_SPAN/ZONE_MAX_SPAN scale, which would either be
+    // too cramped (4) or too wide to read as a small diagram (20) - the
+    // card's own text gives the real range. The boundary color comes in as
+    // a literal hex string from LOKI_ZONE_ACTIVE_COLOR/SCRY_ZONE_ACTIVE_COLOR
+    // so this can never drift from what the real zone boundary renders in.
+    function zoneDiagram(colorIds, boundaryColor) {
+      var species = SPECIES.slice(0, 4).map(function (s) { return s.key; });
+      function block(colorId, rowSeed) {
+        return [spellCell(species[0], colorId, 0, rowSeed), spellCell(species[1], colorId, 1, rowSeed),
+                spellCell(species[2], colorId, 2, rowSeed), spellCell(species[3], colorId, 3, rowSeed)];
+      }
+      var tl = block(colorIds[0], 0), tr = block(colorIds[1], 1), bl = block(colorIds[2], 2), br = block(colorIds[3], 3);
+      var gap = spellCell(null);
+      return '<div class="spell-diagram zone" style="border-color:' + boundaryColor + '">' +
+        spellRow([tl[0], tl[1], gap, gap, tr[0], tr[1]]) +
+        spellRow([tl[2], tl[3], gap, gap, tr[2], tr[3]]) +
+        spellRow([gap, gap, gap, gap, gap, gap]) +
+        spellRow([bl[0], bl[1], gap, gap, br[0], br[1]]) +
+        spellRow([bl[2], bl[3], gap, gap, br[2], br[3]]) +
+      '</div>';
+    }
+    function lokiDiagram() {
+      var c = tierColors(LOKI_TIER).map(function (col) { return col.id; });
+      return zoneDiagram([c[0], c[1], c[2], c[3]], LOKI_ZONE_ACTIVE_COLOR);
+    }
+    function scryDiagram() {
+      var c = tierColors(SCRY_TIER).map(function (col) { return col.id; });
+      while (c.length < 4) c.push(c[0]); // only 3 tier-2 colors exist - repeat one to fill the 4th corner
+      return zoneDiagram([c[0], c[1], c[2], c[3]], SCRY_ZONE_ACTIVE_COLOR);
+    }
+
+    function spellCard(icon, title, diagramHtml, bodyHtml) {
+      return '<div class="spell-card"><div class="spell-card-head">' + icon + ' ' + title + '</div>' +
+        diagramHtml + bodyHtml + '</div>';
+    }
+
+    // All the numbers below are read from the live constants (RAIN_RING_RADIUS,
+    // RUNE_ACTIVE_MS, etc.) rather than typed out by hand, so this page can
+    // never quietly drift out of sync with the mechanics it's describing.
+    function renderSpellbookPage() {
+      var growColors = tierColors(GROW_TIER).map(function (c) { return c.name; }).join('/');
+      var lokiColors = tierColors(LOKI_TIER).map(function (c) { return c.name; }).join('/');
+      var scryColors = tierColors(SCRY_TIER).map(function (c) { return c.name; }).join('/');
+      var ringSpan = RAIN_RING_RADIUS * 2 + 1;
+      var html =
+        '<p class="spellbook-intro">Basic elemental magic - plant flowers into one of the layouts below and, ' +
+        'once every flower in it reaches a full cluster, the formation does the rest on its own. A dev/testing ' +
+        'reference - a normal save never sees this page, same as none of these spells have an in-game hint.</p>' +
+
+        spellCard('\u{1F4A7}', 'Rain Ring', rainRingDiagram(),
+          '<p>One of each of the eight species - all Blue, no repeats - on the eight tiles ringed around one ' +
+          'empty center tile. Water the center once every flower around it is a full cluster and a rune rises ' +
+          'there. While the rune stays watered, it keeps every plant within ' + RAIN_RING_RADIUS + ' tiles of it ' +
+          '- a ' + ringSpan + 'x' + ringSpan + ' block, including its own eight Blue flowers - watered on its ' +
+          'own for the next ' + (RUNE_ACTIVE_MS / HOUR) + ' hours. Watering it again at any point tops that ' +
+          'window back up; letting it run out just leaves it dormant until the next watering, nothing is lost.</p>') +
+
+        spellCard('\u{1F300}', 'Grow Spell', growSpellDiagram(),
+          '<p>A 2x2 block of one exact species and color, all four matching, as long as that color is one tier ' +
+          'up from the four standards (' + growColors + '). The instant all four reach a full cluster, the ' +
+          'block is consumed on the spot - gone for good, no seeds or Petals back - and pulses every other ' +
+          'flower you own within ' + GROW_PULSE_RADIUS + ' tiles: whatever was still waiting out its stage ' +
+          'timer is ready for the very next watering instead.</p>') +
+
+        spellCard('\u{1F451}', 'Loki\'s Control', lokiDiagram(),
+          '<p>A 2x2 block of any ' + lokiColors + ' flowers - they don\'t have to match each other, or even ' +
+          'match within a block - at each of the four corners of a square or rectangle between ' + ZONE_MIN_SPAN +
+          ' and ' + ZONE_MAX_SPAN + ' tiles on a side. Once all sixteen corner flowers are grown, everywhere ' +
+          'inside holds your access for up to ' + (LOKI_CONTROL_MS / HOUR / 24) + ' days instead of expiring at ' +
+          'midnight, as long as every corner stays flourishing. Let even one corner wilt and the extension ' +
+          'lapses until every corner is rewatered - it only ever stretches access already earned by walking ' +
+          'there, never grants ground never actually reached.</p>') +
+
+        spellCard('\u{1F441}', 'Scry', scryDiagram(),
+          '<p>Same shape as Loki\'s Control, one tier up - ' + scryColors + ' at each of the four corners. ' +
+          'While all sixteen corner flowers stay grown and watered, everywhere inside is in range ' +
+          'unconditionally, even ground never actually walked to. A single wilted corner drops the effect ' +
+          'immediately until every corner is rewatered.</p>');
+
+      document.getElementById('spellbook-body').innerHTML = html;
+    }
+
+    function openSpellbook() {
+      toggleMenu();
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeMilestones(); closeGreenhouse();
+      renderSpellbookPage();
+      document.getElementById('spellbook-panel').classList.add('open');
+      syncToolRail();
+    }
+    function closeSpellbook() {
+      document.getElementById('spellbook-panel').classList.remove('open');
+      syncToolRail();
+    }
+
     // How many times this exact variant has ever been grown - extracted or
     // sold, owned plant or wild pick (see recordGrown). 0 for a variant
     // that's only ever been seen blooming, never actually harvested.
@@ -9077,7 +9289,7 @@
 
     function openInventory() {
       toggleMenu();
-      closeShop(); closePlantPanel(); closeCrossNotes(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeGreenhouse(); closeSpellbook(); // only one full-screen/bottom-sheet panel open at a time
       // journalSpecies persists for the session, so re-opening the journal
       // returns to the page you were last reading.
       openJournalPage(journalSpecies || defaultJournalSpecies());
@@ -9297,7 +9509,7 @@
       // see that function's own comment for why this list (rather than the
       // shorter one on openInventory/openCrossNotes/openShop) is the
       // complete one to copy for a screen reachable from the same menu.
-      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeGreenhouse();
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeGreenhouse(); closeSpellbook();
       renderMilestonesPage();
       document.getElementById('milestones-panel').classList.add('open');
       syncToolRail();
@@ -9513,7 +9725,7 @@
 
     function openCrossNotes() {
       toggleMenu();
-      closeShop(); closePlantPanel(); closeJournal(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
+      closeShop(); closePlantPanel(); closeJournal(); closeGreenhouse(); closeSpellbook(); // only one full-screen/bottom-sheet panel open at a time
       renderCrossTree(notesSpecies || defaultJournalSpecies());
       document.getElementById('notes-panel').classList.add('open');
       syncToolRail();
@@ -9594,6 +9806,11 @@
       var btn = document.getElementById('cheat-toggle-btn');
       btn.textContent = 'Cheat Mode: ' + (state.cheatMode ? 'On' : 'Off');
       btn.classList.toggle('on', !!state.cheatMode);
+      // Also gates the Spell Book menu entry (see the CSS's body.cheat-mode
+      // rule on #menu-spellbook-btn) - a normal save should never see a menu
+      // item explaining mechanics that otherwise have no in-game hint by
+      // design (see the RAIN RING comment up top).
+      document.body.classList.toggle('cheat-mode', !!state.cheatMode);
     }
 
     function updateCurrencyPill() {
@@ -9836,7 +10053,7 @@
     // pill directly - callers handle closing the menu dropdown themselves
     // (see the menu button's onclick) so this doesn't force it open/closed.
     function openShop() {
-      closePlantPanel(); closeJournal(); closeCrossNotes(); closeGreenhouse(); // only one full-screen/bottom-sheet panel open at a time
+      closePlantPanel(); closeJournal(); closeCrossNotes(); closeGreenhouse(); closeSpellbook(); // only one full-screen/bottom-sheet panel open at a time
       if (activeTool) setActiveTool(null); // shopping is not tending; don't leave a tool armed behind the sheet
       renderShopRows();
       renderCheatToggle();
@@ -9955,7 +10172,7 @@
       // The complete close-list, same as openMilestones() - see that
       // function's own comment for why this is the one to copy for a
       // screen reachable from the menu.
-      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeMilestones();
+      closeShop(); closePlantPanel(); closeCrossNotes(); closeJournal(); closeHowToPlay(); closeMilestones(); closeSpellbook();
       renderGreenhouse();
       document.getElementById('greenhouse-panel').classList.add('open');
       syncToolRail();
@@ -10561,6 +10778,7 @@
     //  INIT
     // ---------------------------------------------------------------------
     initToolRail();             // draw the three tool icons once
+    renderCheatToggle();        // show the Spell Book menu entry/toggle label right away for a save with Cheat Mode already on
     syncFertUnlockUI();         // show Crossing Notes/fert sack right away for an already-unlocked save
     syncGreenhouseUnlockUI();   // show the Greenhouse menu entry right away for an already-unlocked save
     recomputeRainRingsFull();   // seed rain rings from whatever's already planted - see its own comment

@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.34.1</span>
+      <span id="game-version">v2.35.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1727,13 +1727,31 @@
     // (GROW_TIER), planted in a 2x2 block. The instant all four reach a full
     // cluster, the block is consumed on the spot - gone, no seeds or Petals
     // back, same as the RAIN RING's rune costs nothing to place but this
-    // costs the four flowers themselves - and fires a pulse: every other
-    // owned plant within GROW_PULSE_RADIUS tiles has its own stage-wait
-    // cleared, so the next watering visit advances it right away instead of
-    // waiting out STAGE_READY_MS. See the GROW SPELL section (below
-    // finishAutoWatering) for the actual detection/resolution logic.
+    // costs the four flowers themselves - and leaves a growth rune behind
+    // at that same 2x2 spot instead of an instant one-shot effect: for
+    // GROW_RUNE_MS afterward, every plant within GROW_PULSE_RADIUS tiles
+    // (a GROW_PULSE_RADIUS*2+1 tiles-on-a-side square centered on the
+    // block, planted before or after the rune goes up - the rune is a
+    // place, not a one-time list of who was standing there) grows
+    // GROW_RUNE_MULTIPLIER times faster: each stage wait it rolls while the
+    // rune is live is divided by that multiplier instead of running the
+    // full STAGE_READY_MS. Anything already mid-wait in range when the rune
+    // appears gets its *current* remaining wait compressed by the same
+    // factor immediately, rather than only speeding up waits that start
+    // after the rune exists. Re-casting a grow spell on the same 2x2 spot
+    // while its old rune is still running restarts the GROW_RUNE_MS clock
+    // rather than stacking - same "top up, don't stack" convention the rain
+    // rune uses. This is a straight timing perk, never a resource one - it
+    // cannot itself produce a flower, a seed, or another grow spell's worth
+    // of material; every cast still costs four flowers for zero return, so
+    // sustaining a chain of casts always costs more material than it can
+    // ever hand back. See the GROW SPELL section (below finishAutoWatering)
+    // for the actual detection/resolution/rune logic, and state.growRunes
+    // (loadState/saveState) for how the rune persists across a reload.
     var GROW_TIER = 1;
     var GROW_PULSE_RADIUS = 10;
+    var GROW_RUNE_MS = 24 * HOUR;   // how long one cast's growth rune stays lit
+    var GROW_RUNE_MULTIPLIER = 4;   // how much faster growth is inside an active rune
 
     // Basic elemental magic, steps three and four: LOKI'S CONTROL and SCRY,
     // a matched pair sharing one shape - four 2x2 corner blocks (all one
@@ -1823,6 +1841,15 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.35.0', changes: [
+        'Reworked the grow spell: instead of an instant one-time nudge to ' +
+          'nearby flowers, completing a 2x2 block now leaves a growth rune ' +
+          'behind at that spot for 24 hours - every flower within 10 tiles ' +
+          '(planted before or after the rune appears) grows four times ' +
+          'faster the whole time it\'s lit. Anything already mid-growth in ' +
+          'range feels it immediately; a fresh planting there grows fast ' +
+          'from the very first stage too.'
+      ] },
       { version: 'v2.34.1', changes: [
         'Fixed the seed pouch color flyout for species with a lot of ' +
           'owned colors - it used to run straight off the left edge of ' +
@@ -2962,6 +2989,14 @@
         // or a stale one past RUNE_ACTIVE_MS, just means a structurally-
         // complete rune sitting dormant.
         runeWater: {},
+        // key ("q,r", the grow block's own top-left anchor) -> { q, r,
+        // activatedAt } - when a GROW SPELL block last resolved there. Same
+        // reasoning as runeWater just above: the rune's *timing* has
+        // nowhere else to come from, since the four flowers that triggered
+        // it are deleted the instant it goes up, so this has to persist
+        // rather than being re-derived from state.plants. See GROW_RUNE_MS
+        // and isGrowRuneActiveEntry, in the GROW SPELL section.
+        growRunes: {},
         // Bought but not yet placed - the equipment toggle's own badge (see
         // renderSprinklerToggle). Placing one moves it from here into
         // `sprinklers` above; picking a placed one back up reverses that.
@@ -3162,6 +3197,10 @@
           // always-on rule just starts dormant until watered for the first
           // time under this one - no free 24h grandfathered in.
           runeWater: parsed.runeWater || {},
+          // Brand new with this feature - a pre-existing save simply has no
+          // grow runes recorded yet, same backfill treatment as runeWater
+          // got when the rain rune shipped.
+          growRunes: parsed.growRunes || {},
           sprinklerInventory: typeof parsed.sprinklerInventory === 'number' ? parsed.sprinklerInventory : 0,
           sprinklerUnlockAnnounced: !!parsed.sprinklerUnlockAnnounced,
           greenhouseTeaserAnnounced: !!parsed.greenhouseTeaserAnnounced,
@@ -3266,7 +3305,8 @@
         lokiAccess: state.lokiAccess,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
-        sprinklers: state.sprinklers, runeWater: state.runeWater, sprinklerInventory: state.sprinklerInventory,
+        sprinklers: state.sprinklers, runeWater: state.runeWater, growRunes: state.growRunes,
+        sprinklerInventory: state.sprinklerInventory,
         sprinklerUnlockAnnounced: state.sprinklerUnlockAnnounced,
         greenhouseTeaserAnnounced: state.greenhouseTeaserAnnounced,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
@@ -3383,9 +3423,15 @@
       var v = parseVariant(vk);
       var c = cellCenter(q, r);
       var key = cellKey(q, r);
+      // A tile inside an active grow rune (see GROW_RUNE_MS/
+      // growAdjustedStageWaitMs, in the GROW SPELL section) grows a fresh
+      // seed's very first stage just as fast as it speeds up one already
+      // mid-growth - the rune covers a place, not a snapshot of who was
+      // already planted there.
+      var waitMs = growAdjustedStageWaitMs(q, r, now);
       state.plants[key] = {
         q: q, r: r, lat: c.lat, lng: c.lng, species: v.species, color: v.color,
-        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + waitMs,
         reachedBloom: false, reachedFlourish: false, grownCredited: false
       };
       state.stats.planted++;
@@ -3398,7 +3444,7 @@
       renderPlants();
       updateHUD();
       toast('\u{1F331} ' + variantName(vk) + ' planted! It will be ready for water in ' +
-        formatDuration(stageReadyMs()) + '.');
+        formatDuration(waitMs) + '.');
       vibrate(20);
       tutorialOnPlant(key);
       return key;
@@ -3419,7 +3465,13 @@
       var revealed = null;
       if (grew) {
         p.stage++;
-        p.readyAt = now + stageReadyMs();
+        // Inside an active GROW SPELL rune (see GROW_RUNE_MS/
+        // growAdjustedStageWaitMs in the GROW SPELL section) this stage's
+        // wait is quartered instead of running the full stageReadyMs() -
+        // checked fresh at the moment each stage starts, so a rune that
+        // expires partway through this plant's growth simply stops
+        // speeding up whichever wait comes next, nothing snaps back.
+        p.readyAt = now + growAdjustedStageWaitMs(p.q, p.r, now);
         if (p.stage >= 2 && !p.reachedBloom) {
           p.reachedBloom = true;
           state.stats.bloomed++;
@@ -3648,6 +3700,10 @@
       // comment).
       renderLokiZones();
       renderScryZones();
+      // A grow rune can expire from the clock alone too, with no watering/
+      // harvest event to hang a recheck off of - same reasoning as the
+      // Loki/Scry zone recheck just above.
+      renderGrowRunes();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
       // Keep an open Greenhouse fresh the same way an open plant panel is
@@ -4472,20 +4528,27 @@
     }
 
     // ---------------------------------------------------------------------
-    //  GROW SPELL  (see GROW_TIER/GROW_PULSE_RADIUS above)
+    //  GROW SPELL  (see GROW_TIER/GROW_PULSE_RADIUS/GROW_RUNE_MS above)
     //
-    //  Unlike a rain ring, a grow block isn't a persistent object worth
+    //  Unlike a rain ring, a grow BLOCK isn't a persistent object worth
     //  caching - the moment it's structurally complete it resolves and the
-    //  four flowers are gone, so this is pure detect-and-resolve, called
-    //  after any watering path leaves a plant at MAX_STAGE (waterPlant,
-    //  finishAutoWatering, catchUpSprinklersOffline). Deliberately NOT
-    //  hooked in from inside applyWatering itself the way the rain ring's
-    //  candidate refresh is - applyWatering runs mid-loop in
-    //  catchUpSprinklersOffline, and deleting plants out from under that
+    //  four flowers are gone, so detecting one is pure detect-and-resolve,
+    //  called after any watering path leaves a plant at MAX_STAGE
+    //  (waterPlant, finishAutoWatering, catchUpSprinklersOffline).
+    //  Deliberately NOT hooked in from inside applyWatering itself the way
+    //  the rain ring's candidate refresh is - applyWatering runs mid-loop
+    //  in catchUpSprinklersOffline, and deleting plants out from under that
     //  loop (a block member due later in the same pass) would hand it a
     //  stale/undefined `p`. Every call site below instead calls this once
     //  its own loop/animation has already finished mutating and saving, so
     //  resolving a block can never race a still-in-flight growth pass.
+    //
+    //  The RUNE a resolved block leaves behind is the opposite: genuinely
+    //  persistent (state.growRunes, timed off GROW_RUNE_MS), and its own
+    //  speed-multiplier check (growRuneSpeedupActiveAt) is read from
+    //  ordinary code inside applyWatering itself, on every call site,
+    //  including mid-loop in catchUpSprinklersOffline - safe there because
+    //  it only ever reads the registry, never mutates or deletes a plant.
     // ---------------------------------------------------------------------
     // The four tiles of the block anchored with (q, r) as its top-left
     // corner: (q,r), (q+1,r), (q,r+1), (q+1,r+1). Complete iff all four are
@@ -4516,9 +4579,8 @@
     }
 
     // Resolves any complete grow block touching (q, r): consumes its four
-    // flowers and pulses every other owned plant within GROW_PULSE_RADIUS
-    // tiles of the block (Chebyshev distance to the nearest of its four
-    // cells) by pulling readyAt down to now. Safe to call speculatively -
+    // flowers and leaves a growth rune behind at that same 2x2 spot (see
+    // GROW_RUNE_MS/resolveGrowBlock below). Safe to call speculatively -
     // e.g. once per surviving member of a block that another anchor already
     // resolved this same pass - a block whose cells no longer all match
     // just no-ops.
@@ -4550,25 +4612,147 @@
       });
 
       var now = Date.now();
-      var pulsed = 0;
+
+      // Leaves the growth rune behind, keyed by this block's own top-left
+      // anchor - re-casting on the same 2x2 spot while an old rune there is
+      // still running just restarts its GROW_RUNE_MS clock (activatedAt
+      // overwritten), same "top up, don't stack" convention the rain rune's
+      // own activateRainRune uses.
+      state.growRunes[cellKey(aq, ar)] = { q: aq, r: ar, activatedAt: now };
+
+      // Anything already mid-wait within the new rune's radius feels the
+      // speedup immediately - its remaining wait is compressed by
+      // GROW_RUNE_MULTIPLIER on the spot, rather than only speeding up
+      // waits that start after this moment (applyWatering's own
+      // growRuneSpeedupActiveAt check handles that ongoing case for every
+      // stage transition for as long as the rune stays lit).
+      var sped = 0;
       Object.keys(state.plants).forEach(function (key) {
         var p = state.plants[key];
-        if (p.stage >= MAX_STAGE) return; // nothing left to advance
+        if (p.stage >= MAX_STAGE || p.readyAt <= now) return; // nothing left to advance, or not waiting
         var near = corners.some(function (c) {
           return cellDist(c[0], c[1], p.q, p.r) <= GROW_PULSE_RADIUS;
         });
-        if (near && p.readyAt > now) { p.readyAt = now; pulsed++; }
+        if (!near) return;
+        p.readyAt = now + Math.round((p.readyAt - now) / GROW_RUNE_MULTIPLIER);
+        sped++;
       });
 
       saveState();
       renderPlants();
       updateHUD();
       closePlantPanel();
-      toast('\u{1F300} The ' + variantName(vk) + ' grow spell fires! ' +
-        (pulsed ? pulsed + ' nearby flower' + (pulsed === 1 ? '' : 's') + ' ' +
-          (pulsed === 1 ? 'is' : 'are') + ' ready for water again.' :
-          'Nothing nearby needed the boost.'));
+      renderGrowRunes();
+      toast('\u{1F300} The ' + variantName(vk) + ' grow spell fires! Growth within ' + GROW_PULSE_RADIUS +
+        ' tiles is ' + GROW_RUNE_MULTIPLIER + 'x faster for the next ' + (GROW_RUNE_MS / HOUR) + ' hours' +
+        (sped ? ' - ' + sped + ' nearby flower' + (sped === 1 ? '' : 's') + ' ' +
+          (sped === 1 ? 'is' : 'are') + ' already closer to ready.' : '.'));
       vibrate(30);
+    }
+
+    // Whether a growRunes registry entry is still within its GROW_RUNE_MS
+    // window as of `now`. Takes the entry object itself (not a lookup key)
+    // so catchUpSprinklersOffline-style replay can check it against a past
+    // `now` exactly like isRuneActive's own wateredAt comparison does.
+    function isGrowRuneActiveEntry(entry, now) {
+      return !!entry && (now - entry.activatedAt) < GROW_RUNE_MS;
+    }
+
+    // Is (q, r) within GROW_PULSE_RADIUS of any currently-active grow
+    // rune's 2x2 origin block, as of `now`? Checked against the nearest of
+    // the rune's four corner tiles, same convention resolveGrowBlock's own
+    // "near" check above uses. Called from applyWatering for every stage
+    // transition (not just the ones inside this section) - safe there,
+    // including mid-loop in catchUpSprinklersOffline, because unlike
+    // resolving a grow block this never deletes or reshuffles anything, it
+    // only reads state.growRunes.
+    function growRuneSpeedupActiveAt(q, r, now) {
+      var keys = Object.keys(state.growRunes);
+      for (var i = 0; i < keys.length; i++) {
+        var entry = state.growRunes[keys[i]];
+        if (!isGrowRuneActiveEntry(entry, now)) continue;
+        var corners = [[entry.q, entry.r], [entry.q + 1, entry.r], [entry.q, entry.r + 1], [entry.q + 1, entry.r + 1]];
+        for (var j = 0; j < corners.length; j++) {
+          if (cellDist(corners[j][0], corners[j][1], q, r) <= GROW_PULSE_RADIUS) return true;
+        }
+      }
+      return false;
+    }
+
+    // The actual wait (ms) one stage costs at (q, r) right now - the full
+    // stageReadyMs(), or that divided by GROW_RUNE_MULTIPLIER if (q, r) is
+    // covered by an active grow rune. Every place that stamps a fresh
+    // readyAt (applyWatering's stage-advance, a freshly planted seed, a
+    // freshly bred seedling) reads this instead of stageReadyMs() directly,
+    // so "planted before or after the rune goes up" (see GROW_RUNE_MS
+    // above) actually holds for a brand-new seed too, not just a plant that
+    // was already mid-wait when the rune appeared. A greenhouse pot has no
+    // q/r at all (undefined) - cellDist against undefined is never <=
+    // GROW_PULSE_RADIUS, so this quietly falls back to the unsped-up wait
+    // for potted plants, which is correct: pots aren't on the map, so no
+    // outdoor rune should ever reach one.
+    function growAdjustedStageWaitMs(q, r, now) {
+      return Math.round(stageReadyMs() / (growRuneSpeedupActiveAt(q, r, now) ? GROW_RUNE_MULTIPLIER : 1));
+    }
+
+    // The rune's boundary square - GROW_PULSE_RADIUS tiles out from the
+    // nearest edge of its 2x2 origin block, same half-tile-padding
+    // convention zoneLatLngs (CORNER ZONES, below) uses for its own
+    // rectangle outline.
+    function growRuneLatLngs(entry) {
+      var half = 0.5;
+      var qMin = entry.q - GROW_PULSE_RADIUS, qMax = entry.q + 1 + GROW_PULSE_RADIUS;
+      var rMin = entry.r - GROW_PULSE_RADIUS, rMax = entry.r + 1 + GROW_PULSE_RADIUS;
+      return [
+        [(rMin - half) * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG],
+        [(rMin - half) * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG],
+        [(rMax + half) * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG],
+        [(rMax + half) * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG]
+      ];
+    }
+
+    var GROW_RUNE_COLOR = '#2fae4e'; // green - distinct from rain blue / Loki gold / Scry violet
+    function growRuneStyle() {
+      return { color: GROW_RUNE_COLOR, weight: 2, opacity: 0.8, dashArray: '2 6', fill: false, interactive: false };
+    }
+
+    // One marker (a small glyph at the origin 2x2's own center) plus one
+    // boundary square (the GROW_PULSE_RADIUS reach) per active rune -
+    // both interactive: false, same reasoning the CORNER ZONES comment up
+    // top gives: a spell's own visual must never intercept a tap meant for
+    // the ground underneath it. Also prunes any entry whose GROW_RUNE_MS
+    // window has lapsed out of state.growRunes entirely, rather than
+    // leaving dead entries to accumulate in the save forever - called often
+    // enough (every cast, plus once a minute from tickPlants) that this is
+    // the only cleanup the registry ever needs.
+    var growRuneLayers = {}; // key ("q,r") -> { marker, boundary }
+    function renderGrowRunes() {
+      var now = Date.now();
+      var seen = {};
+      var pruned = false;
+      Object.keys(state.growRunes).forEach(function (key) {
+        var entry = state.growRunes[key];
+        if (!isGrowRuneActiveEntry(entry, now)) { delete state.growRunes[key]; pruned = true; return; }
+        seen[key] = true;
+        if (growRuneLayers[key]) return; // already drawn, and neither shape ever moves while active
+        var marker = L.marker([(entry.r + 0.5) * CELL_LAT_DEG, (entry.q + 0.5) * CELL_LNG_DEG], {
+          icon: L.divIcon({
+            html: '<div style="font-size:18px;line-height:1;text-align:center;' +
+              'filter:drop-shadow(0 0 3px ' + GROW_RUNE_COLOR + ')">\u{1F300}</div>',
+            iconSize: [22, 22], iconAnchor: [11, 11], className: ''
+          }),
+          interactive: false
+        }).addTo(map);
+        var boundary = L.polygon(growRuneLatLngs(entry), growRuneStyle()).addTo(map);
+        growRuneLayers[key] = { marker: marker, boundary: boundary };
+      });
+      Object.keys(growRuneLayers).forEach(function (key) {
+        if (seen[key]) return;
+        map.removeLayer(growRuneLayers[key].marker);
+        map.removeLayer(growRuneLayers[key].boundary);
+        delete growRuneLayers[key];
+      });
+      if (pruned) saveState();
     }
 
     // One-time sweep for whatever's already sitting fully grown in an
@@ -8647,9 +8831,12 @@
 
       var c = cellCenter(spot.q, spot.r);
       var key = cellKey(spot.q, spot.r);
+      // Same grow-rune check plantSeedAt's own comment explains - a bred
+      // seedling is a real map planting too, so it grows just as fast as
+      // any other fresh seed would inside an active rune's radius.
       state.plants[key] = {
         q: spot.q, r: spot.r, lat: c.lat, lng: c.lng, species: species, color: color,
-        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + stageReadyMs(),
+        plantedAt: now, lastWateredAt: now, stage: 0, readyAt: now + growAdjustedStageWaitMs(spot.q, spot.r, now),
         reachedBloom: false, reachedFlourish: false, grownCredited: false,
         // The color is decided now but stays hidden until it blooms. Seed and
         // sprout artwork is colorless anyway, so nothing leaks, and the
@@ -9221,9 +9408,11 @@
         spellCard('\u{1F300}', 'Grow Spell', growSpellDiagram(),
           '<p>A 2x2 block of one exact species and color, all four matching, as long as that color is one tier ' +
           'up from the four standards (' + growColors + '). The instant all four reach a full cluster, the ' +
-          'block is consumed on the spot - gone for good, no seeds or Petals back - and pulses every other ' +
-          'flower you own within ' + GROW_PULSE_RADIUS + ' tiles: whatever was still waiting out its stage ' +
-          'timer is ready for the very next watering instead.</p>') +
+          'block is consumed on the spot - gone for good, no seeds or Petals back - and leaves a rune behind ' +
+          'at that spot: for the next ' + (GROW_RUNE_MS / HOUR) + ' hours, every flower within ' +
+          GROW_PULSE_RADIUS + ' tiles grows ' + GROW_RUNE_MULTIPLIER + 'x faster. A pure timing perk, not a ' +
+          'resource one - it never hands back a flower, a seed, or another cast\'s worth of material, so ' +
+          'chaining casts always costs more than it returns.</p>') +
 
         spellCard('\u{1F451}', 'Loki\'s Control', lokiDiagram(),
           '<p>A 2x2 block of any ' + lokiColors + ' flowers - they don\'t have to match each other, or even ' +
@@ -10816,6 +11005,7 @@
     renderRainRings();          // rain rings persist across sessions too, same as sprinklers
     renderLokiZones();          // Loki zones persist across sessions too, same as rain rings
     renderScryZones();          // Scry zones too
+    renderGrowRunes();          // and any still-active grow rune from before the tab was closed
     updateHUD();
     updateCurrencyPill();
     setInterval(tickPlants, 60000);

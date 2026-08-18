@@ -22,9 +22,11 @@ Key pieces:
 
 ## Workflow
 
-After completing any change, commit and push to `main` directly (no PRs, no branches):
+After completing any change, commit and push to `main` directly by default (no PRs, no branches):
 ```
 git add -A
 git commit -m "..."
 git push
 ```
+
+Push to `main` immediately once a change is verified (see the `bloom-ship` skill), without waiting for a separate "go ahead" - that confirmation isn't needed unless asked for below. The one exception: if the user asks to test, try out, or otherwise check something first before it ships, hold off on committing/pushing until they actually say to ship it - don't push work they explicitly asked to test first.

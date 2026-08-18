@@ -110,3 +110,22 @@ git push
 Commit body should name the actual regression checks that passed (not just
 assert "tested") - this is the only record that verification happened,
 since there's no CI log to point to later.
+
+**Before you type `git commit`, confirm `git diff index.html` actually
+contains both the `#game-version` span change and the new `CHANGELOG`
+entry** - not just the feature/fix code. It is very easy to fix the real
+bug, run the verification steps, feel "done," and commit that on its own,
+only remembering steps 4-5 after the push already happened (this has
+happened in practice, twice in one session). A commit that ships a code
+change without its version bump leaves the live `#game-version` pointing
+at the *previous* entry, so the in-game "What's New" popup either shows
+stale copy or nothing at all for what just shipped - worth catching before
+`git push`, not after.
+
+If you notice the miss only after already pushing: **do not**
+`git commit --amend` a commit that's already on `origin/main` - rewriting
+pushed history is blocked (a permission classifier will refuse it, and
+even if it didn't, it forces anyone who already fetched to deal with a
+diverged history). Just make a normal small follow-up commit that adds the
+version bump and changelog entry, same as any other change - rerun steps 1
+and 2 on it, then push.

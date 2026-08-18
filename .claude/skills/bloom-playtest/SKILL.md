@@ -18,10 +18,13 @@ techniques that have worked repeatedly.
   don't hardcode a `chromium-NNNN` build number, it changes:
   ```js
   const { chromium } = require('playwright-core');
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   ```
-  (`/opt/pw-browsers/chromium` is a symlink to whatever build is actually
-  installed.)
+  `/opt/pw-browsers/chromium` is a symlink straight to the `chrome`
+  executable itself (e.g. `chromium-1194/chrome-linux/chrome`), not to a
+  directory - don't append `/chrome-linux/chrome` after it, that path
+  doesn't exist and `launch()` fails with ENOENT. Run
+  `ls -la /opt/pw-browsers/` first if this ever changes again.
 - Playwright test scripts written to the scratchpad do **not** persist
   between sessions/containers. Either recreate the ones you need each
   session, or - if a script has proven itself worth keeping across many
@@ -68,6 +71,22 @@ page.on('console', msg => {
 Set the `state` directly via `page.evaluate` for whatever scenario you're
 testing (currency, unlock flags, `state.greenhouse.pots`, etc.) rather than
 trying to drive the UI through real walking/GPS.
+
+**Gotcha: hex-grid `q`/`r` and lat/lng are not independent - a fabricated
+fixture must derive one from the other.** `cellCenter(q, r)` is literally
+`{ lat: r * CELL_LAT_DEG, lng: q * CELL_LNG_DEG }` - the grid has no
+separate origin offset, `q`/`r` *are* lat/lng divided by cell size. Any
+in-game structure that carries both fields (a rain ring, a sprinkler, a
+plant) always has them agree because they're derived from the same
+`cellCenter()`/`latLngToCell()` call. If you hand-build a test fixture with
+an arbitrary `q`/`r` (e.g. `{q:0,r:0}`) but a real-world `lat`/`lng` (e.g.
+San Francisco) to make a marker land somewhere visible, anything that reads
+`q`/`r` to compute *geometry* (a boundary shape drawn in real lat/lng, a
+range check) will silently place that geometry at the `q`/`r`-implied
+location instead - which can be nowhere near your marker and off-screen
+entirely, with no error to flag it. Always compute both from one source:
+`var c = cellCenter(q, r); rainRings[k] = { q: q, r: r, lat: c.lat, lng: c.lng };`
+then `map.setView([c.lat, c.lng], zoom)` - not the other way around.
 
 ## 2. Building a standalone, dependency-free playtest tool
 

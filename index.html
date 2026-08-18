@@ -1414,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.26.0</span>
+      <span id="game-version">v2.26.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1703,6 +1703,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.26.1', changes: [
+        'Fixed dragging to mass-plant seeds across a completed rain rune - ' +
+          'it now skips the rune\'s own empty center tile instead of ' +
+          'planting over it and snuffing out the spell, so you can drag ' +
+          'right across the whole watered area and the rune survives.'
+      ] },
       { version: 'v2.26.0', changes: [
         'A new flower has joined the garden: Iris, the first species built ' +
           'on three petals instead of five, six, seven, eight, or sixteen. ' +
@@ -6472,7 +6478,16 @@
             return;
           }
           var key = cellKey(q, r);
-          if (state.plants[key] || state.wild[key] || state.sprinklers[key]) continue;
+          // A rain ring's own center tile is deliberately empty ground (see
+          // isRainRingComplete) - it never shows up in state.plants, so
+          // without this it looked exactly like any other bare tile to a
+          // dragged box and got planted over, snuffing out an already-
+          // completed spell as collateral damage from a sweep that was
+          // aimed at the empty ground around it, not at the rune itself.
+          // Skipped only here, not in plantSeedAt/plantEquippedSeedAt - a
+          // single deliberate tap right on the rune is still a real choice
+          // a player can make (and does break the ring, same as today).
+          if (state.plants[key] || state.wild[key] || state.sprinklers[key] || rainRings[key]) continue;
           plantSeedAt(q, r, vk);
           planted++;
         }

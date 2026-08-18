@@ -1414,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.28.0</span>
+      <span id="game-version">v2.29.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1719,6 +1719,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.29.0', changes: [
+        'Cheat Mode now fills the seed pouch with every color of every ' +
+          'species - signature colors included - not just unlimited Petals, ' +
+          'so you can plant anything while it\'s on.'
+      ] },
       { version: 'v2.28.0', changes: [
         'That rune isn\'t permanent any more - water it and it rains on ' +
           'everything around it for 24 hours, watering it again tops the ' +
@@ -2351,6 +2356,11 @@
     // makes a dent in it, re-applied after every purchase so it never runs
     // down for real.
     var CHEAT_CURRENCY = 999999;
+    // Same idea, per seed variant: what Cheat Mode tops every species/color
+    // pouch slot up to (see setCheatMode and the two planting choke points,
+    // plantSeedAt/plantInPot, which re-apply it after every spend so no seed
+    // ever actually runs out).
+    var CHEAT_SEED_COUNT = 999;
     function harvestValue(p, stage) { return stage >= MAX_STAGE ? SELL_CLUSTER : SELL_SINGLE; }
 
     // Seeds recovered by shearing a flower apart on the spot, as
@@ -3205,7 +3215,8 @@
     function plantSeedAt(q, r, vk) {
       if (!(state.seeds[vk] > 0)) return null;
       state.seeds[vk]--;
-      if (state.seeds[vk] <= 0) delete state.seeds[vk]; // keep the pouch tidy
+      if (state.cheatMode) state.seeds[vk] = CHEAT_SEED_COUNT; // never actually runs down
+      else if (state.seeds[vk] <= 0) delete state.seeds[vk]; // keep the pouch tidy
 
       var now = Date.now();
       var v = parseVariant(vk);
@@ -8945,17 +8956,31 @@
     // ---------------------------------------------------------------------
 
     // Cheat Mode: a dev/testing shortcut, not a real game feature - unlimited
-    // Petals and a 15s stage-readiness time instead of 1.5h. Currency isn't a
-    // true sentinel "infinite" value, just topped up to CHEAT_CURRENCY (see
-    // buySeed/buyFertilizer, which re-apply the top-up after every spend so
-    // it never actually runs down). Turning it off doesn't claw anything
-    // back - whatever Petals or grown plants you ended up with stay, only
-    // future costs/timing go back to normal, same as any other toggle in
-    // this game (nothing here is ever taken away from the player).
+    // Petals, a full pouch of every seed variant (every species in every
+    // color it can legally come in, signature colors included), and a 15s
+    // stage-readiness time instead of 1.5h. Currency and seeds aren't true
+    // sentinel "infinite" values, just topped up to CHEAT_CURRENCY/
+    // CHEAT_SEED_COUNT (see buySeed/buyFertilizer and the planting choke
+    // points plantSeedAt/plantInPot, which all re-apply the top-up after
+    // every spend so nothing actually runs down). Turning it off doesn't
+    // claw anything back - whatever Petals, seeds, or grown plants you ended
+    // up with stay, only future costs/timing go back to normal, same as any
+    // other toggle in this game (nothing here is ever taken away from the
+    // player).
     function setCheatMode(on) {
       state.cheatMode = on;
       if (on) {
         state.currency = Math.max(state.currency, CHEAT_CURRENCY);
+        // Every species, every color that species can legally carry
+        // (colorsForSpecies already excludes another species' signature
+        // colors) - so the seed rail immediately offers everything plantable,
+        // not just whatever happened to already be in the pouch.
+        SPECIES.forEach(function (s) {
+          colorsForSpecies(s.key).forEach(function (c) {
+            var vk = variantKey(s.key, c.id);
+            state.seeds[vk] = Math.max(state.seeds[vk] || 0, CHEAT_SEED_COUNT);
+          });
+        });
         // Retroactively shortens whatever's left of the CURRENT wait for
         // anything still growing, so turning the toggle on is useful right
         // away instead of only affecting plants watered after this point.
@@ -8976,7 +9001,7 @@
       // cache, so calling it first would still see the pre-toggle numbers.
       renderPlants();
       updateHUD();
-      toast(on ? 'Cheat Mode on - unlimited Petals, 15s growth \u{1F31F}' : 'Cheat Mode off');
+      toast(on ? 'Cheat Mode on - unlimited Petals & seeds, 15s growth \u{1F31F}' : 'Cheat Mode off');
     }
     function toggleCheatMode() { setCheatMode(!state.cheatMode); }
     function renderCheatToggle() {
@@ -9561,7 +9586,8 @@
       var pot = state.greenhouse.pots[slotIndex];
       if (!pot || !pot.fixed || pot.plant) return;
       state.seeds[vk]--;
-      if (state.seeds[vk] <= 0) delete state.seeds[vk];
+      if (state.cheatMode) state.seeds[vk] = CHEAT_SEED_COUNT; // never actually runs down
+      else if (state.seeds[vk] <= 0) delete state.seeds[vk];
       var v = parseVariant(vk);
       var now = Date.now();
       pot.plant = {

@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.36.0</span>
+      <span id="game-version">v2.36.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1841,6 +1841,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.36.1', changes: [
+        'Fixed the grow rune\'s center icon randomly rendering too small ' +
+          'or too large while zooming in and out - it now stays locked to ' +
+          'the same size every other map icon uses at that zoom level.'
+      ] },
       { version: 'v2.36.0', changes: [
         'The grow rune now has its own info panel, just like the rain ' +
           'rune\'s - tap any of its four center tiles (with or without a ' +
@@ -6799,7 +6804,17 @@
       _markerRenderPending = true;
       requestAnimationFrame(function () {
         _markerRenderPending = false;
-        renderPlants(); renderWild(); renderSprinklers(); renderWeeds(); renderRainRings();
+        // renderGrowRunes must run in this same batch, not on its own
+        // separate schedule (cast/tick/boot) - every one of these rebuilds
+        // writes the single shared _iconBuiltPx (see rescalePlantIcons
+        // below), so a marker type left out here has its OWN icon rebuilt
+        // at the old zoom's px while _iconBuiltPx moves on to the new one
+        // out from under it. rescalePlantIcons' live in-gesture transform
+        // then scales that stale icon against the wrong baseline - it
+        // grew or shrank on every zoom step instead of settling back to
+        // its real size, which is exactly what was happening here before
+        // this call was added.
+        renderPlants(); renderWild(); renderSprinklers(); renderWeeds(); renderRainRings(); renderGrowRunes();
       });
     }
     map.on('moveend zoomend viewreset resize', scheduleMarkerRender);

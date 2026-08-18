@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.35.0</span>
+      <span id="game-version">v2.35.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1841,6 +1841,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.35.1', changes: [
+        'The grow spell\'s rune now actually looks like a rune - the same ' +
+          'compass-star glyph and boundary the rain ring uses, recolored ' +
+          'green with a budding flower at its center instead of a raindrop, ' +
+          'in place of the plain dashed square it launched with.'
+      ] },
       { version: 'v2.35.0', changes: [
         'Reworked the grow spell: instead of an instant one-time nudge to ' +
           'nearby flowers, completing a 2x2 block now leaves a growth rune ' +
@@ -4695,61 +4701,190 @@
       return Math.round(stageReadyMs() / (growRuneSpeedupActiveAt(q, r, now) ? GROW_RUNE_MULTIPLIER : 1));
     }
 
-    // The rune's boundary square - GROW_PULSE_RADIUS tiles out from the
-    // nearest edge of its 2x2 origin block, same half-tile-padding
-    // convention zoneLatLngs (CORNER ZONES, below) uses for its own
-    // rectangle outline.
-    function growRuneLatLngs(entry) {
+    // ---- Rune marker (the resolved 2x2's own center) -----------------------
+    // Deliberately built the same way buildRainRuneSVG is - the outer glow,
+    // the circle-and-compass-star collar, the 16 rim ticks, the 8 star-point
+    // diamonds - reusing that function's own polarPoint/runeSquarePoints
+    // helpers, just recolored green and with a budding flower in place of
+    // the raindrop, so the two runes visibly belong to the same family.
+    // Colors are inlined literals for the same reason RAIN_RUNE_LINE etc.
+    // are: this markup lands in a divIcon's `html` string, outside the
+    // page's normal CSS cascade, where a var(--x) reference wouldn't resolve.
+    var GROW_RUNE_LINE = '#5cbb7a';
+    var GROW_RUNE_GLOW = '#a8e8bc';
+    var GROW_RUNE_BUD_TIP = '#f0a9c9';  // the blush of petal peeking through, at the very top of the bud
+    var GROW_RUNE_BUD_MID = '#8fd39f';
+    var GROW_RUNE_BUD_BASE = '#2f7a45'; // the sepals cradling the bud, at its base
+    var GROW_RUNE_LEAF = '#3d8f55';
+    function buildGrowRuneSVG(px, idSuffix) {
+      var cx = 60, cy = 60, rOuter = 54, rTickOuter = 60, rTickShort = 57, rInner = 32, rDiamond = 43;
+      var ticks = '';
+      for (var i = 0; i < 16; i++) {
+        var deg = i * 22.5, long = (i % 2 === 0);
+        var from = polarPoint(cx, cy, rOuter, deg), to = polarPoint(cx, cy, long ? rTickOuter : rTickShort, deg);
+        ticks += '<line x1="' + from.x.toFixed(2) + '" y1="' + from.y.toFixed(2) + '" x2="' + to.x.toFixed(2) +
+          '" y2="' + to.y.toFixed(2) + '" stroke="' + GROW_RUNE_LINE + '" stroke-width="' + (long ? 1.6 : 1) +
+          '" stroke-linecap="round" opacity="' + (long ? 0.9 : 0.55) + '"/>';
+      }
+      var diamonds = '';
+      for (var j = 0; j < 8; j++) {
+        var dp = polarPoint(cx, cy, rDiamond, j * 45);
+        diamonds += '<rect x="' + (dp.x - 2.6).toFixed(2) + '" y="' + (dp.y - 2.6).toFixed(2) +
+          '" width="5.2" height="5.2" transform="rotate(45 ' + dp.x.toFixed(2) + ' ' + dp.y.toFixed(2) + ')" ' +
+          'fill="' + GROW_RUNE_GLOW + '" opacity="0.85"/>';
+      }
+      var gid = 'gr' + idSuffix;
+      return '<svg viewBox="0 0 120 120" width="' + px + '" height="' + px + '">' +
+        '<defs>' +
+          '<radialGradient id="glow-' + gid + '" cx="50%" cy="50%" r="50%">' +
+            '<stop offset="0%" stop-color="' + GROW_RUNE_GLOW + '" stop-opacity="0.55"/>' +
+            '<stop offset="100%" stop-color="' + GROW_RUNE_GLOW + '" stop-opacity="0"/>' +
+          '</radialGradient>' +
+          '<linearGradient id="bud-' + gid + '" x1="60" y1="30" x2="60" y2="80" gradientUnits="userSpaceOnUse">' +
+            '<stop offset="0%" stop-color="' + GROW_RUNE_BUD_TIP + '"/>' +
+            '<stop offset="22%" stop-color="' + GROW_RUNE_BUD_TIP + '"/>' +
+            '<stop offset="55%" stop-color="' + GROW_RUNE_BUD_MID + '"/>' +
+            '<stop offset="100%" stop-color="' + GROW_RUNE_BUD_BASE + '"/>' +
+          '</linearGradient>' +
+        '</defs>' +
+        '<circle cx="60" cy="60" r="70" fill="url(#glow-' + gid + ')"/>' +
+        '<g>' +
+          '<circle cx="60" cy="60" r="' + rOuter + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.4" opacity="0.85"/>' +
+          '<polygon points="' + runeSquarePoints(cx, cy, 46, 0) + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
+          '<polygon points="' + runeSquarePoints(cx, cy, 46, 45) + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
+          ticks + diamonds +
+        '</g>' +
+        '<circle cx="60" cy="60" r="' + rInner + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.2" stroke-dasharray="3 4" opacity="0.8"/>' +
+        // Two small leaves flaring off a short stem, then the closed bud
+        // itself sitting on top - unopened, same reasoning GROW_RUNE_BUD_TIP
+        // is only a hint of color rather than full petal color: this is a
+        // BUD, not a bloom.
+        '<line x1="60" y1="78" x2="60" y2="92" stroke="' + GROW_RUNE_LEAF + '" stroke-width="2.2" stroke-linecap="round"/>' +
+        '<path d="M60 84 C50 82 44 86 42 92 C50 93 58 90 60 84 Z" fill="' + GROW_RUNE_LEAF + '" opacity="0.95"/>' +
+        '<path d="M60 84 C70 82 76 86 78 92 C70 93 62 90 60 84 Z" fill="' + GROW_RUNE_LEAF + '" opacity="0.95"/>' +
+        '<path d="M60 32 C68 44 76 54 76 62 C76 72 69 78 60 78 C51 78 44 72 44 62 C44 54 52 44 60 32 Z" ' +
+          'fill="url(#bud-' + gid + ')" stroke="' + GROW_RUNE_BUD_BASE + '" stroke-width="1" opacity="0.97"/>' +
+      '</svg>';
+    }
+    function makeGrowRuneIcon(px, idSuffix) {
+      return L.divIcon({
+        html: buildGrowRuneSVG(px, idSuffix), iconSize: [px, px], iconAnchor: [px / 2, px / 2], className: ''
+      });
+    }
+
+    // ---- Boundary rune (the GROW_PULSE_RADIUS reach) ------------------------
+    // Same "small glyph and full reach are visibly the same rune, just two
+    // sizes" idea rainBoundaryGeometry's own comment explains - but square,
+    // not circular, because the reach really is Chebyshev-square (see
+    // growRuneSpeedupActiveAt): an outer square at the true boundary, a
+    // second square rotated 45 degrees around the block's own center
+    // (echoing the compact glyph's own two-square compass star), a small
+    // diamond accent at each of the outer square's four corners, and a
+    // faint tile-by-tile lattice across the interior, same as the rain
+    // rune's own lattice.
+    function growRuneBoundaryGeometry(entry) {
       var half = 0.5;
+      var cq = entry.q + 0.5, cr = entry.r + 0.5; // the 2x2 block's own center
+      var span = GROW_PULSE_RADIUS + 0.5;         // tiles from center to the true edge
       var qMin = entry.q - GROW_PULSE_RADIUS, qMax = entry.q + 1 + GROW_PULSE_RADIUS;
       var rMin = entry.r - GROW_PULSE_RADIUS, rMax = entry.r + 1 + GROW_PULSE_RADIUS;
-      return [
+
+      var square = [
         [(rMin - half) * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG],
         [(rMin - half) * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG],
         [(rMax + half) * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG],
         [(rMax + half) * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG]
       ];
+      var diamond = [
+        [(cr - span) * CELL_LAT_DEG, cq * CELL_LNG_DEG],
+        [cr * CELL_LAT_DEG, (cq + span) * CELL_LNG_DEG],
+        [(cr + span) * CELL_LAT_DEG, cq * CELL_LNG_DEG],
+        [cr * CELL_LAT_DEG, (cq - span) * CELL_LNG_DEG]
+      ];
+      var accentHalf = 0.55;
+      var corners = [[rMin - half, qMin - half], [rMin - half, qMax + half], [rMax + half, qMax + half], [rMax + half, qMin - half]];
+      var diamonds = corners.map(function (c) {
+        var r0 = c[0], q0 = c[1];
+        return [
+          [(r0 - accentHalf) * CELL_LAT_DEG, q0 * CELL_LNG_DEG],
+          [r0 * CELL_LAT_DEG, (q0 + accentHalf) * CELL_LNG_DEG],
+          [(r0 + accentHalf) * CELL_LAT_DEG, q0 * CELL_LNG_DEG],
+          [r0 * CELL_LAT_DEG, (q0 - accentHalf) * CELL_LNG_DEG]
+        ];
+      });
+
+      // Every internal tile edge inside the square, minus the two outermost
+      // (the boundary square above already marks those) - same convention
+      // rainBoundaryGeometry's own lattice uses, just trivial here since
+      // this shape is already an axis-aligned square in lat/lng.
+      var lattice = [];
+      for (var qOff = qMin + 1; qOff < qMax; qOff++) {
+        lattice.push([[(rMin - half) * CELL_LAT_DEG, qOff * CELL_LNG_DEG], [(rMax + half) * CELL_LAT_DEG, qOff * CELL_LNG_DEG]]);
+      }
+      for (var rOff = rMin + 1; rOff < rMax; rOff++) {
+        lattice.push([[rOff * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG], [rOff * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG]]);
+      }
+
+      return { square: square, diamond: diamond, diamonds: diamonds, lattice: lattice };
     }
 
-    var GROW_RUNE_COLOR = '#2fae4e'; // green - distinct from rain blue / Loki gold / Scry violet
-    function growRuneStyle() {
-      return { color: GROW_RUNE_COLOR, weight: 2, opacity: 0.8, dashArray: '2 6', fill: false, interactive: false };
-    }
-
-    // One marker (a small glyph at the origin 2x2's own center) plus one
-    // boundary square (the GROW_PULSE_RADIUS reach) per active rune -
-    // both interactive: false, same reasoning the CORNER ZONES comment up
-    // top gives: a spell's own visual must never intercept a tap meant for
-    // the ground underneath it. Also prunes any entry whose GROW_RUNE_MS
-    // window has lapsed out of state.growRunes entirely, rather than
-    // leaving dead entries to accumulate in the save forever - called often
-    // enough (every cast, plus once a minute from tickPlants) that this is
-    // the only cleanup the registry ever needs.
-    var growRuneLayers = {}; // key ("q,r") -> { marker, boundary }
+    // One marker (the compact glyph, sized and rescaled exactly like the
+    // rain rune's own marker - see plantIconBase()/rescalePlantIcons()) plus
+    // the boundary shapes above, per active rune - all interactive: false,
+    // same reasoning the CORNER ZONES comment up top gives: a spell's own
+    // visual must never intercept a tap meant for the ground underneath it.
+    // Also prunes any entry whose GROW_RUNE_MS window has lapsed out of
+    // state.growRunes entirely, rather than leaving dead entries to
+    // accumulate in the save forever - called often enough (every cast,
+    // plus once a minute from tickPlants) that this is the only cleanup the
+    // registry ever needs.
+    var growRuneLayers = {}; // key ("q,r") -> { marker, square, diamond, diamonds, lattice }
     function renderGrowRunes() {
       var now = Date.now();
       var seen = {};
       var pruned = false;
+      var basePx = plantIconBase();
+      _iconBuiltPx = basePx; // same bookkeeping renderRainRings does with its own unscaled px
+      var px = Math.round(basePx * 0.92);
       Object.keys(state.growRunes).forEach(function (key) {
         var entry = state.growRunes[key];
         if (!isGrowRuneActiveEntry(entry, now)) { delete state.growRunes[key]; pruned = true; return; }
         seen[key] = true;
-        if (growRuneLayers[key]) return; // already drawn, and neither shape ever moves while active
+        var existing = growRuneLayers[key];
+        var iconKey = px + '';
+        if (existing) {
+          if (existing.marker._iconKey !== iconKey) {
+            existing.marker.setIcon(makeGrowRuneIcon(px, key.replace(/[^a-zA-Z0-9]/g, '_')));
+            existing.marker._iconKey = iconKey;
+          }
+          return; // boundary shapes never move while active - real lat/lng geometry, nothing to update
+        }
         var marker = L.marker([(entry.r + 0.5) * CELL_LAT_DEG, (entry.q + 0.5) * CELL_LNG_DEG], {
-          icon: L.divIcon({
-            html: '<div style="font-size:18px;line-height:1;text-align:center;' +
-              'filter:drop-shadow(0 0 3px ' + GROW_RUNE_COLOR + ')">\u{1F300}</div>',
-            iconSize: [22, 22], iconAnchor: [11, 11], className: ''
-          }),
-          interactive: false
+          icon: makeGrowRuneIcon(px, key.replace(/[^a-zA-Z0-9]/g, '_')), interactive: false, zIndexOffset: 80
         }).addTo(map);
-        var boundary = L.polygon(growRuneLatLngs(entry), growRuneStyle()).addTo(map);
-        growRuneLayers[key] = { marker: marker, boundary: boundary };
+        marker._iconKey = iconKey;
+        var geo = growRuneBoundaryGeometry(entry);
+        // Lattice added first so it sits under the rest (Leaflet stacks
+        // same-pane vector layers in add order), same as renderRainRings.
+        var lattice = L.polyline(geo.lattice, {
+          color: GROW_RUNE_LINE, weight: 1, opacity: 0.25, interactive: false
+        }).addTo(map);
+        var square = L.polygon(geo.square, {
+          color: GROW_RUNE_LINE, weight: 1.4, fill: false, opacity: 0.85, interactive: false
+        }).addTo(map);
+        var diamond = L.polygon(geo.diamond, {
+          color: GROW_RUNE_LINE, weight: 1.1, fill: false, opacity: 0.7, interactive: false
+        }).addTo(map);
+        var diamonds = L.polygon(geo.diamonds, {
+          color: GROW_RUNE_GLOW, weight: 0, fillColor: GROW_RUNE_GLOW, fillOpacity: 0.85, interactive: false
+        }).addTo(map);
+        growRuneLayers[key] = { marker: marker, lattice: lattice, square: square, diamond: diamond, diamonds: diamonds };
       });
       Object.keys(growRuneLayers).forEach(function (key) {
         if (seen[key]) return;
-        map.removeLayer(growRuneLayers[key].marker);
-        map.removeLayer(growRuneLayers[key].boundary);
+        var l = growRuneLayers[key];
+        map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.square);
+        map.removeLayer(l.diamond); map.removeLayer(l.diamonds);
         delete growRuneLayers[key];
       });
       if (pruned) saveState();
@@ -6583,6 +6718,15 @@
       // instead of going through apply().
       Object.keys(rainRingLayers).forEach(function (key) {
         var el = rainRingLayers[key].marker.getElement();
+        var c = el && el.firstElementChild;
+        if (c) c.style.transform = t;
+      });
+      // Same one-line-loop treatment as rainRingLayers just above, for the
+      // exact same reason - growRuneLayers' own boundary shapes are real
+      // lat/lng geometry that Leaflet reprojects on its own; only the
+      // compact marker glyph needs this live in-gesture rescale.
+      Object.keys(growRuneLayers).forEach(function (key) {
+        var el = growRuneLayers[key].marker.getElement();
         var c = el && el.firstElementChild;
         if (c) c.style.transform = t;
       });

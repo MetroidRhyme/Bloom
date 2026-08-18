@@ -1414,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.29.0</span>
+      <span id="game-version">v2.30.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1719,6 +1719,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.30.0', changes: [
+        'Cheat Mode drops the walking requirement too - plant, water, ' +
+          'harvest, sell, fertilize, pick, or place a sprinkler anywhere on ' +
+          'the map while it\'s on, no need to actually be standing nearby.'
+      ] },
       { version: 'v2.29.0', changes: [
         'Cheat Mode now fills the seed pouch with every color of every ' +
           'species - signature colors included - not just unlimited Petals, ' +
@@ -4361,6 +4366,10 @@
     // simply hasn't been touched yet is never mistaken for today's.
     function inRange(q, r) {
       if (!state.userPos) return false;
+      // Cheat Mode: no distance limit - every tile counts as in range, so
+      // plant/water/harvest/sell/fertilize/pick/sprinkler all work anywhere
+      // on the map, not just near the player's live position.
+      if (state.cheatMode) return true;
       var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
       if (cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
       if (state.todayAccessibleDay !== localDayKey()) return false;
@@ -8957,12 +8966,13 @@
 
     // Cheat Mode: a dev/testing shortcut, not a real game feature - unlimited
     // Petals, a full pouch of every seed variant (every species in every
-    // color it can legally come in, signature colors included), and a 15s
-    // stage-readiness time instead of 1.5h. Currency and seeds aren't true
-    // sentinel "infinite" values, just topped up to CHEAT_CURRENCY/
-    // CHEAT_SEED_COUNT (see buySeed/buyFertilizer and the planting choke
-    // points plantSeedAt/plantInPot, which all re-apply the top-up after
-    // every spend so nothing actually runs down). Turning it off doesn't
+    // color it can legally come in, signature colors included), no distance
+    // limit on where you can act (see inRange), and a 15s stage-readiness
+    // time instead of 1.5h. Currency and seeds aren't true sentinel
+    // "infinite" values, just topped up to CHEAT_CURRENCY/CHEAT_SEED_COUNT
+    // (see buySeed/buyFertilizer and the planting choke points plantSeedAt/
+    // plantInPot, which all re-apply the top-up after every spend so nothing
+    // actually runs down). Turning it off doesn't
     // claw anything back - whatever Petals, seeds, or grown plants you ended
     // up with stay, only future costs/timing go back to normal, same as any
     // other toggle in this game (nothing here is ever taken away from the
@@ -9001,7 +9011,7 @@
       // cache, so calling it first would still see the pre-toggle numbers.
       renderPlants();
       updateHUD();
-      toast(on ? 'Cheat Mode on - unlimited Petals & seeds, 15s growth \u{1F31F}' : 'Cheat Mode off');
+      toast(on ? 'Cheat Mode on - unlimited Petals & seeds, plant anywhere, 15s growth \u{1F31F}' : 'Cheat Mode off');
     }
     function toggleCheatMode() { setCheatMode(!state.cheatMode); }
     function renderCheatToggle() {

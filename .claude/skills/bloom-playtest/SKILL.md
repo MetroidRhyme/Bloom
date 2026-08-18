@@ -57,10 +57,18 @@ renderWild = function () {};
 ```
 
 Vendored `leaflet.min.js`/`leaflet.min.css` need to already exist next to
-the test script (copy them into the scratchpad `pw-test/` dir once). The
-aborted tile requests will show up as `console.error` `ERR_FAILED` lines -
-that's expected noise, filter it out rather than treating it as a real
-error:
+the test script (copy them into the scratchpad `pw-test/` dir once). If
+they're not already there this session, fetch them straight through the
+proxy rather than trying to route around the network entirely:
+
+```bash
+curl -sS -o leaflet.min.js  https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js
+curl -sS -o leaflet.min.css https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css
+```
+
+The aborted tile requests will show up as `console.error` `ERR_FAILED`
+lines - that's expected noise, filter it out rather than treating it as a
+real error:
 
 ```js
 page.on('console', msg => {
@@ -87,6 +95,19 @@ location instead - which can be nowhere near your marker and off-screen
 entirely, with no error to flag it. Always compute both from one source:
 `var c = cellCenter(q, r); rainRings[k] = { q: q, r: r, lat: c.lat, lng: c.lng };`
 then `map.setView([c.lat, c.lng], zoom)` - not the other way around.
+
+**Gotcha: a `confirmX(...)`-named function almost always opens a modal, not
+the action itself** - `confirmBuySeed(vk)` builds an "Are you sure?" panel
+and wires its OK button to call `buySeed(vk)`; it never touches
+`state.currency`/`state.seeds` on its own. Driving `confirmX` headless just
+leaves a modal open with nothing to click. Grep the function body (or the
+`onOk:`/`onclick=` it sets up) for the real mutator - `buySeed`,
+`buyFertilizer`, `buySprinkler`, etc. - and call that directly instead.
+More generally, don't assume a function's parameter order or shape from
+its name: `buildPlantVisual(species, color, stage, wilted, px, q, r)` takes
+seven positional args, not a plant object, despite what a plausible-sounding
+call site might suggest - check the real signature with Grep before writing
+the `page.evaluate` call, the same way you'd check any other unfamiliar API.
 
 ## 2. Building a standalone, dependency-free playtest tool
 

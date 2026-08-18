@@ -10,6 +10,10 @@ only thing standing between a change and production is you, right now. Do
 not commit or push until every step below has actually been run in this
 session. "The diff looks right" is not verification.
 
+Adding a new flower species or color? See the `bloom-add-species` skill
+first - it covers a hardcoded-count landmine (the Shop's crate rows) that
+this checklist's generic steps won't catch on their own.
+
 ## 1. ASCII scan (non-negotiable, per CLAUDE.md)
 
 ```

@@ -1417,7 +1417,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.25.0</span>
+      <span id="game-version">v2.25.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1706,6 +1706,10 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.25.1', changes: [
+        'That mark from a couple updates back is a bit more particular now ' +
+          'about the tile it sits on - nothing can be planted there anymore.'
+      ] },
       { version: 'v2.25.0', changes: [
         'Planted the wrong seed by accident? The shears now work on a seed ' +
           'or sprout that hasn\'t bloomed yet, too - it will not give the ' +
@@ -3119,6 +3123,12 @@
     // species and a color, and planting spends exactly the one chosen.
     function plantSeedAt(q, r, vk) {
       if (!(state.seeds[vk] > 0)) return null;
+      // Defensive, same spirit as the seed-count check above: every caller
+      // (resolveSeedTap, applyRangeSeedAction) is already expected to have
+      // checked cellFree()/rainRings first, but a rune-occupied tile must
+      // never actually get planted on regardless of how this was reached -
+      // see cellFree's own comment for why.
+      if (rainRings[cellKey(q, r)]) return null;
       state.seeds[vk]--;
       if (state.seeds[vk] <= 0) delete state.seeds[vk]; // keep the pouch tidy
 
@@ -6242,6 +6252,11 @@
         return;
       }
       if (!tileInRange) { toast('Walk closer to plant a seed here \u{1F6B6}'); return; }
+      // See cellFree's own comment - this tile is quietly holding something
+      // up (a rain ring's rune) even though nothing is technically "planted"
+      // there. Worth its own toast rather than the generic empty-ground
+      // silence, same as every other blocked-tap case above.
+      if (rainRings[key]) { toast("Something's anchored here - it can't be planted on"); return; }
       plantEquippedSeedAt(ps.cell.q, ps.cell.r);
     }
 
@@ -6420,8 +6435,7 @@
             unequipSeed();
             return;
           }
-          var key = cellKey(q, r);
-          if (state.plants[key] || state.wild[key] || state.sprinklers[key]) continue;
+          if (!cellFree(q, r)) continue; // occupied, or a rain ring's rune - see cellFree's own comment
           plantSeedAt(q, r, vk);
           planted++;
         }
@@ -7618,9 +7632,17 @@
     }
     // Free means nothing of yours, no wild flower, and no placed sprinkler -
     // a bred seedling must never land on top of something already there.
+    // A rain ring's rune (see RAIN RINGS, above catchUpSprinklersOffline)
+    // sits on an otherwise-empty tile, so without this a seed - single-tap,
+    // dragged over a whole box, or a bred seedling's landing spot - could
+    // still be planted right on top of it. There is never a reason to want
+    // that: it would just immediately break the ring (a plant occupying the
+    // center is exactly what isRainRingComplete checks against), so this
+    // rules the tile out at the source rather than letting it happen and
+    // relying on refreshRainRingCandidates to clean up after the fact.
     function cellFree(q, r) {
       var k = cellKey(q, r);
-      return !state.plants[k] && !state.wild[k] && !state.sprinklers[k];
+      return !state.plants[k] && !state.wild[k] && !state.sprinklers[k] && !rainRings[k];
     }
     function colorOfPlant(p) { return p.color || baseColorOf(p.species); }
 

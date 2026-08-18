@@ -1414,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.32.0</span>
+      <span id="game-version">v2.33.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1684,32 +1684,45 @@
     var GROW_TIER = 1;
     var GROW_PULSE_RADIUS = 10;
 
-    // Basic elemental magic, step three: LOKI'S CONTROL. Four 2x2 blocks of
-    // tier-1 flowers (LOKI_TIER) - not required to match each other or even
-    // within a single block, unlike the grow spell's exact recipe - one
-    // planted at each corner of a rectangle between LOKI_MIN_SPAN and
-    // LOKI_MAX_SPAN tiles on a side. While all four corner blocks are
-    // structurally complete AND none of their sixteen flowers is currently
-    // wilted, every tile inside the rectangle has however it was already
-    // granted inRange access (a live visit, or today's walk - see
-    // markAccessibleToday/inRange) extended out to LOKI_CONTROL_MS instead
-    // of expiring at local midnight. A single wilted corner flower drops
-    // the extension immediately - the interior falls straight back to the
-    // normal one-day rule until every corner is rewatered. This never
-    // grants access to ground never actually reached - see LOKI'S CONTROL
-    // (below the GROW SPELL section) for the actual detection/access logic.
+    // Basic elemental magic, steps three and four: LOKI'S CONTROL and SCRY,
+    // a matched pair sharing one shape - four 2x2 corner blocks (all one
+    // exact tier, not required to match each other or even within a single
+    // block, unlike the grow spell's exact recipe) planted at the corners
+    // of a rectangle between ZONE_MIN_SPAN and ZONE_MAX_SPAN tiles on a
+    // side. See the CORNER ZONES section (below the GROW SPELL section)
+    // for the shared detection logic both spells are built on.
     //
-    // Note: a corner block whose four flowers all happen to match (same
-    // species+color) is also a valid GROW SPELL recipe if they're tier-1 -
-    // and the grow spell fires unconditionally the moment such a block
-    // completes, consuming it before a Loki zone referencing it can do
-    // anything. A deliberately mixed corner (any one of the four differing
-    // in species or color) is immune to this and is the reliable way to
-    // build a lasting zone.
+    // LOKI'S CONTROL uses LOKI_TIER flowers. While all four corner blocks
+    // are structurally complete AND none of their sixteen flowers is
+    // currently wilted, every tile inside the rectangle has however it was
+    // already granted inRange access (a live visit, or today's walk - see
+    // markAccessibleToday/inRange) extended out to LOKI_CONTROL_MS instead
+    // of expiring at local midnight. This never grants access to ground
+    // never actually reached - it only extends how long already-earned
+    // access lasts.
+    //
+    // SCRY uses SCRY_TIER flowers, one tier higher. While its own four
+    // corner blocks are complete and unwilted, every tile inside is in
+    // range UNCONDITIONALLY - including ground never physically visited at
+    // all, no prior access of any kind required. This is the one genuinely
+    // new capability of the two; Loki only stretches out access already
+    // earned by walking.
+    //
+    // Both: a single wilted corner flower drops the effect immediately -
+    // the interior falls straight back to the normal rule until every
+    // corner is rewatered. And a corner block whose four flowers all
+    // happen to match (same species+color) is also a valid GROW SPELL
+    // recipe if it's tier-1 (LOKI_TIER, never SCRY_TIER) - the grow spell
+    // fires unconditionally the moment such a block completes, consuming
+    // it before a Loki zone referencing it can do anything. A deliberately
+    // mixed Loki corner (any one of the four differing in species or
+    // color) is immune to this and is the reliable way to build a lasting
+    // zone; Scry's own corners, one tier up, are never at risk of it.
+    var ZONE_MIN_SPAN = 4;   // shortest legal side (tiles) - below this the two corner blocks on a side would overlap
+    var ZONE_MAX_SPAN = 20;  // longest legal side (tiles) - keeps the candidate search and boundary overlay bounded
     var LOKI_TIER = 1;
-    var LOKI_MIN_SPAN = 4;   // shortest legal side (tiles) - below this the two corner blocks on a side would overlap
-    var LOKI_MAX_SPAN = 20;  // longest legal side (tiles) - keeps the candidate search and boundary overlay bounded
     var LOKI_CONTROL_MS = 3 * 24 * HOUR;
+    var SCRY_TIER = 2;
 
     // Full water drains to empty over 2 days, at which point the flower starts
     // *looking* wilted. That is the entire consequence: wilting is cosmetic.
@@ -1759,6 +1772,15 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.33.0', changes: [
+        'New basic magic: Scry. Same four-corners-of-an-area shape as ' +
+          'Loki\'s Control, one tier up (third-tier flowers), but the ' +
+          'effect is stronger - everywhere inside is in range even on ' +
+          'ground you have never actually walked to, for as long as all ' +
+          'sixteen corner flowers stay grown and watered. Let a corner ' +
+          'wilt and the area outside your normal reach goes dark again ' +
+          'until it\'s rewatered.'
+      ] },
       { version: 'v2.32.0', changes: [
         'New basic magic: Loki\'s Control. Plant a 2x2 block of any ' +
           'second-tier flowers at each of the four corners of an area (a ' +
@@ -3368,16 +3390,17 @@
           if (colorOfPlant(p) === RAIN_RING_COLOR) {
             refreshRainRingCandidates(candidateRingCentersAround(p.q, p.r));
           }
-          // This flower just reached MAX_STAGE - the one moment a LOKI'S
-          // CONTROL corner block can newly complete (see the LOKI'S
-          // CONTROL section, below the GROW SPELL section). Only worth
-          // checking at all if it's the right tier; unlike a rain ring's
-          // candidateRingCentersAround, a Loki zone can't be fully bounded
-          // by this tile's immediate neighbors, so refreshLokiZoneCandidates
-          // does its own wider (but still capped) search.
-          if (colorFor(colorOfPlant(p)).tier === LOKI_TIER) {
-            refreshLokiZoneCandidates(p.q, p.r);
-          }
+          // This flower just reached MAX_STAGE - the one moment a corner
+          // block (LOKI'S CONTROL or SCRY - see the CORNER ZONES section,
+          // below the GROW SPELL section) can newly complete. Only worth
+          // checking at all against whichever spell's tier actually
+          // matches; unlike a rain ring's candidateRingCentersAround, a
+          // zone can't be fully bounded by this tile's immediate
+          // neighbors, so refreshLokiZoneCandidates/refreshScryZoneCandidates
+          // each do their own wider (but still capped) search.
+          var pTier = colorFor(colorOfPlant(p)).tier;
+          if (pTier === LOKI_TIER) refreshLokiZoneCandidates(p.q, p.r);
+          else if (pTier === SCRY_TIER) refreshScryZoneCandidates(p.q, p.r);
         }
         // A bred seedling opening is the payoff of the whole crossing loop, so
         // it gets its own message instead of the generic "burst into bloom".
@@ -3493,10 +3516,11 @@
       // spoke, or it was blocking a candidate center that can now form (see
       // RAIN RINGS, above catchUpSprinklersOffline).
       refreshRainRingCandidates(candidateRingCentersAround(p.q, p.r));
-      // Same idea for a LOKI'S CONTROL corner block - a harvested tile can
-      // only have broken one if it was itself tier-1 (the only tier a
-      // corner block can be built from).
-      if (colorFor(colorOfPlant(p)).tier === LOKI_TIER) refreshLokiZoneCandidates(p.q, p.r);
+      // Same idea for a LOKI'S CONTROL or SCRY corner block - a harvested
+      // tile can only have broken one if it was itself the matching tier.
+      var harvestedTier = colorFor(colorOfPlant(p)).tier;
+      if (harvestedTier === LOKI_TIER) refreshLokiZoneCandidates(p.q, p.r);
+      else if (harvestedTier === SCRY_TIER) refreshScryZoneCandidates(p.q, p.r);
       if (!p.grownCredited) recordGrown(vk);
 
       var value = 0;
@@ -3554,11 +3578,13 @@
       renderPlants();
       renderWild();
       renderWeeds();
-      // A Loki zone can wilt from the clock alone with no watering/harvest
-      // event to hang refreshLokiZoneCandidates off of - this per-minute
-      // tick is what actually notices that transition (see
-      // renderLokiZones' own comment).
+      // A corner zone can wilt from the clock alone with no watering/
+      // harvest event to hang refreshLokiZoneCandidates/
+      // refreshScryZoneCandidates off of - this per-minute tick is what
+      // actually notices that transition (see renderZoneRegistry's own
+      // comment).
       renderLokiZones();
+      renderScryZones();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
       // Keep an open Greenhouse fresh the same way an open plant panel is
@@ -4505,62 +4531,62 @@
     }
 
     // ---------------------------------------------------------------------
-    //  LOKI'S CONTROL  (see LOKI_TIER/LOKI_MIN_SPAN/LOKI_MAX_SPAN/
-    //  LOKI_CONTROL_MS above)
+    //  CORNER ZONES  (shared foundation for LOKI'S CONTROL and SCRY - see
+    //  ZONE_MIN_SPAN/ZONE_MAX_SPAN/LOKI_TIER/SCRY_TIER above)
     //
     //  A zone is NOT a fixed shape like a rain ring - its four 2x2 corner
-    //  blocks can sit anywhere from LOKI_MIN_SPAN to LOKI_MAX_SPAN tiles
+    //  blocks can sit anywhere from ZONE_MIN_SPAN to ZONE_MAX_SPAN tiles
     //  apart on a side, so unlike refreshRainRingCandidates (bounded to one
     //  tile's immediate 8 neighbors) a single changed tile has to be
     //  checked against every size/role combination it could complete.
-    //  Still cheap: LOKI_MAX_SPAN caps the search to a few thousand O(1)
+    //  Still cheap: ZONE_MAX_SPAN caps the search to a few thousand O(1)
     //  checks at most, run only on a watering/harvest event, never per
-    //  frame. `lokiZones` is a session-only cache (not part of `state`),
-    //  same reasoning as `rainRings` - entirely a function of what's
-    //  already in state.plants, rebuilt once at boot by
-    //  recomputeLokiZonesFull and kept current by
-    //  refreshLokiZoneCandidates from then on.
+    //  frame. Every function here is parameterized on `tier` so the exact
+    //  same detection logic serves both spells, each keeping its own
+    //  separate registry/render/effect below (`lokiZones` and
+    //  `scryZones`) - a tier-1 corner block and a tier-2 one can never be
+    //  mistaken for each other's zone.
     // ---------------------------------------------------------------------
-    var lokiZones = {}; // zoneKey ("qMin,rMin,qMax,rMax") -> { qMin, rMin, qMax, rMax }
 
     // A 2x2 block anchored at (q, r) - (q,r), (q+1,r), (q,r+1), (q+1,r+1) -
-    // counts as a Loki corner iff all four tiles are planted, every one
-    // already at MAX_STAGE, and every one is LOKI_TIER. Unlike a grow
-    // block, the four don't need to match each other at all - see
-    // LOKI_CONTROL_MS's own note on why a matching corner is actually the
-    // one to avoid.
-    function isCornerBlock(q, r) {
+    // counts as a corner of the given tier iff all four tiles are planted,
+    // every one already at MAX_STAGE, and every one is that exact tier.
+    // Unlike a grow block, the four don't need to match each other at all -
+    // see the CORNER ZONES banner comment's note on why a matching Loki
+    // corner is actually the one to avoid.
+    function isCornerBlockOfTier(q, r, tier) {
       var a = state.plants[cellKey(q, r)], b = state.plants[cellKey(q + 1, r)],
           c = state.plants[cellKey(q, r + 1)], d = state.plants[cellKey(q + 1, r + 1)];
       if (!a || !b || !c || !d) return false;
       if (a.stage < MAX_STAGE || b.stage < MAX_STAGE || c.stage < MAX_STAGE || d.stage < MAX_STAGE) return false;
-      return colorFor(colorOfPlant(a)).tier === LOKI_TIER && colorFor(colorOfPlant(b)).tier === LOKI_TIER &&
-        colorFor(colorOfPlant(c)).tier === LOKI_TIER && colorFor(colorOfPlant(d)).tier === LOKI_TIER;
+      return colorFor(colorOfPlant(a)).tier === tier && colorFor(colorOfPlant(b)).tier === tier &&
+        colorFor(colorOfPlant(c)).tier === tier && colorFor(colorOfPlant(d)).tier === tier;
     }
 
-    // A rectangle is a valid zone iff both sides are each within
-    // [LOKI_MIN_SPAN, LOKI_MAX_SPAN] tiles AND all four of its corners -
-    // top-left (qMin,rMin), top-right (qMax-1,rMin), bottom-left
+    // A rectangle is a valid zone of the given tier iff both sides are
+    // each within [ZONE_MIN_SPAN, ZONE_MAX_SPAN] tiles AND all four of its
+    // corners - top-left (qMin,rMin), top-right (qMax-1,rMin), bottom-left
     // (qMin,rMax-1), bottom-right (qMax-1,rMax-1) - are themselves valid
-    // corner blocks. qMin/rMin/qMax/rMax are the whole rectangle's outer
-    // tile coordinates (inclusive), not any one corner block's own anchor.
-    function isLokiZoneValid(qMin, rMin, qMax, rMax) {
+    // corner blocks of that tier. qMin/rMin/qMax/rMax are the whole
+    // rectangle's outer tile coordinates (inclusive), not any one corner
+    // block's own anchor.
+    function isZoneValidOfTier(qMin, rMin, qMax, rMax, tier) {
       var width = qMax - qMin + 1, height = rMax - rMin + 1;
-      if (width < LOKI_MIN_SPAN || width > LOKI_MAX_SPAN) return false;
-      if (height < LOKI_MIN_SPAN || height > LOKI_MAX_SPAN) return false;
-      return isCornerBlock(qMin, rMin) && isCornerBlock(qMax - 1, rMin) &&
-        isCornerBlock(qMin, rMax - 1) && isCornerBlock(qMax - 1, rMax - 1);
+      if (width < ZONE_MIN_SPAN || width > ZONE_MAX_SPAN) return false;
+      if (height < ZONE_MIN_SPAN || height > ZONE_MAX_SPAN) return false;
+      return isCornerBlockOfTier(qMin, rMin, tier) && isCornerBlockOfTier(qMax - 1, rMin, tier) &&
+        isCornerBlockOfTier(qMin, rMax - 1, tier) && isCornerBlockOfTier(qMax - 1, rMax - 1, tier);
     }
 
     // Every rectangle within the legal span range that could have this
     // exact corner block, (aq, ar), playing any one of its four roles -
-    // i.e. every new zone this single corner block completing could just
-    // have formed. Returns a list of [qMin, rMin, qMax, rMax] tuples for
-    // whichever of those turn out fully valid.
-    function newLokiZonesFromAnchor(aq, ar) {
+    // i.e. every new zone of the given tier this single corner block
+    // completing could just have formed. Returns a list of
+    // [qMin, rMin, qMax, rMax] tuples for whichever turn out fully valid.
+    function newZonesFromAnchorOfTier(aq, ar, tier) {
       var found = [];
-      for (var w = LOKI_MIN_SPAN; w <= LOKI_MAX_SPAN; w++) {
-        for (var h = LOKI_MIN_SPAN; h <= LOKI_MAX_SPAN; h++) {
+      for (var w = ZONE_MIN_SPAN; w <= ZONE_MAX_SPAN; w++) {
+        for (var h = ZONE_MIN_SPAN; h <= ZONE_MAX_SPAN; h++) {
           var tries = [
             [aq, ar, aq + w - 1, ar + h - 1],            // this anchor is the top-left corner
             [aq - (w - 2), ar, aq + 1, ar + h - 1],      // ...top-right
@@ -4569,60 +4595,63 @@
           ];
           for (var i = 0; i < tries.length; i++) {
             var t = tries[i];
-            if (isLokiZoneValid(t[0], t[1], t[2], t[3])) found.push(t);
+            if (isZoneValidOfTier(t[0], t[1], t[2], t[3], tier)) found.push(t);
           }
         }
       }
       return found;
     }
 
-    // Re-tests candidates around (q, r) and adds/removes `lokiZones` to
-    // match, in both directions: any already-registered zone might have
-    // just broken (a corner tile harvested, or eaten by the grow spell
-    // elsewhere in this same block - the registry is small by
-    // construction, this is a rare, deliberate 16-flower structure, so a
-    // full recheck of it is cheap), and this tile's own corner block(s)
-    // might have just completed a brand new zone.
-    function refreshLokiZoneCandidates(q, r) {
+    // Re-tests candidates around (q, r) against `registry` (a plain
+    // zoneKey -> {qMin,rMin,qMax,rMax} map - either `lokiZones` or
+    // `scryZones`) and adds/removes entries to match, in both directions:
+    // any already-registered zone might have just broken (a corner tile
+    // harvested, or eaten by the grow spell elsewhere in this same block -
+    // the registry is small by construction, this is a rare, deliberate
+    // 16-flower structure, so a full recheck of it is cheap), and this
+    // tile's own corner block(s) might have just completed a brand new
+    // zone. Returns whether anything changed; callers own re-rendering.
+    function refreshZoneRegistry(registry, q, r, tier) {
       var changed = false;
-      Object.keys(lokiZones).forEach(function (zk) {
-        var z = lokiZones[zk];
-        if (!isLokiZoneValid(z.qMin, z.rMin, z.qMax, z.rMax)) { delete lokiZones[zk]; changed = true; }
+      Object.keys(registry).forEach(function (zk) {
+        var z = registry[zk];
+        if (!isZoneValidOfTier(z.qMin, z.rMin, z.qMax, z.rMax, tier)) { delete registry[zk]; changed = true; }
       });
       growAnchorsAround(q, r).forEach(function (a) {
-        if (!isCornerBlock(a[0], a[1])) return;
-        newLokiZonesFromAnchor(a[0], a[1]).forEach(function (t) {
+        if (!isCornerBlockOfTier(a[0], a[1], tier)) return;
+        newZonesFromAnchorOfTier(a[0], a[1], tier).forEach(function (t) {
           var zk = t.join(',');
-          if (!lokiZones[zk]) { lokiZones[zk] = { qMin: t[0], rMin: t[1], qMax: t[2], rMax: t[3] }; changed = true; }
+          if (!registry[zk]) { registry[zk] = { qMin: t[0], rMin: t[1], qMax: t[2], rMax: t[3] }; changed = true; }
         });
       });
-      if (changed) renderLokiZones();
       return changed;
     }
 
-    // Full rebuild from scratch - only ever needed once, at boot (see
-    // INIT), to seed `lokiZones` from whatever a returning player already
-    // has planted. From then on refreshLokiZoneCandidates keeps it current
-    // incrementally. Walks every corner-block-eligible tile at most once
-    // (the `seen` guard), same shape as recomputeRainRingsFull/
-    // sweepGrowBlocksFull.
-    function recomputeLokiZonesFull() {
-      lokiZones = {};
+    // Full rebuild from scratch for the given tier - only ever needed once
+    // per spell, at boot (see INIT), to seed a fresh registry from
+    // whatever a returning player already has planted. From then on
+    // refreshZoneRegistry keeps it current incrementally. Walks every
+    // corner-block-eligible tile at most once (the `seen` guard), same
+    // shape as recomputeRainRingsFull/sweepGrowBlocksFull. Returns the new
+    // registry; callers assign it to their own `lokiZones`/`scryZones`.
+    function recomputeZoneRegistryOfTier(tier) {
+      var registry = {};
       var seen = {};
       Object.keys(state.plants).forEach(function (key) {
         var p = state.plants[key];
-        if (colorFor(colorOfPlant(p)).tier !== LOKI_TIER || p.stage < MAX_STAGE) return;
+        if (colorFor(colorOfPlant(p)).tier !== tier || p.stage < MAX_STAGE) return;
         growAnchorsAround(p.q, p.r).forEach(function (a) {
           var ak = cellKey(a[0], a[1]);
           if (seen[ak]) return;
           seen[ak] = true;
-          if (!isCornerBlock(a[0], a[1])) return;
-          newLokiZonesFromAnchor(a[0], a[1]).forEach(function (t) {
+          if (!isCornerBlockOfTier(a[0], a[1], tier)) return;
+          newZonesFromAnchorOfTier(a[0], a[1], tier).forEach(function (t) {
             var zk = t.join(',');
-            lokiZones[zk] = { qMin: t[0], rMin: t[1], qMax: t[2], rMax: t[3] };
+            registry[zk] = { qMin: t[0], rMin: t[1], qMax: t[2], rMax: t[3] };
           });
         });
       });
+      return registry;
     }
 
     // Whether a structurally-registered zone is currently ACTIVE - none of
@@ -4630,13 +4659,15 @@
     // recomputePlant uses (now - lastWateredAt >= WATER_DURATION_MS), read
     // straight off each corner flower rather than through
     // recomputePlant/p._d, since this needs to run for a `now` other than
-    // "this instant" (see renderLokiZones' own per-minute tick via
-    // tickPlants). A zone whose corners aren't all present and grown any
-    // more (structurally broken) reads as inactive too rather than
-    // throwing - refreshLokiZoneCandidates removes broken zones from the
-    // registry on its own schedule, but nothing stops a caller from
-    // holding a reference in between.
-    function isLokiZoneActive(z, now) {
+    // "this instant" (see the per-minute tick both spells' render
+    // functions get via tickPlants). Tier-agnostic - a zone's own corners
+    // already carry a fixed tier by construction, so this only ever needs
+    // to check wilt, not re-check tier. A zone whose corners aren't all
+    // present and grown any more (structurally broken) reads as inactive
+    // too rather than throwing - refreshZoneRegistry removes broken zones
+    // from its registry on its own schedule, but nothing stops a caller
+    // from holding a reference in between.
+    function isZoneActive(z, now) {
       var corners = [[z.qMin, z.rMin], [z.qMax - 1, z.rMin], [z.qMin, z.rMax - 1], [z.qMax - 1, z.rMax - 1]];
       for (var i = 0; i < corners.length; i++) {
         var aq = corners[i][0], ar = corners[i][1];
@@ -4649,23 +4680,22 @@
       return true;
     }
 
-    // Whether (q, r) sits inside any currently-active Loki zone - the one
-    // question markAccessibleToday/inRange actually need. A tile could only
-    // ever be inside two zones at once if two separate 16-flower structures
-    // overlapped, which nothing here forbids, so this checks every zone
-    // rather than assuming at most one match.
-    function isInActiveLokiZone(q, r, now) {
-      return Object.keys(lokiZones).some(function (zk) {
-        var z = lokiZones[zk];
+    // Whether (q, r) sits inside any currently-active zone in `registry`.
+    // A tile could only ever be inside two zones at once if two separate
+    // 16-flower structures overlapped, which nothing here forbids, so this
+    // checks every zone rather than assuming at most one match.
+    function isInActiveZoneOf(registry, q, r, now) {
+      return Object.keys(registry).some(function (zk) {
+        var z = registry[zk];
         if (q < z.qMin || q > z.qMax || r < z.rMin || r > z.rMax) return false;
-        return isLokiZoneActive(z, now);
+        return isZoneActive(z, now);
       });
     }
 
     // The whole rectangle's outer boundary (half a tile of padding beyond
     // the corner tiles, same convention cellRingLatLngs uses) as a Leaflet
     // LatLng loop.
-    function lokiZoneLatLngs(z) {
+    function zoneLatLngs(z) {
       var half = 0.5;
       return [
         [(z.rMin - half) * CELL_LAT_DEG, (z.qMin - half) * CELL_LNG_DEG],
@@ -4675,11 +4705,65 @@
       ];
     }
 
+    // Draws (or updates) one outline per registry entry, and toasts once
+    // on each active<->dormant transition via `onTransition(active)` - the
+    // only way a player learns a corner wilted without walking back to
+    // look, since that particular transition can happen from the clock
+    // alone with no watering/harvest event to hang a check on. `styleFor`
+    // maps an active flag to a Leaflet path style; `interactive: false` in
+    // it (both spells set this) for the same reason the rain rune's own
+    // boundary layers use it - a zone outline is purely a visual and must
+    // never intercept a tap meant for the ground underneath it. `layers`
+    // is the caller's own zoneKey -> {polygon, active} cache.
+    function renderZoneRegistry(registry, layers, styleFor, onTransition) {
+      var now = Date.now();
+      var seen = {};
+      Object.keys(registry).forEach(function (key) {
+        var z = registry[key];
+        seen[key] = true;
+        var active = isZoneActive(z, now);
+        var existing = layers[key];
+        if (existing) {
+          if (existing.active !== active) {
+            existing.polygon.setStyle(styleFor(active));
+            existing.active = active;
+            onTransition(active);
+          }
+          return;
+        }
+        var polygon = L.polygon(zoneLatLngs(z), styleFor(active)).addTo(map);
+        layers[key] = { polygon: polygon, active: active };
+      });
+      Object.keys(layers).forEach(function (key) {
+        if (seen[key]) return;
+        map.removeLayer(layers[key].polygon);
+        delete layers[key];
+      });
+    }
+
+    // ---------------------------------------------------------------------
+    //  LOKI'S CONTROL  (see LOKI_TIER/LOKI_CONTROL_MS above, and the
+    //  CORNER ZONES section just above for the shared detection this and
+    //  SCRY are both built on)
+    //
+    //  `lokiZones` is a session-only cache (not part of `state`), same
+    //  reasoning as `rainRings` - entirely a function of what's already in
+    //  state.plants, rebuilt once at boot by recomputeLokiZonesFull and
+    //  kept current by refreshLokiZoneCandidates from then on. The actual
+    //  access-extension effect lives in state.lokiAccess/markAccessibleToday/
+    //  inRange, not here - this section is purely the zone's own
+    //  detection/visibility.
+    // ---------------------------------------------------------------------
+    var lokiZones = {}; // zoneKey ("qMin,rMin,qMax,rMax") -> { qMin, rMin, qMax, rMax }
+
+    function refreshLokiZoneCandidates(q, r) {
+      if (refreshZoneRegistry(lokiZones, q, r, LOKI_TIER)) renderLokiZones();
+    }
+    function recomputeLokiZonesFull() { lokiZones = recomputeZoneRegistryOfTier(LOKI_TIER); }
+    function isInActiveLokiZone(q, r, now) { return isInActiveZoneOf(lokiZones, q, r, now); }
+
     var LOKI_ZONE_ACTIVE_COLOR = '#e8a91c';  // gold - matches the gold breeding tier's accent elsewhere
     var LOKI_ZONE_DORMANT_COLOR = '#8a8a8a'; // grey - a broken/wilted zone waiting on a rewater
-    // `interactive: false` here for the same reason the rain rune's own
-    // boundary layers use it - a zone outline is purely a visual and must
-    // never intercept a tap meant for the ground underneath it.
     function lokiZoneStyle(active) {
       return {
         color: active ? LOKI_ZONE_ACTIVE_COLOR : LOKI_ZONE_DORMANT_COLOR,
@@ -4687,38 +4771,48 @@
         dashArray: active ? null : '4 6', fill: false, interactive: false
       };
     }
-
-    // Draws (or updates) one outline per registered zone, and toasts once
-    // on each active<->dormant transition - the only way a player learns a
-    // corner wilted without walking back to look, since that particular
-    // transition can happen from the clock alone with no watering/harvest
-    // event to hang a check on (see tickPlants' own call to this).
     var lokiZoneLayers = {}; // zoneKey -> { polygon, active }
     function renderLokiZones() {
-      var now = Date.now();
-      var seen = {};
-      Object.keys(lokiZones).forEach(function (key) {
-        var z = lokiZones[key];
-        seen[key] = true;
-        var active = isLokiZoneActive(z, now);
-        var existing = lokiZoneLayers[key];
-        if (existing) {
-          if (existing.active !== active) {
-            existing.polygon.setStyle(lokiZoneStyle(active));
-            existing.active = active;
-            toast(active
-              ? '\u{1F451} Loki\'s Control is active - this area holds control for up to 3 days now.'
-              : '\u{1F451} A corner wilted - Loki\'s Control has lapsed here until every corner is rewatered.');
-          }
-          return;
-        }
-        var polygon = L.polygon(lokiZoneLatLngs(z), lokiZoneStyle(active)).addTo(map);
-        lokiZoneLayers[key] = { polygon: polygon, active: active };
+      renderZoneRegistry(lokiZones, lokiZoneLayers, lokiZoneStyle, function (active) {
+        toast(active
+          ? '\u{1F451} Loki\'s Control is active - this area holds control for up to 3 days now.'
+          : '\u{1F451} A corner wilted - Loki\'s Control has lapsed here until every corner is rewatered.');
       });
-      Object.keys(lokiZoneLayers).forEach(function (key) {
-        if (seen[key]) return;
-        map.removeLayer(lokiZoneLayers[key].polygon);
-        delete lokiZoneLayers[key];
+    }
+
+    // ---------------------------------------------------------------------
+    //  SCRY  (see SCRY_TIER above, and the CORNER ZONES section above
+    //  LOKI'S CONTROL for the shared detection both are built on)
+    //
+    //  Same session-only-cache reasoning as `lokiZones`. Unlike Loki, Scry
+    //  needs no persisted state of its own at all: the effect (see
+    //  inRange) is a plain "is this tile inside a currently-active Scry
+    //  zone" check against the live registry, no timestamp to stamp or
+    //  extend - a tile either is or isn't covered right now.
+    // ---------------------------------------------------------------------
+    var scryZones = {}; // zoneKey ("qMin,rMin,qMax,rMax") -> { qMin, rMin, qMax, rMax }
+
+    function refreshScryZoneCandidates(q, r) {
+      if (refreshZoneRegistry(scryZones, q, r, SCRY_TIER)) renderScryZones();
+    }
+    function recomputeScryZonesFull() { scryZones = recomputeZoneRegistryOfTier(SCRY_TIER); }
+    function isInActiveScryZone(q, r, now) { return isInActiveZoneOf(scryZones, q, r, now); }
+
+    var SCRY_ZONE_ACTIVE_COLOR = '#7c4dbd';  // violet - distinct from Loki's gold, echoes the iris signature colors
+    var SCRY_ZONE_DORMANT_COLOR = '#8a8a8a'; // grey - same dormant color Loki uses, same meaning
+    function scryZoneStyle(active) {
+      return {
+        color: active ? SCRY_ZONE_ACTIVE_COLOR : SCRY_ZONE_DORMANT_COLOR,
+        weight: active ? 2.4 : 1.6, opacity: active ? 0.9 : 0.55,
+        dashArray: active ? '1 3' : '4 6', fill: false, interactive: false
+      };
+    }
+    var scryZoneLayers = {}; // zoneKey -> { polygon, active }
+    function renderScryZones() {
+      renderZoneRegistry(scryZones, scryZoneLayers, scryZoneStyle, function (active) {
+        toast(active
+          ? '\u{1F441} Scry is active - this area is in range even where you have never walked.'
+          : '\u{1F441} A corner wilted - Scry has lapsed here until every corner is rewatered.');
       });
     }
 
@@ -4838,6 +4932,13 @@
       if (state.cheatMode) return true;
       var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
       if (cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
+      var now = Date.now();
+      // SCRY: checked before the day/today-access checks below - unlike
+      // Loki, this needs no prior visit or grant of any kind, only that
+      // the zone covering (q, r) is structurally complete and unwilted
+      // right now (see the CORNER ZONES section, below the GROW SPELL
+      // section).
+      if (isInActiveScryZone(q, r, now)) return true;
       if (state.todayAccessibleDay === localDayKey() && state.todayAccessible[cellKey(q, r)]) return true;
       // LOKI'S CONTROL: checked even when the day check above just failed -
       // this extension has its own real timestamp, independent of the
@@ -4847,7 +4948,6 @@
       // doesn't ride out the remainder of an already-stamped window (see
       // markAccessibleToday and isInActiveLokiZone, below the GROW SPELL
       // section).
-      var now = Date.now();
       var until = state.lokiAccess[cellKey(q, r)];
       return !!until && until > now && isInActiveLokiZone(q, r, now);
     }
@@ -10465,6 +10565,7 @@
     syncGreenhouseUnlockUI();   // show the Greenhouse menu entry right away for an already-unlocked save
     recomputeRainRingsFull();   // seed rain rings from whatever's already planted - see its own comment
     recomputeLokiZonesFull();   // seed Loki zones the same way - see its own comment
+    recomputeScryZonesFull();   // and Scry zones too - same reasoning, separate registry
     sweepGrowBlocksFull();      // resolve any grow-spell block already sitting complete - see its own comment
     catchUpSprinklersOffline(); // bank any stages a placed sprinkler earned while fully closed
     catchUpRainRingsOffline();  // then bank whatever an already-active rain ring earned the same way
@@ -10474,6 +10575,7 @@
     renderWeeds();              // weeds persist across sessions until plucked, same as wild flowers
     renderRainRings();          // rain rings persist across sessions too, same as sprinklers
     renderLokiZones();          // Loki zones persist across sessions too, same as rain rings
+    renderScryZones();          // Scry zones too
     updateHUD();
     updateCurrencyPill();
     setInterval(tickPlants, 60000);

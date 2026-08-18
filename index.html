@@ -434,8 +434,8 @@
        whole bed of the same color is a row of taps, not a picker
        round-trip per tile.
 
-       Species and color counts are both open-ended (up to 7 species, up to
-       14 colors each), unlike the tool rail's fixed three, so there is no
+       Species and color counts are both open-ended (currently 8 species, up
+       to 16 colors each), unlike the tool rail's fixed three, so there is no
        per-item CSS selector to lay them out with - .seed-petal only carries
        the closed rest state and the transition; the open position for each
        one is computed by JS (SEED_ROW for the species column,
@@ -655,23 +655,24 @@
       padding: 16px 14px 14px; box-shadow: inset 0 3px 10px rgba(0,0,0,0.28);
       overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
-    /* Seven crates, one per species on sale that day, always laid out three
+    /* Eight crates, one per species on sale that day, always laid out three
        to a row - a fixed count (not a responsive auto-fill) since the
        species list itself is fixed, so there is no "does it still fit"
-       guesswork. The seventh has no row-mate among the crates, so it shares
-       the last row with the fertilizer sack instead: that row is centered
-       and left at natural size (not stretched edge to edge like the two
-       rows above it), so the odd flower-plus-sack pair reads as one small
-       group under the two full rows rather than a stretched mismatch. */
+       guesswork. The last two have no third row-mate among the crates, so
+       they share the last row with the fertilizer sack instead: that row is
+       centered and left at natural size (not stretched edge to edge like
+       the two rows above it), so the odd flower-pair-plus-sack group reads
+       as one small group under the two full rows rather than a stretched
+       mismatch. */
     .stand-row { display: flex; gap: 9px; }
     .stand-row-crates { width: 100%; }
     .stand-row-crates .stand-item { flex: 1 1 0; min-width: 0; }
     .stand-row-last { justify-content: center; }
-    /* Base width matches the fertilizer sack (86px) - without it, the
-       seventh crate has no row-mates to stretch against on its own row and
-       shrinks to fit its wrapped two-line name instead, reading noticeably
-       narrower than the six crates above it. Rows 1/2 override this with
-       flex-grow to stretch edge to edge. */
+    /* Base width matches the fertilizer sack (86px) - without it, the last
+       row's crates have no full row to stretch against and shrink to fit
+       their wrapped two-line name instead, reading noticeably narrower than
+       the six crates above them. Rows 1/2 override this with flex-grow to
+       stretch edge to edge. */
     .stand-item {
       display: flex; flex-direction: column; align-items: center; gap: 3px; width: 86px;
       background: linear-gradient(180deg, #fff6e0, #ecdcb2); border: 2px solid #6b4423;
@@ -1413,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.25.3</span>
+      <span id="game-version">v2.26.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1702,6 +1703,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.26.0', changes: [
+        'A new flower has joined the garden: Iris, the first species built ' +
+          'on three petals instead of five, six, seven, eight, or sixteen. ' +
+          'It comes with two signature colors of its own to breed toward, ' +
+          'Indigo and Opal.'
+      ] },
       { version: 'v2.25.3', changes: [
         'That mark also lost the dull grey plate it was sitting on - it ' +
           'rests right on the ground now.'
@@ -1982,7 +1989,16 @@
       { key: 'lotus', name: 'Lotus', base: 'white',
         shape: { rows: [{ n: 8, rx: 8.5, ry: 24, r: 21, tip: 'point' },
                         { n: 8, rx: 7, ry: 17, r: 16, rot: 22.5, tip: 'point', deep: true }],
-                 center: { r: 7 } } }
+                 center: { r: 7 } } },
+      // Every other species is 5/6/7/8/16-fold; Iris is the one built on
+      // three - three upright inner petals (the standards) and three larger
+      // outer petals rotated 60 degrees between them and pulled outward (the
+      // falls), so it reads as structurally different even before color
+      // enters it.
+      { key: 'iris', name: 'Iris', base: 'blue',
+        shape: { rows: [{ n: 3, rx: 15, ry: 27, r: 9, tip: 'point' },
+                        { n: 3, rx: 11, ry: 21, r: 23, rot: 60, tip: 'round', deep: true }],
+                 center: { r: 5, stamen: true } } }
     ];
     function speciesFor(key) {
       for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return SPECIES[i];
@@ -2078,7 +2094,13 @@
         glow: '#8ff0d4', spark: '#d9c2ff' },
       { id: 'obsidian',  name: 'Obsidian',  tier: 3, species: 'lotus',
         petal: '#2b2733', center: '#7ce8d0', grad: ['#6d5f8a', '#2b2733', '#0d0b12'],
-        glow: '#5b4c85', spark: '#9ff0dc' }
+        glow: '#5b4c85', spark: '#9ff0dc' },
+      { id: 'indigo',    name: 'Indigo',    tier: 3, species: 'iris',
+        petal: '#4b3a8f', center: '#c9a8ff', grad: ['#8f7ad6', '#4b3a8f', '#1a1338'],
+        glow: '#6f5bc9', spark: '#d9c8ff' },
+      { id: 'opal',      name: 'Opal',      tier: 3, species: 'iris',
+        petal: '#dce6f5', center: '#f3e9ff', grad: ['#fff6ff', '#dce6f5', '#b8d9c9'],
+        glow: '#cfe0f5', spark: '#ffffff' }
     ];
     var STANDARD_COLORS = ['white', 'red', 'yellow', 'blue'];
 
@@ -2086,8 +2108,8 @@
     // The shop is a market stand that restocks once per calendar day (local
     // time), not on every open. Stock is a deterministic function of the
     // date rather than stored state: one crate per species (there are
-    // exactly seven, hence "seven seeds on the stand today"), each wearing a
-    // random STANDARD color. Same day -> same seven, no matter how many
+    // exactly eight, hence "eight seeds on the stand today"), each wearing a
+    // random STANDARD color. Same day -> same eight, no matter how many
     // times the panel is opened or the page reloaded; the color mix simply
     // reshuffles the next time the date rolls over.
     function dailyStockSeed(dateKey) {
@@ -8227,11 +8249,15 @@
     var TOTAL_VARIANTS = SPECIES.reduce(function (n, s) {
       return n + colorsForSpecies(s.key).length;
     }, 0);
+    // Every signature color across every species (2 each) - the Alchemist
+    // milestone's own natural ceiling, same idea as TOTAL_VARIANTS above.
+    var TOTAL_SIGNATURES = COLORS.filter(function (c) { return c.species; }).length;
 
     // A tally of every flower you've ever grown, kept as a journal: one page
-    // per species, with a spot for each of the fourteen colors and a row of
-    // bookmarks along the top to switch between them. All seven bookmarks and
-    // all fourteen spots are always drawn, so a gap reads as "still to breed"
+    // per species, with a spot for each of that species' sixteen colors (the
+    // fourteen shared plus its own two signatures) and a row of bookmarks
+    // along the top to switch between them. All eight bookmarks and all
+    // sixteen spots are always drawn, so a gap reads as "still to breed"
     // rather than as a list that happens to be short.
     //
     // There was a contents page in front of this. It was removed because it
@@ -8417,8 +8443,8 @@
       Object.keys(state.inventory).forEach(function (vk) { seen[parseVariant(vk).species] = true; });
       return Object.keys(seen).length;
     }
-    // exclusiveSpeciesOf(colorId) is truthy only for the 14 signature
-    // colors (2 per species) - see the COLORS section. Counts distinct
+    // exclusiveSpeciesOf(colorId) is truthy only for the TOTAL_SIGNATURES
+    // signature colors (2 per species) - see the COLORS section. Counts distinct
     // signature colors found, not how many species they span.
     function signatureColorsDiscoveredCount() {
       var seen = {};
@@ -8429,8 +8455,8 @@
       return Object.keys(seen).length;
     }
 
-    // Each track's top tier is deliberately sized to its own natural
-    // ceiling where one exists (7 species, TOTAL_VARIANTS flowers, all 14
+    // Each track's top tier is deliberately sized to its own natural ceiling
+    // where one exists (8 species, TOTAL_VARIANTS flowers, TOTAL_SIGNATURES
     // signatures) so completing that track IS full completion of that part
     // of the Journal - the last sticker doubles as proof, not a separate
     // number to eyeball against it.
@@ -8453,7 +8479,7 @@
         tiers: [10, 30, 60, TOTAL_VARIANTS],
         valueFn: function () { return Object.keys(state.inventory).length; } },
       { key: 'signatures', icon: '\u{1F48E}', label: 'Alchemist', blurb: 'Signature colors found',
-        tiers: [1, 4, 8, 14], valueFn: function () { return signatureColorsDiscoveredCount(); } },
+        tiers: [1, 4, 8, TOTAL_SIGNATURES], valueFn: function () { return signatureColorsDiscoveredCount(); } },
       { key: 'extracted', icon: '\u{2697}', label: 'Extractor', blurb: 'Seeds pulled from extraction',
         tiers: [5, 25, 75, 150], valueFn: function (st) { return st.extracted; } }
     ];
@@ -8794,10 +8820,10 @@
 
       // Fertilizer is the only non-seed thing for sale, and the only way
       // into the colors the stand never stocks - so it gets its own sack
-      // rather than blending into the crate rows. Species come seven to a
-      // day (see dailyStock), three per row, so the seventh always ends up
-      // alone; rather than leave it stranded on its own row, it shares the
-      // last row with the sack instead (see .stand-row-last).
+      // rather than blending into the crate rows. Species come eight to a
+      // day (see dailyStock), three per row, so the last two always end up
+      // short a third; rather than leave them stranded on their own row,
+      // they share the last row with the sack instead (see .stand-row-last).
       // Empty (not disabled) until state.fertUnlocked - see the FERTILIZER
       // UNLOCK section. Before the player has ever grown a flower to
       // flourishing there's nothing to sell them: a visible-but-disabled
@@ -8813,7 +8839,7 @@
 
       document.getElementById('stand-row-1').innerHTML = crates.slice(0, 3).join('');
       document.getElementById('stand-row-2').innerHTML = crates.slice(3, 6).join('');
-      document.getElementById('stand-row-3').innerHTML = crates.slice(6, 7).join('') + fert;
+      document.getElementById('stand-row-3').innerHTML = crates.slice(6, 8).join('') + fert;
 
       // The Sprinkler and Greenhouse share one row (stand-row-4) instead of
       // each getting its own stacked row - both are non-flower purchasable

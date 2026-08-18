@@ -1334,16 +1334,12 @@
     @keyframes wild-pulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.12); } }
     .wild-glow { animation: wild-pulse 2.8s ease-in-out infinite; }
 
-    /* Rain ring rune (see buildRainRuneSVG/renderRainRings) - only the outer
-       ring (circle + compass star + tick marks + diamonds) spins; the inner
-       dashed circle and the raindrop itself hold still, so the symbol reads
-       as "a spell actively running" without the whole glyph being too busy
-       to look at. transform-box is deliberately left unset, same reasoning
-       as .wind-grass-back/.wind-stem above - the default already resolves
-       against the SVG's own viewBox coordinates, which is what the fixed
-       "60px 60px" origin below assumes. */
-    @keyframes runeSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    .rain-rune-spin { animation: runeSpin 18s linear infinite; transform-origin: 60px 60px; }
+    /* Rain ring rune (see buildRainRuneSVG/renderRainRings) - the whole glyph
+       (circle + compass star + tick marks + diamonds + inner dashed circle
+       + raindrop) holds still, matching the large boundary rune drawn out
+       over the affected tiles (see rainBoundaryGeometry) - neither one
+       spins, so the compact center glyph and its full-range echo read as
+       the same held symbol rather than two things fighting for attention. */
 
     /* Signature colors only (see COLORS `species`). These are drawn inside the
        flower's own SVG, so the same markup glows in a 26px bookmark and a
@@ -1417,7 +1413,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.25.0</span>
+      <span id="game-version">v2.25.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1706,6 +1702,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.25.1', changes: [
+        'That ring around the edge of what you noticed recently now ' +
+          'carries the same symbol as the mark at its center, stretched ' +
+          'out to the whole reach of it - and neither one spins anymore, ' +
+          'so it is easier to actually look at.'
+      ] },
       { version: 'v2.25.0', changes: [
         'Planted the wrong seed by accident? The shears now work on a seed ' +
           'or sprout that hasn\'t bloomed yet, too - it will not give the ' +
@@ -3791,7 +3793,7 @@
         '</defs>' +
         '<circle cx="60" cy="60" r="58" fill="' + RAIN_RUNE_BACKING + '" opacity="0.55"/>' +
         '<circle cx="60" cy="60" r="70" fill="url(#glow-' + gid + ')"/>' +
-        '<g class="rain-rune-spin">' +
+        '<g>' +
           '<circle cx="60" cy="60" r="' + rOuter + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.4" opacity="0.85"/>' +
           '<polygon points="' + runeSquarePoints(cx, cy, 46, 0) + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
           '<polygon points="' + runeSquarePoints(cx, cy, 46, 45) + '" fill="none" stroke="' + RAIN_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
@@ -3808,72 +3810,81 @@
       });
     }
 
-    // ---- Boundary glyphs (the edge of the 5x5 zone) ------------------------
-    // Fragments of the same linework "branching out" from the rune to mark
-    // how far it reaches: a dashed square (no fill - a flat color wash reads
-    // as a highlight, not a rune), an etched right-angle bracket at each of
-    // the 4 corners, and a small diamond at each of the 4 edge midpoints -
-    // plus a faint lattice across the whole interior (see renderRainRings)
-    // showing every tile actually in range. Every glyph sits ON the
-    // boundary line itself, never past it, so a flower planted in the tile
-    // just outside the watered zone can never end up overlapping one. All
-    // in real lat/lng (like cellRingLatLngs already used for the plant-
-    // range preview), not pixel-sized markers, so they reproject for free
-    // on pan/zoom with no rescale handling needed.
+    // ---- Boundary rune (the edge of the 5x5 zone) --------------------------
+    // Rather than a plain bracketed square, the boundary is the *same* rune
+    // as the compact center glyph (buildRainRuneSVG) - outer circle, the
+    // 8-point compass star (two squares 45deg apart), the 16 tick marks
+    // around the rim, and a diamond at each of the 8 star points - just
+    // scaled up until its own tick-mark ring lands exactly on the edge of
+    // the watered zone. That reads as one spell whose small glyph and full
+    // reach are visibly the same shape, rather than two unrelated motifs
+    // (a compass rune in the middle, a bracketed square around it). Radii
+    // are kept proportional to buildRainRuneSVG's 120-unit viewBox (rOuter
+    // 54, star 46, tick rim 60, short ticks 57, star-point diamonds 43, out
+    // of a 60-unit radius) so the two glyphs are visibly the same rune at
+    // two sizes. All in real lat/lng (like cellRingLatLngs already used for
+    // the plant-range preview), not pixel-sized markers, so it reprojects
+    // for free on pan/zoom with no rescale handling needed. Plus a faint
+    // lattice across the whole interior (see renderRainRings) showing every
+    // tile actually in range.
     function rainBoundaryGeometry(centerQ, centerR, N) {
-      var half = N + 0.5, arm = 0.62, capD = 0.16;
+      var half = N + 0.5;
       function ll(qOff, rOff) { return [(centerR + rOff) * CELL_LAT_DEG, (centerQ + qOff) * CELL_LNG_DEG]; }
-
-      var square = [ll(-half, -half), ll(half, -half), ll(half, half), ll(-half, half)]; // BL, BR, TR, TL
-
-      var lines = [];
-      function bracket(qOff, rOff, armQSign, armRSign) {
-        lines.push([ll(qOff, rOff), ll(qOff, rOff + armRSign * arm)]);
-        lines.push([ll(qOff, rOff), ll(qOff + armQSign * arm, rOff)]);
+      // Same polar convention as polarPoint (0deg = north/up, clockwise),
+      // just in tile-offset units instead of SVG pixels - rOff runs
+      // opposite to SVG's y (north is +rOff here, +y there).
+      function polarLL(rTiles, deg) {
+        var rad = (deg - 90) * Math.PI / 180;
+        return ll(rTiles * Math.cos(rad), -rTiles * Math.sin(rad));
       }
-      bracket(-half, -half, 1, 1);   // BL: arms point inward - east and north
-      bracket(half, -half, -1, 1);   // BR: west and north
-      bracket(half, half, -1, -1);   // TR: west and south
-      bracket(-half, half, 1, -1);   // TL: east and south
 
-      // Edge-midpoint diamonds touch the boundary line but never cross it -
-      // not out past it on a tick, the way an earlier version had them, and
-      // not simply centered on the line either (a diamond shape centered
-      // exactly on a point straddles both sides of it - its outward corner
-      // would still poke out past the line just as much as a tick did). The
-      // center is shifted inward by the diamond's own half-width first, so
-      // the single corner that would otherwise be the one poking outward
-      // lands exactly on the line instead, and the rest of the shape sits
-      // inside the zone. This is the actual fix for "a flower planted in
-      // the very next tile outside the watered zone can overlap one".
+      // Scaled so the tick-mark ring (radius 60 of the 120-unit glyph)
+      // lands exactly on the boundary, `half` tiles out from center.
+      var scale = half / 60;
+      var rOuter = 54 * scale, rStar = 46 * scale;
+      var rTickOuter = 60 * scale, rTickShort = 57 * scale;
+      var rDiamond = 43 * scale, diamondHalf = 2.6 * scale;
+
+      var circle = [];
+      for (var a = 0; a < 360; a += 5.625) circle.push(polarLL(rOuter, a)); // 64-gon reads as a circle
+
+      function star(rotDeg) {
+        var pts = [];
+        for (var i = 0; i < 4; i++) pts.push(polarLL(rStar, rotDeg + i * 90));
+        return pts;
+      }
+      var star1 = star(0), star2 = star(45);
+
+      var ticks = [];
+      for (var i = 0; i < 16; i++) {
+        var deg = i * 22.5, long = (i % 2 === 0);
+        ticks.push([polarLL(rOuter, deg), polarLL(long ? rTickOuter : rTickShort, deg)]);
+      }
+
       var diamonds = [];
-      function edgeDiamond(qOff, rOff, inQ, inR) {
-        var p = ll(qOff + inQ * capD, rOff + inR * capD);
+      for (var j = 0; j < 8; j++) {
+        var p = polarLL(rDiamond, j * 45);
         diamonds.push([
-          [p[0] + capD * CELL_LAT_DEG, p[1]],
-          [p[0], p[1] + capD * CELL_LNG_DEG],
-          [p[0] - capD * CELL_LAT_DEG, p[1]],
-          [p[0], p[1] - capD * CELL_LNG_DEG]
+          [p[0] + diamondHalf * CELL_LAT_DEG, p[1]],
+          [p[0], p[1] + diamondHalf * CELL_LNG_DEG],
+          [p[0] - diamondHalf * CELL_LAT_DEG, p[1]],
+          [p[0], p[1] - diamondHalf * CELL_LNG_DEG]
         ]);
       }
-      edgeDiamond(0, -half, 0, 1);  // bottom mid, nudged inward (north)
-      edgeDiamond(0, half, 0, -1);  // top mid, nudged inward (south)
-      edgeDiamond(-half, 0, 1, 0);  // left mid, nudged inward (east)
-      edgeDiamond(half, 0, -1, 0);  // right mid, nudged inward (west)
 
-      // Lattice: every internal tile edge inside the zone (the boundary
-      // square above already covers the outermost ones), so the individual
+      // Lattice: every internal tile edge inside the zone, so the individual
       // tiles a player can actually plant in are visibly laid out rather
       // than left to guesswork against the ambient grid mesh elsewhere on
       // the map. 2N lines each direction - the edges between N+1's worth of
-      // rows/columns, minus the two outer ones the square already draws.
+      // rows/columns, minus the two outermost ones (the rune's own tick
+      // ring already marks those).
       var lattice = [];
       for (var off = -N + 0.5; off < N; off += 1) {
         lattice.push([ll(off, -half), ll(off, half)]); // vertical
         lattice.push([ll(-half, off), ll(half, off)]); // horizontal
       }
 
-      return { square: square, lines: lines, diamonds: diamonds, lattice: lattice };
+      return { circle: circle, star1: star1, star2: star2, ticks: ticks, diamonds: diamonds, lattice: lattice };
     }
 
     // px is sized the same way every other plant-adjacent icon is
@@ -3883,7 +3894,7 @@
     // live in-gesture and settled-zoom halves of that. The boundary layers
     // never need a rebuild call here at all (real lat/lng geometry, not
     // pixel icons), only teardown when a ring itself goes away.
-    var rainRingLayers = {}; // centerKey -> { marker, lattice, area, lines, diamonds }
+    var rainRingLayers = {}; // centerKey -> { marker, lattice, circle, star1, star2, ticks, diamonds }
     function renderRainRings() {
       var seen = {};
       var basePx = plantIconBase();
@@ -3914,22 +3925,34 @@
         var lattice = L.polyline(geo.lattice, {
           color: RAIN_RUNE_LINE, weight: 1, opacity: 0.28, interactive: false
         }).addTo(map);
-        var area = L.polygon(geo.square, {
-          color: RAIN_RUNE_LINE, weight: 1.4, fill: false, dashArray: '5 6', opacity: 0.55, interactive: false
+        // The rest mirror buildRainRuneSVG's own outer circle / compass
+        // star / tick marks / star-point diamonds, at full-range size (see
+        // rainBoundaryGeometry) - same strokes and opacities as the small
+        // center glyph so it reads as one rune at two sizes.
+        var circle = L.polygon(geo.circle, {
+          color: RAIN_RUNE_LINE, weight: 1.4, fill: false, opacity: 0.85, interactive: false
         }).addTo(map);
-        var lines = L.polyline(geo.lines, {
-          color: RAIN_RUNE_LINE, weight: 1.6, opacity: 0.75, lineCap: 'round', interactive: false
+        var star1 = L.polygon(geo.star1, {
+          color: RAIN_RUNE_LINE, weight: 1.1, fill: false, opacity: 0.7, interactive: false
+        }).addTo(map);
+        var star2 = L.polygon(geo.star2, {
+          color: RAIN_RUNE_LINE, weight: 1.1, fill: false, opacity: 0.7, interactive: false
+        }).addTo(map);
+        var ticks = L.polyline(geo.ticks, {
+          color: RAIN_RUNE_LINE, weight: 1.3, opacity: 0.75, lineCap: 'round', interactive: false
         }).addTo(map);
         var diamonds = L.polygon(geo.diamonds, {
           color: RAIN_RUNE_GLOW, weight: 0, fillColor: RAIN_RUNE_GLOW, fillOpacity: 0.85, interactive: false
         }).addTo(map);
-        rainRingLayers[key] = { marker: marker, lattice: lattice, area: area, lines: lines, diamonds: diamonds };
+        rainRingLayers[key] = {
+          marker: marker, lattice: lattice, circle: circle, star1: star1, star2: star2, ticks: ticks, diamonds: diamonds
+        };
       });
       Object.keys(rainRingLayers).forEach(function (key) {
         if (seen[key]) return;
         var l = rainRingLayers[key];
-        map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.area);
-        map.removeLayer(l.lines); map.removeLayer(l.diamonds);
+        map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.circle);
+        map.removeLayer(l.star1); map.removeLayer(l.star2); map.removeLayer(l.ticks); map.removeLayer(l.diamonds);
         delete rainRingLayers[key];
       });
     }
@@ -5540,7 +5563,7 @@
       apply(sprinklerMarkers);
       apply(weedMarkers);
       // rainRingLayers isn't a flat key->marker map like the others (each
-      // entry also carries its boundary polygon/lines/diamonds, which are
+      // entry also carries its boundary rune's circle/stars/ticks/diamonds, which are
       // real lat/lng geometry and need no rescaling here at all - Leaflet
       // reprojects those on its own), so it gets its own one-line loop
       // instead of going through apply().

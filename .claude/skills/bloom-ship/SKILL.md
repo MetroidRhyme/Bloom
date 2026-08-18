@@ -107,6 +107,21 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 git push
 ```
 
+**Exception: a session explicitly told to develop on a named branch**
+(Claude Code on the web sometimes assigns one, e.g. for a multi-part
+feature request) overrides the main-only default *for where each commit
+lands*, not for whether steps 1-6 run - every commit on that branch still
+needs its own version bump/changelog/verification pass, exactly as above.
+Once the user says the work is ready to ship for real, merge that branch
+into `main` and push `main` directly (`git fetch origin main && git
+checkout -B main origin/main && git merge --ff-only <branch> && git push
+origin main`) rather than opening a PR - a PR just adds a "someone has to
+click Merge" step for no benefit when the branch is already fast-forward-
+able and the user has final say either way. If a user unfamiliar with git
+asks what a PR even is, they usually just want the simplest path to their
+game being updated - explain the merge-directly option plainly and let them
+choose.
+
 Commit body should name the actual regression checks that passed (not just
 assert "tested") - this is the only record that verification happened,
 since there's no CI log to point to later.

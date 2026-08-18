@@ -88,6 +88,29 @@ entirely, with no error to flag it. Always compute both from one source:
 `var c = cellCenter(q, r); rainRings[k] = { q: q, r: r, lat: c.lat, lng: c.lng };`
 then `map.setView([c.lat, c.lng], zoom)` - not the other way around.
 
+**Gotcha: a test helper that fast-forwards growth by calling `applyWatering`
+directly can silently skip a spell's own trigger.** Several mutation hooks
+(the grow spell's `checkGrowBlocksAround`, for instance - see the
+`bloom-spells` skill) are deliberately wired in at the *call sites*
+(`waterPlant`/`finishAutoWatering`/`catchUpSprinklersOffline`), not inside
+`applyWatering` itself, specifically so a batch/offline loop can't delete a
+plant out from under itself mid-iteration. A test convenience like:
+```js
+function growAllToMax(k) {
+  var p = state.plants[k];
+  while (p.stage < MAX_STAGE) { p.readyAt = Date.now(); applyWatering(p, Date.now()); }
+}
+```
+grows the flower correctly but silently never fires anything hooked at the
+call-site level - the assertion just fails ("why didn't my block get
+consumed?") with no error to point at the real cause. Route growth helpers
+through the real `waterPlant(key)` (re-fetching `state.plants[key]` each
+loop iteration, since it may now be `undefined` if that watering consumed
+it) whenever the test needs to exercise a spell's actual trigger, and only
+reach for raw `applyWatering` calls when you specifically want to bypass
+those hooks (e.g. building a fixture state before testing detection in
+isolation).
+
 ## 2. Building a standalone, dependency-free playtest tool
 
 For handing the user something they can open and interact with, isolated

@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.35.1</span>
+      <span id="game-version">v2.35.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1841,6 +1841,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.35.2', changes: [
+        'The grow rune\'s center is now an actual little flower - three ' +
+          'fanned petals on a stem with two leaves, still closed like a bud ' +
+          'rather than a bloom - and its compass star doubled from eight ' +
+          'points to sixteen, on both the small glyph and the full 10-tile ' +
+          'boundary out in the field.'
+      ] },
       { version: 'v2.35.1', changes: [
         'The grow spell\'s rune now actually looks like a rune - the same ' +
           'compass-star glyph and boundary the rain ring uses, recolored ' +
@@ -4704,18 +4711,36 @@
     // ---- Rune marker (the resolved 2x2's own center) -----------------------
     // Deliberately built the same way buildRainRuneSVG is - the outer glow,
     // the circle-and-compass-star collar, the 16 rim ticks, the 8 star-point
-    // diamonds - reusing that function's own polarPoint/runeSquarePoints
-    // helpers, just recolored green and with a budding flower in place of
-    // the raindrop, so the two runes visibly belong to the same family.
-    // Colors are inlined literals for the same reason RAIN_RUNE_LINE etc.
-    // are: this markup lands in a divIcon's `html` string, outside the
-    // page's normal CSS cascade, where a var(--x) reference wouldn't resolve.
+    // diamonds - reusing that function's own polarPoint helper, just
+    // recolored green, the compass star taken to 16 points instead of 8
+    // (see the star-square loop below), and a budding flower in place of
+    // the raindrop, so the two runes visibly belong to the same family
+    // without being identical. Colors are inlined literals for the same
+    // reason RAIN_RUNE_LINE etc. are: this markup lands in a divIcon's
+    // `html` string, outside the page's normal CSS cascade, where a
+    // var(--x) reference wouldn't resolve.
     var GROW_RUNE_LINE = '#5cbb7a';
     var GROW_RUNE_GLOW = '#a8e8bc';
-    var GROW_RUNE_BUD_TIP = '#f0a9c9';  // the blush of petal peeking through, at the very top of the bud
+    var GROW_RUNE_BUD_TIP = '#f0a9c9';  // the blush of petal peeking through, at each petal's own tip
     var GROW_RUNE_BUD_MID = '#8fd39f';
     var GROW_RUNE_BUD_BASE = '#2f7a45'; // the sepals cradling the bud, at its base
     var GROW_RUNE_LEAF = '#3d8f55';
+    // One petal of the center bud, in LOCAL space (tip at y=-42, rounded
+    // base at y=2, straight up the -y axis) - an SVG <g transform> places
+    // and rotates/scales each instance, so this single path is reused for
+    // all three (see budPetal below) rather than hand-deriving three
+    // separately-rotated coordinate sets.
+    var GROW_BUD_PETAL_PATH =
+      'M0,-42 C6,-32 10,-22 10,-13 C10,-4 6,2 0,2 C-6,2 -10,-4 -10,-13 C-10,-22 -6,-32 0,-42 Z';
+    function budPetal(gid, rotDeg, scale, opacity) {
+      // stroke-width is divided back out by `scale` so every petal reads as
+      // the same line weight regardless of how much smaller the two side
+      // petals are drawn than the center one.
+      return '<g transform="translate(60,70) rotate(' + rotDeg + ') scale(' + scale + ')">' +
+        '<path d="' + GROW_BUD_PETAL_PATH + '" fill="url(#bud-' + gid + ')" stroke="' + GROW_RUNE_BUD_BASE +
+        '" stroke-width="' + (1 / scale).toFixed(2) + '" opacity="' + opacity + '"/>' +
+      '</g>';
+    }
     function buildGrowRuneSVG(px, idSuffix) {
       var cx = 60, cy = 60, rOuter = 54, rTickOuter = 60, rTickShort = 57, rInner = 32, rDiamond = 43;
       var ticks = '';
@@ -4733,6 +4758,14 @@
           '" width="5.2" height="5.2" transform="rotate(45 ' + dp.x.toFixed(2) + ' ' + dp.y.toFixed(2) + ')" ' +
           'fill="' + GROW_RUNE_GLOW + '" opacity="0.85"/>';
       }
+      // The compass star itself - the rain rune builds an 8-point version
+      // from two squares 45deg apart; this is the same construction taken
+      // one step further, four squares 22.5deg apart, for 16 points total.
+      var star = '';
+      for (var k = 0; k < 4; k++) {
+        star += '<polygon points="' + runeSquarePoints(cx, cy, 46, k * 22.5) +
+          '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>';
+      }
       var gid = 'gr' + idSuffix;
       return '<svg viewBox="0 0 120 120" width="' + px + '" height="' + px + '">' +
         '<defs>' +
@@ -4740,7 +4773,7 @@
             '<stop offset="0%" stop-color="' + GROW_RUNE_GLOW + '" stop-opacity="0.55"/>' +
             '<stop offset="100%" stop-color="' + GROW_RUNE_GLOW + '" stop-opacity="0"/>' +
           '</radialGradient>' +
-          '<linearGradient id="bud-' + gid + '" x1="60" y1="30" x2="60" y2="80" gradientUnits="userSpaceOnUse">' +
+          '<linearGradient id="bud-' + gid + '" x1="0" y1="-42" x2="0" y2="2" gradientUnits="userSpaceOnUse">' +
             '<stop offset="0%" stop-color="' + GROW_RUNE_BUD_TIP + '"/>' +
             '<stop offset="22%" stop-color="' + GROW_RUNE_BUD_TIP + '"/>' +
             '<stop offset="55%" stop-color="' + GROW_RUNE_BUD_MID + '"/>' +
@@ -4750,20 +4783,21 @@
         '<circle cx="60" cy="60" r="70" fill="url(#glow-' + gid + ')"/>' +
         '<g>' +
           '<circle cx="60" cy="60" r="' + rOuter + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.4" opacity="0.85"/>' +
-          '<polygon points="' + runeSquarePoints(cx, cy, 46, 0) + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
-          '<polygon points="' + runeSquarePoints(cx, cy, 46, 45) + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.1" opacity="0.7"/>' +
-          ticks + diamonds +
+          star + ticks + diamonds +
         '</g>' +
         '<circle cx="60" cy="60" r="' + rInner + '" fill="none" stroke="' + GROW_RUNE_LINE + '" stroke-width="1.2" stroke-dasharray="3 4" opacity="0.8"/>' +
-        // Two small leaves flaring off a short stem, then the closed bud
-        // itself sitting on top - unopened, same reasoning GROW_RUNE_BUD_TIP
-        // is only a hint of color rather than full petal color: this is a
-        // BUD, not a bloom.
-        '<line x1="60" y1="78" x2="60" y2="92" stroke="' + GROW_RUNE_LEAF + '" stroke-width="2.2" stroke-linecap="round"/>' +
-        '<path d="M60 84 C50 82 44 86 42 92 C50 93 58 90 60 84 Z" fill="' + GROW_RUNE_LEAF + '" opacity="0.95"/>' +
-        '<path d="M60 84 C70 82 76 86 78 92 C70 93 62 90 60 84 Z" fill="' + GROW_RUNE_LEAF + '" opacity="0.95"/>' +
-        '<path d="M60 32 C68 44 76 54 76 62 C76 72 69 78 60 78 C51 78 44 72 44 62 C44 54 52 44 60 32 Z" ' +
-          'fill="url(#bud-' + gid + ')" stroke="' + GROW_RUNE_BUD_BASE + '" stroke-width="1" opacity="0.97"/>' +
+        // Two small leaves flaring off a short stem, then the bud itself -
+        // three overlapping petals fanned from one base point (the two
+        // outer ones drawn first and smaller, the center one on top and
+        // slightly larger, same layered-bud convention a hand-drawn rosebud
+        // icon uses) so this actually reads as a flower top and not just a
+        // single teardrop. Still closed, not blooming open - each petal's
+        // own gradient only hints pink at its very tip (GROW_RUNE_BUD_TIP),
+        // the rest is green sepal, because this is a BUD, not a bloom.
+        '<line x1="60" y1="74" x2="60" y2="91" stroke="' + GROW_RUNE_LEAF + '" stroke-width="2.2" stroke-linecap="round"/>' +
+        '<path d="M60 82 C50 80 44 84 42 90 C50 91 58 88 60 82 Z" fill="' + GROW_RUNE_LEAF + '" opacity="0.95"/>' +
+        '<path d="M60 82 C70 80 76 84 78 90 C70 91 62 88 60 82 Z" fill="' + GROW_RUNE_LEAF + '" opacity="0.95"/>' +
+        budPetal(gid, -30, 0.78, 0.92) + budPetal(gid, 30, 0.78, 0.92) + budPetal(gid, 0, 1.05, 0.98) +
       '</svg>';
     }
     function makeGrowRuneIcon(px, idSuffix) {
@@ -4776,12 +4810,26 @@
     // Same "small glyph and full reach are visibly the same rune, just two
     // sizes" idea rainBoundaryGeometry's own comment explains - but square,
     // not circular, because the reach really is Chebyshev-square (see
-    // growRuneSpeedupActiveAt): an outer square at the true boundary, a
-    // second square rotated 45 degrees around the block's own center
-    // (echoing the compact glyph's own two-square compass star), a small
-    // diamond accent at each of the outer square's four corners, and a
-    // faint tile-by-tile lattice across the interior, same as the rain
-    // rune's own lattice.
+    // growRuneSpeedupActiveAt): an outer square at the true boundary, three
+    // more squares rotated 22.5/45/67.5 degrees around the block's own
+    // center (echoing the compact glyph's own four-square, 16-point compass
+    // star - the outer square here doubles as that pattern's own 0-degree
+    // member), a small diamond accent at each of the outer square's four
+    // corners, and a faint tile-by-tile lattice across the interior, same
+    // as the rain rune's own lattice.
+    // rotDeg is measured the same "0deg = a corner pointing along +r"
+    // convention polarPoint/polarLL use elsewhere in this file - which
+    // corner ends up "first" doesn't matter for a shape this symmetric, so
+    // there's no need to match their exact sign convention, only to be
+    // internally consistent across the four calls below.
+    function rotatedSquareLL(cq, cr, span, rotDeg) {
+      var pts = [];
+      for (var i = 0; i < 4; i++) {
+        var rad = (rotDeg + i * 90) * Math.PI / 180;
+        pts.push([(cr + span * Math.cos(rad)) * CELL_LAT_DEG, (cq + span * Math.sin(rad)) * CELL_LNG_DEG]);
+      }
+      return pts;
+    }
     function growRuneBoundaryGeometry(entry) {
       var half = 0.5;
       var cq = entry.q + 0.5, cr = entry.r + 0.5; // the 2x2 block's own center
@@ -4795,12 +4843,7 @@
         [(rMax + half) * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG],
         [(rMax + half) * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG]
       ];
-      var diamond = [
-        [(cr - span) * CELL_LAT_DEG, cq * CELL_LNG_DEG],
-        [cr * CELL_LAT_DEG, (cq + span) * CELL_LNG_DEG],
-        [(cr + span) * CELL_LAT_DEG, cq * CELL_LNG_DEG],
-        [cr * CELL_LAT_DEG, (cq - span) * CELL_LNG_DEG]
-      ];
+      var stars = [22.5, 45, 67.5].map(function (rotDeg) { return rotatedSquareLL(cq, cr, span, rotDeg); });
       var accentHalf = 0.55;
       var corners = [[rMin - half, qMin - half], [rMin - half, qMax + half], [rMax + half, qMax + half], [rMax + half, qMin - half]];
       var diamonds = corners.map(function (c) {
@@ -4825,7 +4868,7 @@
         lattice.push([[rOff * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG], [rOff * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG]]);
       }
 
-      return { square: square, diamond: diamond, diamonds: diamonds, lattice: lattice };
+      return { square: square, stars: stars, diamonds: diamonds, lattice: lattice };
     }
 
     // One marker (the compact glyph, sized and rescaled exactly like the
@@ -4838,7 +4881,7 @@
     // accumulate in the save forever - called often enough (every cast,
     // plus once a minute from tickPlants) that this is the only cleanup the
     // registry ever needs.
-    var growRuneLayers = {}; // key ("q,r") -> { marker, square, diamond, diamonds, lattice }
+    var growRuneLayers = {}; // key ("q,r") -> { marker, square, stars, diamonds, lattice }
     function renderGrowRunes() {
       var now = Date.now();
       var seen = {};
@@ -4872,19 +4915,22 @@
         var square = L.polygon(geo.square, {
           color: GROW_RUNE_LINE, weight: 1.4, fill: false, opacity: 0.85, interactive: false
         }).addTo(map);
-        var diamond = L.polygon(geo.diamond, {
+        // geo.stars is three separate rotated-square rings (22.5/45/67.5
+        // degrees) - one multi-polygon layer, same technique geo.diamonds
+        // below already uses for its own four disjoint rings.
+        var stars = L.polygon(geo.stars, {
           color: GROW_RUNE_LINE, weight: 1.1, fill: false, opacity: 0.7, interactive: false
         }).addTo(map);
         var diamonds = L.polygon(geo.diamonds, {
           color: GROW_RUNE_GLOW, weight: 0, fillColor: GROW_RUNE_GLOW, fillOpacity: 0.85, interactive: false
         }).addTo(map);
-        growRuneLayers[key] = { marker: marker, lattice: lattice, square: square, diamond: diamond, diamonds: diamonds };
+        growRuneLayers[key] = { marker: marker, lattice: lattice, square: square, stars: stars, diamonds: diamonds };
       });
       Object.keys(growRuneLayers).forEach(function (key) {
         if (seen[key]) return;
         var l = growRuneLayers[key];
         map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.square);
-        map.removeLayer(l.diamond); map.removeLayer(l.diamonds);
+        map.removeLayer(l.stars); map.removeLayer(l.diamonds);
         delete growRuneLayers[key];
       });
       if (pruned) saveState();

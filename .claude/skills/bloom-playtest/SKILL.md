@@ -18,10 +18,13 @@ techniques that have worked repeatedly.
   don't hardcode a `chromium-NNNN` build number, it changes:
   ```js
   const { chromium } = require('playwright-core');
-  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium/chrome-linux/chrome' });
+  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   ```
-  (`/opt/pw-browsers/chromium` is a symlink to whatever build is actually
-  installed.)
+  `/opt/pw-browsers/chromium` is a symlink straight to the `chrome`
+  executable itself (not a directory) - appending `/chrome-linux/chrome`
+  to it, which looks like the natural thing to do, points at a path that
+  doesn't exist and fails with "executable doesn't exist". Use the bare
+  symlink path as-is.
 - Playwright test scripts written to the scratchpad do **not** persist
   between sessions/containers. Either recreate the ones you need each
   session, or - if a script has proven itself worth keeping across many
@@ -68,6 +71,42 @@ page.on('console', msg => {
 Set the `state` directly via `page.evaluate` for whatever scenario you're
 testing (currency, unlock flags, `state.greenhouse.pots`, etc.) rather than
 trying to drive the UI through real walking/GPS.
+
+**`state.userPos` often never actually gets set**, even with the
+`navigator.geolocation.watchPosition`/`getCurrentPosition` stub above in
+place and the HUD showing "LOCATING..." forever instead of "GPS LOCKED" -
+something about the permission/callback plumbing doesn't complete in this
+sandboxed headless run. Anything gated on distance from the player
+(`inRange`, `toolBlockedReason`, planting/watering/harvesting range checks)
+silently no-ops or throws (`Cannot read properties of null (reading
+'lat')`) if you assume it locked. Don't chase the real GPS flow - set it
+directly and derive your test tiles from it:
+```js
+await page.evaluate(() => {
+  const c = cellCenter(20, 20); // any cell, just needs to be consistent
+  state.userPos = { lat: c.lat, lng: c.lng };
+});
+// then: const home = latLngToCell(state.userPos.lat, state.userPos.lng);
+```
+
+**Auto-watering animations (sprinkler and rain-ring droplets) are async**
+and won't have landed by the time a `tickSprinklers()`/`tickRainRings()`
+call returns - state changes only once the in-flight droplet lands,
+`SPRINKLER_ANIM_DELAY_MS` (1000ms) plus flight time later. Don't reach for
+`page.waitForTimeout` to bridge that gap by default. Instead force
+`reduceMotion = true` in-page first - every auto-watering path checks it
+and, when true, applies the mutation immediately with no delay or droplet
+DOM at all, collapsing the whole thing back to a synchronous call you can
+assert on right after:
+```js
+await page.evaluate(() => { reduceMotion = true; });
+```
+Only leave it `false` (the default) when the animation itself is what
+you're verifying - then budget real wall-clock time past the delay plus
+flight duration (roughly 2.2s covers `SPRINKLER_ANIM_DELAY_MS` +
+`SPRINKLER_DROPLET_MS` + landing stagger) before asserting on the result,
+and check `document.querySelectorAll('#fx-layer .sprinkler-drop')` for
+mid-flight DOM and zero-after-landing cleanup.
 
 ## 2. Building a standalone, dependency-free playtest tool
 

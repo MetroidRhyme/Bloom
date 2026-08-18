@@ -1451,7 +1451,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.35.2</span>
+      <span id="game-version">v2.35.3</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1841,6 +1841,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.35.3', changes: [
+        'Removed the fine grid lines that used to fill the grow rune\'s ' +
+          'whole 10-tile boundary - at that size they read as a second, ' +
+          'mismatched grid sitting on top of the map\'s own tile grid ' +
+          'rather than decoration. The square, star, and corner accents ' +
+          'still mark the boundary on their own.'
+      ] },
       { version: 'v2.35.2', changes: [
         'The grow rune\'s center is now an actual little flower - three ' +
           'fanned petals on a stem with two leaves, still closed like a bud ' +
@@ -4814,9 +4821,12 @@
     // more squares rotated 22.5/45/67.5 degrees around the block's own
     // center (echoing the compact glyph's own four-square, 16-point compass
     // star - the outer square here doubles as that pattern's own 0-degree
-    // member), a small diamond accent at each of the outer square's four
-    // corners, and a faint tile-by-tile lattice across the interior, same
-    // as the rain rune's own lattice.
+    // member), and a small diamond accent at each of the outer square's
+    // four corners. Deliberately no interior tile lattice the way the rain
+    // rune's own boundary draws one - at GROW_PULSE_RADIUS's 21x21-tile
+    // span that read as a second, finer grid sitting on top of the map's
+    // own ambient mesh, and the two not obviously being the same tile size
+    // read as a bug rather than decoration.
     // rotDeg is measured the same "0deg = a corner pointing along +r"
     // convention polarPoint/polarLL use elsewhere in this file - which
     // corner ends up "first" doesn't matter for a shape this symmetric, so
@@ -4856,19 +4866,13 @@
         ];
       });
 
-      // Every internal tile edge inside the square, minus the two outermost
-      // (the boundary square above already marks those) - same convention
-      // rainBoundaryGeometry's own lattice uses, just trivial here since
-      // this shape is already an axis-aligned square in lat/lng.
-      var lattice = [];
-      for (var qOff = qMin + 1; qOff < qMax; qOff++) {
-        lattice.push([[(rMin - half) * CELL_LAT_DEG, qOff * CELL_LNG_DEG], [(rMax + half) * CELL_LAT_DEG, qOff * CELL_LNG_DEG]]);
-      }
-      for (var rOff = rMin + 1; rOff < rMax; rOff++) {
-        lattice.push([[rOff * CELL_LAT_DEG, (qMin - half) * CELL_LNG_DEG], [rOff * CELL_LAT_DEG, (qMax + half) * CELL_LNG_DEG]]);
-      }
-
-      return { square: square, stars: stars, diamonds: diamonds, lattice: lattice };
+      // No internal tile-by-tile lattice here, unlike the rain rune's own
+      // boundary - at GROW_PULSE_RADIUS's 21x21-tile span it read as a
+      // second, finer grid sitting on top of the map's own ambient mesh,
+      // and the two not obviously being the same tile size read as a bug
+      // rather than decoration. The star/diamond accents already carry the
+      // "this is a rune, not just a square" read on their own.
+      return { square: square, stars: stars, diamonds: diamonds };
     }
 
     // One marker (the compact glyph, sized and rescaled exactly like the
@@ -4881,7 +4885,7 @@
     // accumulate in the save forever - called often enough (every cast,
     // plus once a minute from tickPlants) that this is the only cleanup the
     // registry ever needs.
-    var growRuneLayers = {}; // key ("q,r") -> { marker, square, stars, diamonds, lattice }
+    var growRuneLayers = {}; // key ("q,r") -> { marker, square, stars, diamonds }
     function renderGrowRunes() {
       var now = Date.now();
       var seen = {};
@@ -4907,11 +4911,6 @@
         }).addTo(map);
         marker._iconKey = iconKey;
         var geo = growRuneBoundaryGeometry(entry);
-        // Lattice added first so it sits under the rest (Leaflet stacks
-        // same-pane vector layers in add order), same as renderRainRings.
-        var lattice = L.polyline(geo.lattice, {
-          color: GROW_RUNE_LINE, weight: 1, opacity: 0.25, interactive: false
-        }).addTo(map);
         var square = L.polygon(geo.square, {
           color: GROW_RUNE_LINE, weight: 1.4, fill: false, opacity: 0.85, interactive: false
         }).addTo(map);
@@ -4924,12 +4923,12 @@
         var diamonds = L.polygon(geo.diamonds, {
           color: GROW_RUNE_GLOW, weight: 0, fillColor: GROW_RUNE_GLOW, fillOpacity: 0.85, interactive: false
         }).addTo(map);
-        growRuneLayers[key] = { marker: marker, lattice: lattice, square: square, stars: stars, diamonds: diamonds };
+        growRuneLayers[key] = { marker: marker, square: square, stars: stars, diamonds: diamonds };
       });
       Object.keys(growRuneLayers).forEach(function (key) {
         if (seen[key]) return;
         var l = growRuneLayers[key];
-        map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.square);
+        map.removeLayer(l.marker); map.removeLayer(l.square);
         map.removeLayer(l.stars); map.removeLayer(l.diamonds);
         delete growRuneLayers[key];
       });

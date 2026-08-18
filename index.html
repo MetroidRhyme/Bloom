@@ -1414,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.26.1</span>
+      <span id="game-version">v2.27.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1642,16 +1642,16 @@
 
     var PLANT_RANGE = 2;   // how close (in tiles, 8-directional) you must be to plant or water
 
-    // Basic elemental magic, step one: a RAIN RING. Eight blue flowers (any
-    // species - only the color matters) planted in the 8 tiles immediately
-    // around one empty tile, all grown to a full cluster, keep every plant in
-    // a square RAIN_RING_RADIUS tiles out from that empty center tile
-    // watered on their own - including the ring's own eight blue flowers -
-    // for as long as the ring stays intact. See the RAIN RINGS section
-    // (below catchUpSprinklersOffline) for the actual detection/watering
-    // logic. There is deliberately no in-game hint that this exists yet
-    // (spellbook/tutorial copy is a later feature) - the only tell is
-    // whatever a player can actually see happen on the map.
+    // Basic elemental magic, step one: a RAIN RING. Eight blue flowers - one
+    // of each of the 8 species, no repeats - planted in the 8 tiles
+    // immediately around one empty tile, all grown to a full cluster, keep
+    // every plant in a square RAIN_RING_RADIUS tiles out from that empty
+    // center tile watered on their own - including the ring's own eight blue
+    // flowers - for as long as the ring stays intact. See the RAIN RINGS
+    // section (below catchUpSprinklersOffline) for the actual
+    // detection/watering logic. There is deliberately no in-game hint that
+    // this exists yet (spellbook/tutorial copy is a later feature) - the
+    // only tell is whatever a player can actually see happen on the map.
     var RAIN_RING_COLOR = 'blue';
     var RAIN_RING_RADIUS = 2;   // Chebyshev distance from the center tile that gets rained on - a 5x5 block
 
@@ -1703,6 +1703,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.27.0', changes: [
+        'That rune around a ring of blue flowers used to accept any eight, ' +
+          'even eight of the same kind - now it wants one of every species, ' +
+          'no repeats, before it\'ll hold.'
+      ] },
       { version: 'v2.26.1', changes: [
         'Fixed dragging to mass-plant seeds across a completed rain rune - ' +
           'it now skips the rune\'s own empty center tile instead of ' +
@@ -3615,15 +3620,18 @@
     var rainRings = {}; // centerKey ("q,r") -> { q, r, lat, lng }
 
     // A ring is valid at (cq, cr) iff that tile itself is empty AND all 8
-    // neighbors are blue flowers already grown to a full cluster. Species
-    // doesn't matter (any of the 8 can be a different kind of flower) - only
-    // color and stage do.
+    // neighbors are blue flowers already grown to a full cluster AND every
+    // one of them is a different species - with exactly 8 species and 8
+    // spokes, that means all 8 species have to be represented, one each.
     function isRainRingComplete(cq, cr) {
       if (state.plants[cellKey(cq, cr)]) return false; // center tile must stay empty
+      var seenSpecies = {};
       for (var i = 0; i < CELL_NEIGHBORS.length; i++) {
         var d = CELL_NEIGHBORS[i];
         var p = state.plants[cellKey(cq + d[0], cr + d[1])];
         if (!p || colorOfPlant(p) !== RAIN_RING_COLOR || p.stage < MAX_STAGE) return false;
+        if (seenSpecies[p.species]) return false; // two spokes of the same species
+        seenSpecies[p.species] = true;
       }
       return true;
     }

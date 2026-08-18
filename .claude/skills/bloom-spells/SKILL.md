@@ -1,6 +1,6 @@
 ---
 name: bloom-spells
-description: Use when the user wants to add, modify, or reason about one of Bloom's "basic elemental magic" spells (planting-formation mechanics like the RAIN RING, GROW SPELL, LOKI'S CONTROL, SCRY) or asks for a new one. Explains the existing spell architecture in index.html - the consuming-vs-persistent design fork, the shared CORNER ZONES foundation, the tier system, and the checklist for wiring in a new tier-gated formation spell - so a new spell reuses existing machinery instead of re-deriving it from scratch.
+description: Use when the user wants to add, modify, or reason about one of Bloom's "basic elemental magic" spells (planting-formation mechanics like the RAIN RING, GROW SPELL, LOKI'S CONTROL, SCRY) or asks for a new one - including changing a rune's own look, timing, or tap-to-inspect/no-planting behavior. Explains the existing spell architecture in index.html - the consuming-vs-persistent design fork, the shared CORNER ZONES foundation, the shared Runes foundation (glyph conventions, the zoom-rescale gotcha, the rune-ground-is-unplantable pattern), the tier system, and the checklist for wiring in a new tier-gated formation spell - so a new spell reuses existing machinery instead of re-deriving it from scratch.
 ---
 
 # Bloom's spell system
@@ -44,6 +44,14 @@ already has a complete-but-never-consumed formation sitting in it from
 before the feature existed - the persistent spells need this too
 (`recomputeLokiZonesFull`/`recomputeScryZonesFull`/`recomputeRainRingsFull`),
 just without the consuming side effect.
+
+Consuming doesn't mean "and then nothing's left" - GROW SPELL's own
+formation is destroyed, but `resolveGrowBlock` leaves a **rune** behind at
+that same spot (a timed, 4x-growth zone). Consuming vs. persistent decides
+how the *formation itself* is detected; a rune is a separate concern layered
+on top - see the Runes section below, which RAIN RING's own rune (a
+persistent-spell rune, triggered by watering rather than by consuming
+anything) also belongs to.
 
 ## The tier system
 
@@ -108,6 +116,82 @@ section - Loki's is in `markAccessibleToday`/`inRange` (extends
 `state.lokiAccess` timestamps), Scry's is a single unconditional check
 added to `inRange` directly, with no persisted state at all.
 
+## Runes: a timed object a spell leaves behind (shared by RAIN RING and GROW SPELL)
+
+A rune is the *effect*, not the formation - what's left after (RAIN RING)
+watering a structurally-complete ring's own empty center tile, or (GROW
+SPELL) a consuming formation resolving. Unlike a CORNER ZONE, whose
+"structure" is always re-derivable from `state.plants` (the corner flowers
+stay planted), a rune's own timing has nowhere else to come from - GROW
+SPELL deletes the flowers that triggered it, and RAIN RING's watering is a
+one-off action with no other record. **A rune's "when did this last
+activate / how long is left" always needs its own persisted timestamp** -
+`state.runeWater` (rain, keyed by the ring's center tile) / `state.growRunes`
+(grow, keyed by the block's own top-left anchor), each entry just
+`{ activatedAt }` or similar. Re-triggering an already-active rune (watering
+the rain rune again, or a new grow spell resolving on the exact spot before
+the old rune there expires) **tops the timer back up rather than
+stacking** - copy `activateRainRune`'s/`resolveGrowBlock`'s own overwrite,
+don't add a counter.
+
+A new rune (or a change to one of these two) touches several places that
+don't share one obvious "the rune section" - easy to fix in one spot and
+forget the others, which is exactly what happened building the grow rune:
+
+- **The glyph**: `buildRainRuneSVG`/`buildGrowRuneSVG` share one visual
+  language - a 120x120 viewBox centered on (60,60), an outer glow circle,
+  an N-point compass star built from N/4 squares each rotated 360/N degrees
+  apart (`runeSquarePoints`/`polarPoint` - rain uses 2 squares for 8
+  points, grow uses 4 for 16), 16 rim tick marks, 8 star-point diamonds, a
+  dashed inner circle, and a center icon unique to that spell (rain: a
+  raindrop; grow: a 3-petal budding flower via `budPetal`'s per-instance
+  `<g transform>`). A new rune doesn't have to match every count, but keep
+  the same *pieces* so it reads as the same family, not an unrelated icon.
+- **The large-scale boundary**: `rainBoundaryGeometry`/
+  `growRuneBoundaryGeometry` redraw the *same* glyph at real lat/lng scale
+  around the rune's actual reach, so the small marker and the big area
+  visibly agree. Rain's reach is genuinely circular, so its boundary is a
+  circle; grow's reach is Chebyshev-square (`growRuneSpeedupActiveAt`), so
+  its boundary is a literal square - **match the boundary shape to the
+  actual detection math, don't copy the previous rune's geometry
+  wholesale.** Skip an interior tile-by-tile lattice unless the boundary is
+  small (rain's `RAIN_RING_RADIUS`) - at `GROW_PULSE_RADIUS`'s 21x21-tile
+  span it read as a second, mismatched grid on top of the map's own mesh
+  and had to be removed after a player reported it directly.
+- **Live zoom rescale - the one genuinely nasty gotcha**: any marker built
+  via a `plantIconBase()`-sized `L.divIcon` (a rune's marker included) MUST
+  be rebuilt inside `scheduleMarkerRender()`'s batch (search
+  `renderPlants(); renderWild(); ... renderGrowRunes();`), not on its own
+  separate schedule (cast-time/tick/boot only). Every render call in that
+  batch writes the SAME shared `_iconBuiltPx`, which
+  `rescalePlantIcons()`'s live in-gesture CSS transform (bound to the
+  `zoom` event) reads as the baseline for every marker type uniformly. A
+  marker type left out of the batch still gets that live transform applied
+  to it, against a baseline some *other* marker type just moved - not its
+  own actual last-built size - so it visibly drifts to the wrong size with
+  every further zoom step. This shipped for real (the grow rune was left
+  out) and looked like "random sizes when zooming" with nothing obviously
+  wrong in the diff that caused it - trace any zoom-size bug straight to
+  this list before looking anywhere else. See the `bloom-playtest` skill's
+  own gotcha for how to actually test this.
+- **Rune ground is never a valid plant target, from every path a seed can
+  land through**: `runeAt(q, r)` (returns `{ kind: 'rain'|'grow', key }`)
+  is the one shared lookup - `rainRings[key]` directly for rain's single
+  center tile, `growRuneAt(q, r)` (checking every `growAnchorsAround(q, r)`
+  anchor, since a grow rune's registry key is only its own top-left corner
+  but its footprint is all 4 tiles) for grow's 2x2. It has to be checked in
+  **three independent call sites**, not one: `map.on('click')` (bare tap),
+  `resolveSeedTap` (an equipped seed's tap - this one had NO rune awareness
+  at all for either spell until it was added, meaning a seed could silently
+  plant through and break an intact rain rune with a single tap, years
+  after the rain rune shipped), and `applyRangeSeedAction` (a dragged
+  multi-tile sweep - already had its own rain-only check from a past fix,
+  easy to assume that covered every path when it didn't). `openRunePanel`
+  (also kind-dispatching, to `openRainRunePanel`/`openGrowRunePanel`) is
+  the matching info-panel half - wire both from the same `runeAt` call so a
+  tile that can't be planted on always explains why instead of silently
+  refusing.
+
 ## Wiring checklist for a new formation spell
 
 1. Decide consuming vs. persistent (above) - this decides where detection
@@ -140,12 +224,23 @@ added to `inRange` directly, with no persisted state at all.
    fallback (`parsed.newField || {}`), and a line in `saveState()` - follow
    the `lokiAccess` pattern exactly (see loadState's migration branch and
    its own comment). A pure real-time check against a registry (like Scry)
-   needs none of this.
-9. Test via the `bloom-playtest` skill - and specifically its own gotcha
-   about routing growth through `waterPlant()` rather than raw
-   `applyWatering()` when the test needs to exercise a call-site-hooked
-   (consuming) spell's trigger.
-10. Ship via the `bloom-ship` skill - version bump, changelog entry written
+   needs none of this. If the spell leaves a **rune** behind (see the Runes
+   section above), its own persisted timestamp is this same requirement -
+   follow `state.growRunes`/`state.runeWater` instead of `lokiAccess`.
+9. If the spell renders any new marker icon via a `plantIconBase()`-sized
+   `L.divIcon`, register its render function in `scheduleMarkerRender()`'s
+   batch - see the Runes section's zoom-rescale gotcha for what goes wrong
+   if you don't (a real bug, not a hypothetical one).
+10. If a seed should never be plantable on ground the spell occupies (a
+    rune's own tile(s), most likely - ordinary zone corner flowers don't
+    need this, they already occupy `state.plants`), extend `runeAt`/
+    `openRunePanel` rather than adding a fourth parallel check - see the
+    Runes section's "three independent call sites" note.
+11. Test via the `bloom-playtest` skill - and specifically its own gotcha
+    about routing growth through `waterPlant()` rather than raw
+    `applyWatering()` when the test needs to exercise a call-site-hooked
+    (consuming) spell's trigger.
+12. Ship via the `bloom-ship` skill - version bump, changelog entry written
     for a player (what the spell does, not the registry/tier mechanism
     behind it), the works.
 
@@ -159,9 +254,14 @@ added to `inRange` directly, with no persisted state at all.
   changes (including AI-assisted ones) lean on these comments instead of
   re-deriving intent from the code - keep writing them that dense.
 - **A spell's own boundary/visual is `interactive: false`** on its Leaflet
-  layer (see `lokiZoneStyle`/`scryZoneStyle`/the rain rune's boundary
-  layers) - an outline must never intercept a tap meant for the ground
-  underneath it. Don't add click handlers to a zone/ring outline; if a
-  spell needs tap-to-inspect, gate it through the existing
-  plant/rune-tap dispatch (`toolTargetAt`) instead of the boundary shape
-  itself.
+  layer (see `lokiZoneStyle`/`scryZoneStyle`/a rune's own boundary layers)
+  - an outline must never intercept a tap meant for the ground underneath
+  it. Don't add click handlers to a zone/rune outline; tap-to-inspect goes
+  through the ground-tap dispatch instead. For a rune specifically, that's
+  `runeAt`/`openRunePanel` (see the Runes section above), wired into
+  `map.on('click')` and `resolveSeedTap` - **not** `toolTargetAt`, which is
+  a different thing entirely: what an equipped *tool* (water/shear/sell/
+  fert) acts on during a press-and-hold, not what a bare or seed-equipped
+  tap opens an info panel for. A zone (Loki/Scry) has no separate rune
+  object of its own to tap - its corner flowers are ordinary plants, so the
+  normal plant-tap dispatch already covers them.

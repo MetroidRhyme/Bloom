@@ -1,6 +1,6 @@
 ---
 name: bloom-playtest
-description: Use when verifying Bloom UI/game-logic changes with Playwright, or when asked for a standalone/isolated demo build of one Bloom subsystem, or when a JS-driven playtest build isn't loading for the user and a dependency-free static reference is needed instead. Covers the headless-chromium test harness, the splice-a-standalone-tool pattern, and the static-bake fallback.
+description: Use when verifying Bloom UI/game-logic changes with Playwright, or when asked for a standalone/isolated demo build of one Bloom subsystem, or when a JS-driven playtest build isn't loading for the user and a dependency-free static reference is needed instead. Covers the headless-chromium test harness, testing zoom-dependent map behavior (marker icon sizing) against the real Leaflet map, the splice-a-standalone-tool pattern, and the static-bake fallback.
 ---
 
 # Testing and demoing Bloom
@@ -72,8 +72,8 @@ Set the `state` directly via `page.evaluate` for whatever scenario you're
 testing (currency, unlock flags, `state.greenhouse.pots`, etc.) rather than
 trying to drive the UI through real walking/GPS.
 
-**Gotcha: hex-grid `q`/`r` and lat/lng are not independent - a fabricated
-fixture must derive one from the other.** `cellCenter(q, r)` is literally
+**Gotcha: `q`/`r` and lat/lng are not independent - a fabricated fixture
+must derive one from the other.** `cellCenter(q, r)` is literally
 `{ lat: r * CELL_LAT_DEG, lng: q * CELL_LNG_DEG }` - the grid has no
 separate origin offset, `q`/`r` *are* lat/lng divided by cell size. Any
 in-game structure that carries both fields (a rain ring, a sprinkler, a
@@ -110,6 +110,37 @@ it) whenever the test needs to exercise a spell's actual trigger, and only
 reach for raw `applyWatering` calls when you specifically want to bypass
 those hooks (e.g. building a fixture state before testing detection in
 isolation).
+
+**Gotcha: testing zoom-dependent behavior needs a real `zoomend` await, not
+a fixed sleep - `setZoom()` can silently no-op or get clamped.** A naive
+`map.setZoom(z); await page.waitForTimeout(300)` loop breaks in two ways
+that both produce flaky, misleading pass/fail results rather than a clean
+error: (1) if the requested zoom already equals whatever the map is sitting
+at, `setZoom` is a no-op and `'zoomend'` never fires, so a bare
+`page.evaluate(() => new Promise(r => map.once('zoomend', r)))` hangs
+forever - check `map.getZoom() === zoom` first and resolve immediately
+instead; (2) the map's actual `minZoom`/`maxZoom` (`map.getMinZoom()`/
+`getMaxZoom()`, roughly `[14, 19]` in Bloom, not the Leaflet default) can
+silently clamp a requested level to something else entirely, so read back
+`map.getZoom()` after the fact rather than trusting the value you asked
+for. Always pass `{ animate: false }` too - an animated zoom still mid-
+flight can leave the *next* `setZoom` call ignored until the current
+transition finishes, which reads as a missing zoom step with no error.
+Put together:
+```js
+await page.evaluate((zoom) => new Promise((resolve) => {
+  if (map.getZoom() === zoom) { resolve(); return; }
+  map.once('zoomend', resolve);
+  map.setZoom(zoom, { animate: false });
+}), targetZoom);
+```
+This combination is what actually caught the grow rune's icon-size-on-zoom
+bug (see the `bloom-spells` skill's Runes section, "live zoom rescale") by
+walking the real map through several non-monotonic zoom levels and
+comparing each marker's actual rendered `<svg width>` against
+`plantIconBase()*<its own scale factor>` after every step - the fixed-sleep
+version of the same test produced inconsistent results that didn't clearly
+point at the real bug.
 
 ## 2. Building a standalone, dependency-free playtest tool
 

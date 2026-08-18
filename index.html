@@ -1414,7 +1414,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.27.0</span>
+      <span id="game-version">v2.28.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1644,16 +1644,32 @@
 
     // Basic elemental magic, step one: a RAIN RING. Eight blue flowers - one
     // of each of the 8 species, no repeats - planted in the 8 tiles
-    // immediately around one empty tile, all grown to a full cluster, keep
-    // every plant in a square RAIN_RING_RADIUS tiles out from that empty
-    // center tile watered on their own - including the ring's own eight blue
-    // flowers - for as long as the ring stays intact. See the RAIN RINGS
-    // section (below catchUpSprinklersOffline) for the actual
-    // detection/watering logic. There is deliberately no in-game hint that
-    // this exists yet (spellbook/tutorial copy is a later feature) - the
-    // only tell is whatever a player can actually see happen on the map.
+    // immediately around one empty tile, all grown to a full cluster, raise
+    // a rune on that empty center tile. The rune itself still has to be
+    // watered like any flower to actually do anything: once watered, it
+    // keeps every plant in a square RAIN_RING_RADIUS tiles out - including
+    // the ring's own eight blue flowers - watered on its own for the next
+    // 24 hours (RUNE_ACTIVE_MS), watering it again at any point tops that
+    // window back up, and letting it run out just leaves it dormant rather
+    // than breaking anything. Tapping the rune opens a small panel with
+    // what it does and how long it has left. See the RAIN RINGS section
+    // (below catchUpSprinklersOffline) for the actual detection/watering
+    // logic. There is deliberately no in-game hint that this exists yet
+    // (spellbook/tutorial copy is a later feature) - the only tell is
+    // whatever a player can actually see happen on the map.
     var RAIN_RING_COLOR = 'blue';
     var RAIN_RING_RADIUS = 2;   // Chebyshev distance from the center tile that gets rained on - a 5x5 block
+
+    // A structurally-complete ring (see isRainRingComplete) doesn't rain on
+    // its own - it has to actually be WATERED, the same way any flower does,
+    // before it does anything. That watering is what activates it for
+    // RUNE_ACTIVE_MS from the moment it happened; watering it again at any
+    // point (dormant or already active) resets the window back to the full
+    // 24h rather than stacking. Running out just leaves it dormant - the
+    // ring itself is untouched and a later watering brings it right back.
+    // See isRuneActive/activateRainRune, below the rest of the RAIN RINGS
+    // section.
+    var RUNE_ACTIVE_MS = 24 * HOUR;
 
     // Full water drains to empty over 2 days, at which point the flower starts
     // *looking* wilted. That is the entire consequence: wilting is cosmetic.
@@ -1703,6 +1719,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.28.0', changes: [
+        'That rune isn\'t permanent any more - water it and it rains on ' +
+          'everything around it for 24 hours, watering it again tops the ' +
+          'clock back up, and letting it run out just leaves it dormant ' +
+          'until the next time you water it. Tap it to see how long it ' +
+          'has left.'
+      ] },
       { version: 'v2.27.0', changes: [
         'That rune around a ring of blue flowers used to accept any eight, ' +
           'even eight of the same kind - now it wants one of every species, ' +
@@ -2770,6 +2793,18 @@
         // cell key -> { q, r, lat, lng, placedAt }, one entry per placed
         // sprinkler - see tickSprinklers for what "placed" actually does.
         sprinklers: {},
+        // centerKey ("q,r") -> ms timestamp of the last time that rain
+        // rune was watered - what actually starts/resets its RUNE_ACTIVE_MS
+        // countdown (see the RUNE_ACTIVE_MS comment above and isRuneActive
+        // below the RAIN RINGS section). Deliberately separate from
+        // `rainRings` (a session-only cache rebuilt from state.plants every
+        // load - see its own comment) since a ring's *structure* has
+        // state.plants alone to derive from, but "when was it last
+        // watered" has no other source of truth and has to persist. A
+        // center with no entry here,
+        // or a stale one past RUNE_ACTIVE_MS, just means a structurally-
+        // complete rune sitting dormant.
+        runeWater: {},
         // Bought but not yet placed - the equipment toggle's own badge (see
         // renderSprinklerToggle). Placing one moves it from here into
         // `sprinklers` above; picking a placed one back up reverses that.
@@ -2950,6 +2985,13 @@
           // none placed/owned yet, same treatment as fertilizer's own
           // backfill just below.
           sprinklers: parsed.sprinklers || {},
+          // Brand new with this feature - a pre-existing save simply has no
+          // rune activations recorded yet, same backfill treatment as
+          // `sprinklers`/`weeds` got when they were introduced. Any rain
+          // ring a returning player already had standing under the old
+          // always-on rule just starts dormant until watered for the first
+          // time under this one - no free 24h grandfathered in.
+          runeWater: parsed.runeWater || {},
           sprinklerInventory: typeof parsed.sprinklerInventory === 'number' ? parsed.sprinklerInventory : 0,
           sprinklerUnlockAnnounced: !!parsed.sprinklerUnlockAnnounced,
           greenhouseTeaserAnnounced: !!parsed.greenhouseTeaserAnnounced,
@@ -3053,7 +3095,7 @@
         todayAccessible: state.todayAccessible, todayAccessibleDay: state.todayAccessibleDay,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
-        sprinklers: state.sprinklers, sprinklerInventory: state.sprinklerInventory,
+        sprinklers: state.sprinklers, runeWater: state.runeWater, sprinklerInventory: state.sprinklerInventory,
         sprinklerUnlockAnnounced: state.sprinklerUnlockAnnounced,
         greenhouseTeaserAnnounced: state.greenhouseTeaserAnnounced,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
@@ -3697,18 +3739,53 @@
       });
     }
 
+    // ---- Rune activation (see RUNE_ACTIVE_MS above) ------------------------
+    // Being a structurally-complete ring (`rainRings[key]`) and being
+    // ACTIVE are two different questions - this answers the second one.
+    // Watered within the last RUNE_ACTIVE_MS -> raining. Never watered, or
+    // watered longer ago than that -> a perfectly intact but dormant rune.
+    // Doesn't check rainRings[key] itself - every caller below only ever
+    // reaches a rune key through one, so that half is already guaranteed.
+    function isRuneActive(key, now) {
+      var wateredAt = state.runeWater[key];
+      return !!wateredAt && (now - wateredAt) < RUNE_ACTIVE_MS;
+    }
+
+    // The one interaction a rune supports: water it (via the watering can,
+    // same as any flower - see waterRuneWithCan below and toolTargetAt's
+    // 'rune' kind). Always stamps `now`, whether the rune was dormant,
+    // already active, or this is its first watering ever - "resets the
+    // countdown back to 24 hours" applies uniformly, there is no partial
+    // top-up. Structural validity isn't re-checked here for the same
+    // reason isRuneActive doesn't: every call site already resolved `key`
+    // through `rainRings`.
+    function activateRainRune(key) {
+      var now = Date.now();
+      var wasActive = isRuneActive(key, now);
+      state.runeWater[key] = now;
+      saveState();
+      renderRainRings();
+      toast(wasActive
+        ? '\u{1F4A7} The rain rune tops back up - a full 24 hours to go again'
+        : '\u{1F4A7} The rain rune stirs - it will rain for the next 24 hours');
+      vibrate(20);
+    }
+
     // Live tick, same cadence/shape as tickSprinklers, and - now that the
     // ring has a rune to actually spawn from - the same droplet-flight
-    // animation too: for every active ring, hand any wilted-or-ready plant
-    // within RAIN_RING_RADIUS tiles of its center to startRainWatering
-    // (below, alongside the sprinkler animation it shares its machinery
-    // with) rather than mutating it here directly. Purely detection, same
-    // division of labor as tickSprinklers - the actual state change and
-    // its save/render happen once each droplet lands, in finishAutoWatering.
-    // A ring growing one of its own neighbors' neighbors into a fresh blue
-    // cluster (and so completing a second ring) is picked up for free by
-    // applyWatering's own hook at that point - nothing extra to do here
-    // for that.
+    // animation too: for every ACTIVE ring (structurally complete AND
+    // watered within RUNE_ACTIVE_MS - see isRuneActive), hand any wilted-or-
+    // ready plant within RAIN_RING_RADIUS tiles of its center to
+    // startRainWatering (below, alongside the sprinkler animation it shares
+    // its machinery with) rather than mutating it here directly. Purely
+    // detection, same division of labor as tickSprinklers - the actual
+    // state change and its save/render happen once each droplet lands, in
+    // finishAutoWatering. A ring growing one of its own neighbors'
+    // neighbors into a fresh blue cluster (and so completing a second ring)
+    // is picked up for free by applyWatering's own hook at that point -
+    // nothing extra to do here for that. A structurally-complete-but-
+    // dormant ring is simply skipped every tick, same as if it didn't
+    // exist - it costs nothing to sit there waiting to be watered.
     var RAIN_TICK_MS = 1000;
     function tickRainRings() {
       var keys = Object.keys(rainRings);
@@ -3717,6 +3794,7 @@
       keys.forEach(function (rk) {
         var ring = rainRings[rk];
         if (!ring) return; // a ring earlier in this same pass grew a spoke that broke this one
+        if (!isRuneActive(rk, now)) return; // complete, but dormant until watered
         for (var dq = -RAIN_RING_RADIUS; dq <= RAIN_RING_RADIUS; dq++) {
           for (var dr = -RAIN_RING_RADIUS; dr <= RAIN_RING_RADIUS; dr++) {
             var pkey = cellKey(ring.q + dq, ring.r + dr);
@@ -3750,6 +3828,15 @@
       ringKeys.forEach(function (rk) {
         var ring = rainRings[rk];
         if (!ring) return;
+        var wateredAt = state.runeWater[rk];
+        if (!wateredAt) return; // never activated - nothing to catch up
+        // Bound how far this ring can be caught up to when its own 24h
+        // window actually ran out, not to `now` - a rune that expired
+        // partway through the gap should only water up through its own
+        // expiry, exactly like the live tick (see isRuneActive) would have
+        // stopped right there instead of continuing for however much
+        // longer the player happened to stay away after that.
+        var effectiveNow = Math.min(now, wateredAt + RUNE_ACTIVE_MS);
         for (var dq = -RAIN_RING_RADIUS; dq <= RAIN_RING_RADIUS; dq++) {
           for (var dr = -RAIN_RING_RADIUS; dr <= RAIN_RING_RADIUS; dr++) {
             var p = state.plants[cellKey(ring.q + dq, ring.r + dr)];
@@ -3758,12 +3845,12 @@
             while (p.stage < MAX_STAGE && guard++ < 1000) {
               var wiltAt = p.lastWateredAt + WATER_DURATION_MS;
               var nextEvent = Math.min(wiltAt, p.readyAt);
-              if (nextEvent > now) break;
+              if (nextEvent > effectiveNow) break;
               applyWatering(p, nextEvent);
               changed = true;
             }
-            if (p.stage >= MAX_STAGE && (now - p.lastWateredAt) >= WATER_DURATION_MS) {
-              p.lastWateredAt = now;
+            if (p.stage >= MAX_STAGE && (effectiveNow - p.lastWateredAt) >= WATER_DURATION_MS) {
+              p.lastWateredAt = effectiveNow;
               changed = true;
             }
           }
@@ -3997,6 +4084,48 @@
         map.removeLayer(l.star1); map.removeLayer(l.star2); map.removeLayer(l.ticks); map.removeLayer(l.diamonds);
         delete rainRingLayers[key];
       });
+    }
+
+    // ---- Rune info panel ---------------------------------------------------
+    // A rune's whole interaction surface: tap it (see map.on('click')) to see
+    // what it is, whether it's currently raining, and how long it has left -
+    // a snapshot at the moment of tapping, not a live countdown, the same
+    // "good enough without extra machinery" tradeoff the rest of this
+    // deliberately-undocumented spell already makes. Reuses the single
+    // shared #modal-overlay every other info/confirm popup in the game uses
+    // (see openPurchaseConfirm, the What's New popup, etc.) rather than a
+    // bespoke panel - there's nothing here that needs the plant panel's
+    // bottom-sheet weight.
+    function rainRuneModalBody(key) {
+      var now = Date.now();
+      var wateredAt = state.runeWater[key];
+      var span = (RAIN_RING_RADIUS * 2 + 1);
+      var body = '<p>Eight flourishing flowers - one of every species, no repeats - ringed ' +
+        'around this empty tile. Watered, the rune keeps a ' + span + '&times;' + span +
+        ' block around it (including the ring itself) watered on its own for the next ' +
+        '24 hours.</p>';
+      if (isRuneActive(key, now)) {
+        var remain = wateredAt + RUNE_ACTIVE_MS - now;
+        body += '<p><b>Active</b> - raining for another <b>' + formatDuration(remain) + '</b>. ' +
+          'Water it again any time to top the 24 hours back up.</p>';
+      } else if (wateredAt) {
+        body += '<p><b>Dormant</b> - its last watering ran out, so it has stopped raining. ' +
+          'The ring itself is fine - water the rune to start it up again.</p>';
+      } else {
+        body += '<p><b>Dormant</b> - it has never been watered. Water the rune itself to set ' +
+          'it raining.</p>';
+      }
+      return body;
+    }
+    function openRainRunePanel(key) {
+      if (!rainRings[key]) return;
+      resetModalChrome();
+      document.getElementById('modal-title').textContent = 'Rain Rune';
+      document.getElementById('modal-body').innerHTML = rainRuneModalBody(key);
+      var ok = document.getElementById('modal-ok-btn');
+      ok.textContent = 'Got it \u{1F331}';
+      ok.onclick = closeModal;
+      document.getElementById('modal-overlay').classList.add('open');
     }
 
     // ---- Automatic watering animation (sprinklers AND rain rings) ----------
@@ -5678,6 +5807,10 @@
       var key = cellKey(h.q, h.r);
       if (state.plants[key]) { openPlantPanel(key); return; }
       if (state.wild[key]) { openPlantPanel(key, true); return; }
+      // A rune's info panel is browsable the same distance-free way a
+      // plant/wild panel is - only actually watering it (see toolTargetAt/
+      // waterRuneWithCan above) needs the walk-up range check.
+      if (rainRings[key]) { openRainRunePanel(key); return; }
       if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
       var tileInRange = inRange(h.q, h.r);
       // A weed just plucks on a plain tap in range - no panel, no tool, no
@@ -6042,6 +6175,32 @@
       }, WATER_ANIM_MS);
     }
 
+    // Same can-pour + droplet fx as waterWithCan above, but for a rune: the
+    // target is rainRings[key] (no stage, no growth) rather than a plant,
+    // and the pour finishing calls activateRainRune - start or top up the
+    // 24h window - instead of waterPlant. Shares wateringKeys with the
+    // plant version so a rune and a flower can never be double-triggered
+    // off the same key by coincidence (they never share a key anyway, but
+    // no reason to duplicate the guard).
+    function waterRuneWithCan(key) {
+      var ring = rainRings[key];
+      if (!ring || wateringKeys[key]) return;
+      if (reduceMotion) { activateRainRune(key); return; }
+
+      wateringKeys[key] = true;
+      var drops = '';
+      for (var i = 0; i < 5; i++) {
+        drops += '<div class="water-drop" style="left:' + (i * 4 - 1) + 'px;bottom:17px;' +
+          'animation-delay:' + (350 + i * 85) + 'ms"></div>';
+      }
+      addFx('<div class="water-can pour">' + canIconSVG(30) + '</div>' + drops,
+        ring.lat, ring.lng, 'water-fx', WATER_ANIM_MS + 140);
+      setTimeout(function () {
+        delete wateringKeys[key];
+        if (rainRings[key]) activateRainRune(key);
+      }, WATER_ANIM_MS);
+    }
+
     // ---- Press-and-hold confirmation --------------------------------------
     var RING_R = 22;
     var RING_C = 2 * Math.PI * RING_R;
@@ -6108,6 +6267,11 @@
     function toolTargetAt(key) {
       if (state.plants[key]) return { kind: 'plant', key: key, obj: state.plants[key] };
       if (state.wild[key]) return { kind: 'wild', key: key, obj: state.wild[key] };
+      // A rune isn't a flower - rainRings[key] is just { q, r, lat, lng } -
+      // but it carries the same q/r/lat/lng shape every other target does,
+      // so it slots into `obj` and the inRange check below without needing
+      // its own branch there.
+      if (rainRings[key]) return { kind: 'rune', key: key, obj: rainRings[key] };
       return null;
     }
 
@@ -6119,6 +6283,15 @@
       var o = target.obj;
       if (!state.userPos) return 'Waiting for GPS to lock on...';
       if (!inRange(o.q, o.r)) return 'Walk closer to reach this one \u{1F6B6}';
+
+      if (target.kind === 'rune') {
+        // The watering can is the only tool a rune ever responds to, and it
+        // is never blocked - a dormant rune activates, an already-active
+        // one just tops its 24h back up (see activateRainRune). Everything
+        // else acts on an actual flower, and a rune isn't one.
+        if (tool === 'water') return null;
+        return 'Only the watering can does anything to a rune \u{1F4A7}';
+      }
 
       if (tool === 'water') {
         if (target.kind === 'wild') return 'Wild flowers look after themselves - pick this one instead';
@@ -6254,11 +6427,11 @@
 
     function resolveToolTap(ps) {
       // A weed plucks on a plain tap no matter what tool happens to be
-      // equipped - toolTargetAt() only knows about plants/wild (see its own
-      // comment), so a weed tile always falls through to ps.target === null
-      // otherwise, and would land in the "empty ground" branch below with a
-      // "put the tool away to plant here" message that makes no sense for a
-      // tile that was never plantable to begin with.
+      // equipped - toolTargetAt() only knows about plants/wild/runes (see
+      // its own comment), so a weed tile always falls through to
+      // ps.target === null otherwise, and would land in the "empty ground"
+      // branch below with a "put the tool away to plant here" message that
+      // makes no sense for a tile that was never plantable to begin with.
       var weedKey = cellKey(ps.cell.q, ps.cell.r);
       if (state.weeds[weedKey]) {
         if (!state.userPos) { toast('Waiting for GPS to lock on...'); return; }
@@ -6276,7 +6449,11 @@
       }
       var reason = toolBlockedReason(activeTool, ps.target);
       if (reason) { toast(reason); return; }
-      if (activeTool === 'water') { waterWithCan(ps.target.key); return; }
+      if (activeTool === 'water') {
+        if (ps.target.kind === 'rune') { waterRuneWithCan(ps.target.key); return; }
+        waterWithCan(ps.target.key);
+        return;
+      }
       toast('Press and hold to confirm');
     }
 
@@ -6457,7 +6634,8 @@
           var target = toolTargetAt(cellKey(q, r));
           if (!target || toolBlockedReason(tool, target)) continue;
           if (tool === 'water') {
-            waterWithCan(target.key);
+            if (target.kind === 'rune') waterRuneWithCan(target.key);
+            else waterWithCan(target.key);
           } else {
             var mode = tool === 'sell' ? 'sell' : 'extract';
             if (target.kind === 'wild') pickWild(target.key, mode);

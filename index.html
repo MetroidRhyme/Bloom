@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.0</span>
+      <span id="game-version">v2.39.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.1', changes: [
+        'The grass now covers everywhere you have walked today and still ' +
+          'have planting range over, not just the small patch right where ' +
+          "you're standing."
+      ] },
       { version: 'v2.39.0', changes: [
         'The green highlight around you is grass now instead of a flat ' +
           'wash - roads and paths underneath still show through fine.',
@@ -6704,15 +6709,49 @@
       requestAnimationFrame(function () { _gridRedrawPending = false; renderGridMesh(); });
     }
 
+    // Canvas counterpart to ensureGrassPattern (the SVG <pattern> the live
+    // rangeArea polygon fills with - see onLocationUpdate) - same look, a
+    // faint green wash plus a few blade strokes, just built as a small
+    // offscreen tile handed to ctx.createPattern instead of an SVG element,
+    // since renderGridMesh below paints on a Leaflet canvas layer, not an
+    // SVG one. Built once and cached: the tile bitmap never changes, so
+    // every redraw (every pan/zoom) reuses the same CanvasPattern object
+    // rather than re-drawing it.
+    var _grassCanvasPattern = null;
+    function grassCanvasPattern(ctx) {
+      if (_grassCanvasPattern) return _grassCanvasPattern;
+      var tile = document.createElement('canvas');
+      tile.width = 14; tile.height = 14;
+      var tctx = tile.getContext('2d');
+      tctx.fillStyle = 'rgba(76,175,109,0.09)';
+      tctx.fillRect(0, 0, 14, 14);
+      tctx.lineCap = 'round';
+      tctx.strokeStyle = 'rgba(63,148,87,0.55)';
+      tctx.lineWidth = 1.1;
+      tctx.beginPath();
+      tctx.moveTo(2, 12); tctx.lineTo(2.5, 6);
+      tctx.moveTo(10, 12.5); tctx.lineTo(9.6, 6.8);
+      tctx.stroke();
+      tctx.strokeStyle = 'rgba(89,196,124,0.5)';
+      tctx.beginPath();
+      tctx.moveTo(6, 13); tctx.lineTo(6.8, 7.5);
+      tctx.stroke();
+      _grassCanvasPattern = ctx.createPattern(tile, 'repeat');
+      return _grassCanvasPattern;
+    }
+
     // Soft outline mesh over the current viewport so planting spots read at a
     // glance, plus (drawn first, so the mesh lines above still show through
-    // it) a soft green fill over every tile the player currently has access
-    // to today (see markAccessibleToday/inRange/todayAccessible) - not just
-    // the live PLANT_RANGE square they're standing in right now (that one
-    // still gets its own separate, more solid rangeArea polygon - see
+    // it) a grass fill over every tile the player currently has access to
+    // today (see markAccessibleToday/inRange/todayAccessible) - not just the
+    // live PLANT_RANGE square they're standing in right now (that one still
+    // gets its own separate, more solid grass-filled rangeArea polygon - see
     // onLocationUpdate), but everywhere along today's walk that still counts
-    // as in range. Both share the same viewport-bounded tile loop below,
-    // since recomputing that twice would be pure waste.
+    // as in range (GitHub issue #20: "any area the player has walked in and
+    // has control of" - todayAccessible IS that control set; the permanent
+    // state.visited, used only to bias wild-flower spawns, never grants
+    // control and stays out of this). Both share the same viewport-bounded
+    // tile loop below, since recomputing that twice would be pure waste.
     function renderGridMesh() {
       if (!gridRenderer._ctx || !gridRenderer._bounds) return;
       var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
@@ -6761,7 +6800,7 @@
       // midnight rollover that simply hasn't been touched yet since must
       // never paint as if it were still today's.
       if (state.todayAccessibleDay === localDayKey()) {
-        ctx.fillStyle = 'rgba(76,175,109,0.10)';
+        ctx.fillStyle = grassCanvasPattern(ctx);
         for (var aq = minQ; aq <= maxQ; aq++) {
           var ai = aq - minQ;
           if (!colOn(ai)) continue;

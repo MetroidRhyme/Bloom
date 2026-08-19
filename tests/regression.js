@@ -456,6 +456,16 @@ const h = require('./harness');
   r.check('the range shape fills with the grass pattern, not a flat color', out.fillsWithPattern === true, out);
   r.check('the grass pattern is actually in the SVG', out.patternInDom === true, out);
 
+  // The grid mesh's todayAccessible fill (GitHub issue #20 follow-up - grass
+  // over anywhere the player has walked and still has control of, not just
+  // the live range ring) uses the canvas counterpart of the same pattern.
+  out = await page.evaluate(() => {
+    var ok = false, threw = false;
+    try { ok = !!grassCanvasPattern(gridRenderer._ctx); } catch (e) { threw = true; }
+    return { ok: ok, threw: threw };
+  });
+  r.check('grassCanvasPattern builds a reusable CanvasPattern for the grid mesh', out.ok === true && !out.threw, out);
+
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));
 

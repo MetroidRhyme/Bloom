@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.5</span>
+      <span id="game-version">v2.39.6</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.6', changes: [
+        'Fixed the grass clumps in your walking range reshuffling to a new ' +
+          "layout every time you zoomed - they now stay put in the same " +
+          'spots.'
+      ] },
       { version: 'v2.39.5', changes: [
         "Fixed a bug where grass could keep showing over ground you'd " +
           "walked the day before, even though it no longer counted as in " +
@@ -8940,6 +8945,17 @@
       var tileW = Math.max(4, cellPixelWidth());
       pattern.setAttribute('width', tileW);
       pattern.setAttribute('height', tileW);
+      // Anchor the pattern's phase to the map's world pixel grid instead of
+      // leaving it at the SVG renderer's local (0,0) - Leaflet recenters
+      // that local origin (map.getPixelOrigin()) on every zoom/viewreset,
+      // so an unanchored pattern's tufts appeared to reshuffle to a new
+      // position each time you zoomed even though grassPatternMarkup's
+      // content never actually changed. Offsetting x/y by the negated
+      // pixel origin (mod tileW) keeps a given patch of ground mapped to
+      // the same tuft phase regardless of where the local origin resets to.
+      var origin = map.getPixelOrigin();
+      pattern.setAttribute('x', ((-origin.x % tileW) + tileW) % tileW);
+      pattern.setAttribute('y', ((-origin.y % tileW) + tileW) % tileW);
       pattern.innerHTML = grassPatternMarkup(tileW);
     }
 

@@ -447,7 +447,7 @@ const h = require('./harness');
   r.check('tickSprinklers flags the broken one', out.brokenFlagged === true, out);
   r.check('tickSprinklers leaves the working one unflagged', out.workingFlagged === true, out);
 
-  // ---- range shape grass texture (issue #20) -----------------------------
+  // ---- range shape grass texture (issue #20, grass-clutter fix) ----------
   r.section('range shape grass texture');
   out = await page.evaluate(() => ({
     fillsWithPattern: rangeArea.options.fillColor === 'url(#bloom-grass-pattern)',
@@ -456,15 +456,60 @@ const h = require('./harness');
   r.check('the range shape fills with the grass pattern, not a flat color', out.fillsWithPattern === true, out);
   r.check('the grass pattern is actually in the SVG', out.patternInDom === true, out);
 
+  // The pattern's tile is sized to the real on-screen width of one grid
+  // square (cellPixelWidth), not a fixed pixel constant - that's the actual
+  // fix: a fixed-pixel tile let more repeats fit into the same real square
+  // the further in you zoomed, so the tuft count crept up with zoom. Also
+  // confirm it still draws exactly four tufts (12 blade paths, 3 per tuft).
+  out = await page.evaluate(() => {
+    var pattern = document.querySelector('#bloom-grass-pattern');
+    return {
+      widthMatchesCell: Math.abs(parseFloat(pattern.getAttribute('width')) - cellPixelWidth()) < 0.5,
+      fourTuftPaths: pattern.querySelectorAll('path').length === 12
+    };
+  });
+  r.check('the pattern tile is sized to one real grid square', out.widthMatchesCell === true, out);
+  r.check('the pattern draws exactly four tufts (12 blade paths)', out.fourTuftPaths === true, out);
+
+  // Zoom to a different level and confirm the pattern resizes to track the
+  // new on-screen square width, while the tuft count itself never moves -
+  // this is the whole point: size can change with zoom, count can't.
+  out = await page.evaluate(() => new Promise((resolve) => {
+    var before = parseFloat(document.querySelector('#bloom-grass-pattern').getAttribute('width'));
+    var targetZoom = map.getZoom() === 19 ? 16 : 19;
+    function done() {
+      setTimeout(function () {
+        var pattern = document.querySelector('#bloom-grass-pattern');
+        resolve({
+          before: before,
+          after: parseFloat(pattern.getAttribute('width')),
+          stillFourTufts: pattern.querySelectorAll('path').length === 12
+        });
+      }, 200);
+    }
+    if (map.getZoom() === targetZoom) { done(); return; }
+    map.once('zoomend', done);
+    map.setZoom(targetZoom, { animate: false });
+  }));
+  r.check('the pattern tile resizes on zoom instead of the tuft count scaling', out.before !== out.after, out);
+  r.check('tuft count is still exactly four after the zoom change', out.stillFourTufts === true, out);
+
   // The grid mesh's todayAccessible fill (GitHub issue #20 follow-up - grass
   // over anywhere the player has walked and still has control of, not just
-  // the live range ring) uses the canvas counterpart of the same pattern.
+  // the live range ring) places a deterministic 4-5 tufts per real tile via
+  // grassTuftPick, seeded off q,r - not a repeating fixed-pixel pattern.
   out = await page.evaluate(() => {
-    var ok = false, threw = false;
-    try { ok = !!grassCanvasPattern(gridRenderer._ctx); } catch (e) { threw = true; }
-    return { ok: ok, threw: threw };
+    var a = grassTuftPick(5, 9), b = grassTuftPick(5, 9), c = grassTuftPick(6, 9);
+    var countOf = function (pick) { return pick.skip === -1 ? 5 : 4; };
+    return {
+      deterministic: JSON.stringify(a) === JSON.stringify(b),
+      validCount: countOf(a) === 4 || countOf(a) === 5,
+      differsByTile: JSON.stringify(a) !== JSON.stringify(c)
+    };
   });
-  r.check('grassCanvasPattern builds a reusable CanvasPattern for the grid mesh', out.ok === true && !out.threw, out);
+  r.check('grassTuftPick is deterministic per tile (stable across redraws)', out.deterministic === true, out);
+  r.check('grassTuftPick always picks four or five tufts', out.validCount === true, out);
+  r.check('grassTuftPick varies from one tile to the next', out.differsByTile === true, out);
 
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));

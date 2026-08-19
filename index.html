@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.2</span>
+      <span id="game-version">v2.39.3</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.3', changes: [
+        "Grass tufts no longer pile up the closer you zoom in (or thin out " +
+          "the further you zoom out) - it's a steady four or five per " +
+          'square now. Drawn a bit bigger and a little more subdued too, ' +
+          'so it reads as ground cover instead of clutter.'
+      ] },
       { version: 'v2.39.2', changes: [
         'New grass look: small tufts of blades instead of a faint diagonal ' +
           'wash, both right where you are standing and across everywhere ' +
@@ -6714,50 +6720,107 @@
       requestAnimationFrame(function () { _gridRedrawPending = false; renderGridMesh(); });
     }
 
-    // Canvas counterpart to ensureGrassPattern (the SVG <pattern> the live
-    // rangeArea polygon fills with - see onLocationUpdate) - built as a
-    // small offscreen tile handed to ctx.createPattern instead of an SVG
-    // element, since renderGridMesh below paints on a Leaflet canvas layer,
-    // not an SVG one. Same "Meadow Tufts" layout as the SVG version -
-    // literally the same four tuft coordinates/colors, just replayed with
-    // canvas calls instead of baked into static <path> data - so the live
-    // ring and the wider walked-area fill read as the same material rather
-    // than two different textures that happen to be both green. Built once
-    // and cached: the tile bitmap never changes, so every redraw (every
-    // pan/zoom) reuses the same CanvasPattern object rather than re-drawing it.
-    var _grassCanvasPattern = null;
-    function grassCanvasPattern(ctx) {
-      if (_grassCanvasPattern) return _grassCanvasPattern;
-      var tile = document.createElement('canvas');
-      tile.width = 24; tile.height = 24;
-      var tctx = tile.getContext('2d');
-      tctx.fillStyle = 'rgba(76,175,109,0.06)';
-      tctx.fillRect(0, 0, 24, 24);
-      tctx.lineCap = 'round';
-      // Four three-blade fans (a darker pair framing a brighter center
-      // blade - the same shape convention and the same greens,
-      // #345c30/#5ea648, CLUMP_SHAPE/clumpMarkup use for a flower's own
-      // ambient grass) at fixed spots/scales across the tile.
-      var tufts = [
-        { bx: 5, by: 7, s: 0.85 }, { bx: 16, by: 5, s: 1.05 },
-        { bx: 8, by: 17, s: 0.95 }, { bx: 19, by: 16, s: 1.1 }
-      ];
-      var blades = [
-        [-2.6, -0.8, -4.6, -1.6, '#345c30'], [0.2, -1.9, 0.4, -3.6, '#5ea648'],
-        [2.6, -0.8, 4.6, -1.6, '#345c30']
-      ];
-      tufts.forEach(function (t) {
-        blades.forEach(function (b) {
-          tctx.strokeStyle = b[4];
-          tctx.lineWidth = 1.15 * t.s;
-          tctx.beginPath();
-          tctx.moveTo(t.bx, t.by);
-          tctx.quadraticCurveTo(t.bx + b[0] * t.s * 0.6, t.by + b[1] * t.s, t.bx + b[2] * t.s, t.by + b[3] * t.s);
-          tctx.stroke();
-        });
-      });
-      _grassCanvasPattern = ctx.createPattern(tile, 'repeat');
-      return _grassCanvasPattern;
+    // ===================================================================
+    //  MEADOW TUFTS - shared shape data for both grass renderers: this
+    //  canvas one (renderGridMesh, below, paints the wider today-accessible
+    //  walked area) and the SVG one (ensureGrassPattern, in the GPS section
+    //  further down, fills the live rangeArea polygon). Both used to tile
+    //  a fixed-24-device-pixel repeating pattern, which put the tuft count
+    //  at the mercy of zoom - the same real square showed more repeats the
+    //  further in you zoomed, fewer the further out. Both now place a
+    //  fixed number of tufts (four, or five here) at fractional positions
+    //  inside each real grid square instead, sized off that square's own
+    //  actual on-screen pixel width (cellPixelWidth) - so the count never
+    //  moves, only their size does, same as a plant icon's own zoom
+    //  rescaling.
+    // ===================================================================
+    var GRASS_TUFT_SCALE = 2;       // size of one tuft glyph relative to its square
+    var GRASS_TUFT_OPACITY = 0.75;  // 25% cut from the old fully-opaque blades
+    var GRASS_WASH_OPACITY = 0.045; // same 25% cut from the old 0.06 wash
+    // Design-unit-to-tile conversion: GRASS_BLADE_OFFSETS below is authored
+    // in a 24-unit box, but treating that box as the *whole* real tile (a
+    // straight tileW/24) reproduces the old asset's own proportions, which
+    // were tuned to read well as a small *repeating* pattern rep, not as
+    // the sole content of one full square - at GRASS_TUFT_SCALE 1 it already
+    // read oversized, and doubled it overlapped into a solid mat. Dividing
+    // by a larger box instead keeps the four tufts reading as separate fans
+    // with grass-wash visible between them, matching the size the demo
+    // build (grass-clutter fix mockup) was approved at, before
+    // GRASS_TUFT_SCALE's own 2x is applied on top.
+    var GRASS_UNIT_PER_TILE = 48;
+    var GRASS_BLADE_DARK = '#345c30';
+    var GRASS_BLADE_BRIGHT = '#5ea648';
+    var GRASS_WASH = '#4caf6d';
+    // Each blade: [controlDx, controlDy, tipDx, tipDy, color] - offsets in
+    // the 24-unit design space the shape was originally authored in. A
+    // darker pair frames a brighter center blade, same convention
+    // CLUMP_SHAPE/clumpMarkup use for a flower's own ambient grass.
+    var GRASS_BLADE_OFFSETS = [
+      [-2.6, -0.8, -4.6, -1.6, GRASS_BLADE_DARK],
+      [0.2, -1.9, 0.4, -3.6, GRASS_BLADE_BRIGHT],
+      [2.6, -0.8, 4.6, -1.6, GRASS_BLADE_DARK]
+    ];
+    // Five candidate spots as fractions of one square. The canvas renderer
+    // below draws four or five of them per tile (seeded per q,r so a tile
+    // never reshuffles between redraws); the SVG rangeArea pattern always
+    // draws the first four - a single repeating <pattern> can't vary its
+    // content per real tile the way per-cell canvas draws can.
+    var GRASS_TUFT_SPOTS = [
+      { x: 0.22, y: 0.30, s: 0.85 }, { x: 0.74, y: 0.22, s: 1.05 },
+      { x: 0.34, y: 0.76, s: 0.95 }, { x: 0.82, y: 0.68, s: 1.1 },
+      { x: 0.55, y: 0.50, s: 1.0 }
+    ];
+
+    function hexToRgba(hex, alpha) {
+      var r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    // Which of the five spots a given real tile draws (four, skipping one,
+    // or all five) and how far each one jitters - seeded off the tile's own
+    // q,r via the same dailyStockSeed/mulberry32 pair the wild-flower/weed
+    // randomization uses (see cellKey(...)+':weed' below), so a tile's
+    // grass layout is stable across redraws and reloads, never reshuffling.
+    function grassTuftPick(q, r) {
+      var rng = mulberry32(dailyStockSeed(cellKey(q, r) + ':grass'));
+      var count = rng() < 0.5 ? 4 : 5;
+      var skip = count === 4 ? Math.floor(rng() * GRASS_TUFT_SPOTS.length) : -1;
+      var jitter = GRASS_TUFT_SPOTS.map(function () { return [(rng() - 0.5) * 0.06, (rng() - 0.5) * 0.06]; });
+      return { skip: skip, jitter: jitter };
+    }
+
+    // Draws every tuft across every cell in one pass, batched by (spot,
+    // blade) rather than issued per tuft - every cell shares the same
+    // on-screen tile size within a single redraw (the whole map sits at one
+    // zoom level at once), so a spot's scale and a blade's line width are
+    // identical for every cell that draws it. That turns what would be a
+    // stroke() per tuft (thousands, at a dense walked area) into a fixed 15
+    // (5 spots x 3 blades) regardless of how many tiles are on screen.
+    function drawGrassTufts(ctx, cells, tileW) {
+      if (!cells.length) return;
+      ctx.lineCap = 'round';
+      for (var si = 0; si < GRASS_TUFT_SPOTS.length; si++) {
+        var spot = GRASS_TUFT_SPOTS[si];
+        var scale = (tileW / GRASS_UNIT_PER_TILE) * spot.s * GRASS_TUFT_SCALE;
+        for (var bi = 0; bi < GRASS_BLADE_OFFSETS.length; bi++) {
+          var bd = GRASS_BLADE_OFFSETS[bi];
+          ctx.strokeStyle = hexToRgba(bd[4], GRASS_TUFT_OPACITY);
+          ctx.lineWidth = 1.15 * scale;
+          ctx.beginPath();
+          var any = false;
+          for (var ci = 0; ci < cells.length; ci++) {
+            var cell = cells[ci];
+            if (si === cell.pick.skip) continue;
+            var j = cell.pick.jitter[si];
+            var ax = cell.x + (spot.x + j[0]) * tileW;
+            var ay = cell.y + (spot.y + j[1]) * tileW;
+            ctx.moveTo(ax, ay);
+            ctx.quadraticCurveTo(ax + bd[0] * scale * 0.6, ay + bd[1] * scale, ax + bd[2] * scale, ay + bd[3] * scale);
+            any = true;
+          }
+          if (any) ctx.stroke();
+        }
+      }
     }
 
     // Soft outline mesh over the current viewport so planting spots read at a
@@ -6820,7 +6883,8 @@
       // midnight rollover that simply hasn't been touched yet since must
       // never paint as if it were still today's.
       if (state.todayAccessibleDay === localDayKey()) {
-        ctx.fillStyle = grassCanvasPattern(ctx);
+        ctx.fillStyle = hexToRgba(GRASS_WASH, GRASS_WASH_OPACITY);
+        var grassCells = [];
         for (var aq = minQ; aq <= maxQ; aq++) {
           var ai = aq - minQ;
           if (!colOn(ai)) continue;
@@ -6832,8 +6896,10 @@
             // on this grid - fillRect instead of building and filling a
             // four-point path per tile.
             ctx.fillRect(xs[ai], ys[aj], xs[ai + 1] - xs[ai], ys[aj + 1] - ys[aj]);
+            grassCells.push({ x: xs[ai], y: ys[aj], pick: grassTuftPick(aq, ar) });
           }
         }
+        drawGrassTufts(ctx, grassCells, cellPixelWidth());
       }
 
       ctx.strokeStyle = 'rgba(70,120,80,0.14)';
@@ -8803,45 +8869,55 @@
     }
 
     // ---- Grass pattern for the range shape (GitHub issue #20) -------------
-    // Injects a <pattern> into the map's own SVG renderer <defs> the one
-    // time it's needed (see the !rangeArea branch above), so the range
-    // polygon can be painted with fillColor: 'url(#bloom-grass-pattern)'
-    // instead of a flat color. "Meadow Tufts": four small three-blade fans
-    // (a darker pair framing a brighter center blade, same shape convention
-    // GROUND_MOUND/clumpMarkup use for a flower's own ambient grass, and the
-    // exact same greens - #345c30/#5ea648 - so this reads as the same
-    // material) over a faint green wash, deliberately low-opacity so the
-    // basemap's roads/labels stay readable through it. Picked from a set of
-    // six candidates previewed for and chosen by the repo owner; the
-    // canvas twin of this exact tuft layout is grassCanvasPattern, below
-    // the WILD FLOWERS section's own grid-mesh renderer - see its comment
-    // for why the two share coordinates instead of each inventing their own.
-    // Guarded on the pattern's own id so calling this more than once (it
-    // won't be, today - rangeArea is only ever built once per session) is
-    // still a harmless no-op rather than a duplicate node.
+    // Injects (and, on every zoom change, resizes) a <pattern> into the
+    // map's own SVG renderer <defs>, so the range polygon can be painted
+    // with fillColor: 'url(#bloom-grass-pattern)' instead of a flat color.
+    // "Meadow Tufts": four small three-blade fans (a darker pair framing a
+    // brighter center blade) over a faint green wash - see the MEADOW TUFTS
+    // section above (shared with the canvas grid-mesh renderer) for the
+    // shape data and why the count is fixed at four instead of scaling
+    // with a repeating pattern's pixel period. The pattern's width/height
+    // is set to the real on-screen pixel width of one grid square
+    // (cellPixelWidth) rather than a fixed constant, and content is
+    // regenerated at that size, so a square always shows exactly four
+    // tufts no matter how far in or out the map is zoomed - only their
+    // size moves with zoom, same as a plant icon's own rescaling.
+    function grassPatternMarkup(tileW) {
+      var out = '<rect width="' + tileW.toFixed(2) + '" height="' + tileW.toFixed(2) + '" fill="' +
+        GRASS_WASH + '" fill-opacity="' + GRASS_WASH_OPACITY + '"/>';
+      for (var si = 0; si < 4; si++) {
+        var spot = GRASS_TUFT_SPOTS[si];
+        var cx = spot.x * tileW, cy = spot.y * tileW;
+        var scale = (tileW / GRASS_UNIT_PER_TILE) * spot.s * GRASS_TUFT_SCALE;
+        for (var bi = 0; bi < GRASS_BLADE_OFFSETS.length; bi++) {
+          var bd = GRASS_BLADE_OFFSETS[bi];
+          var qx = cx + bd[0] * scale * 0.6, qy = cy + bd[1] * scale;
+          var tx = cx + bd[2] * scale, ty = cy + bd[3] * scale;
+          out += '<path d="M' + cx.toFixed(2) + ' ' + cy.toFixed(2) + ' Q' + qx.toFixed(2) + ' ' + qy.toFixed(2) +
+            ' ' + tx.toFixed(2) + ' ' + ty.toFixed(2) + '" stroke="' + bd[4] + '" stroke-opacity="' +
+            GRASS_TUFT_OPACITY + '" stroke-width="' + (1.15 * scale).toFixed(2) +
+            '" fill="none" stroke-linecap="round"/>';
+        }
+      }
+      return out;
+    }
     function ensureGrassPattern(svgEl) {
-      if (svgEl.querySelector('#bloom-grass-pattern')) return;
       var defs = svgEl.querySelector('defs');
       if (!defs) {
         defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
         svgEl.insertBefore(defs, svgEl.firstChild);
       }
-      defs.insertAdjacentHTML('beforeend',
-        '<pattern id="bloom-grass-pattern" width="24" height="24" patternUnits="userSpaceOnUse">' +
-        '<rect width="24" height="24" fill="#4caf6d" fill-opacity="0.06"/>' +
-        '<path d="M5 7 Q3.67 6.32 1.09 5.64" stroke="#345c30" stroke-width="0.98" fill="none" stroke-linecap="round"/>' +
-        '<path d="M5 7 Q5.1 5.39 5.34 3.94" stroke="#5ea648" stroke-width="0.98" fill="none" stroke-linecap="round"/>' +
-        '<path d="M5 7 Q6.33 6.32 8.91 5.64" stroke="#345c30" stroke-width="0.98" fill="none" stroke-linecap="round"/>' +
-        '<path d="M16 5 Q14.36 4.16 11.17 3.32" stroke="#345c30" stroke-width="1.21" fill="none" stroke-linecap="round"/>' +
-        '<path d="M16 5 Q16.13 3 16.42 1.22" stroke="#5ea648" stroke-width="1.21" fill="none" stroke-linecap="round"/>' +
-        '<path d="M16 5 Q17.64 4.16 20.83 3.32" stroke="#345c30" stroke-width="1.21" fill="none" stroke-linecap="round"/>' +
-        '<path d="M8 17 Q6.52 16.24 3.63 15.48" stroke="#345c30" stroke-width="1.09" fill="none" stroke-linecap="round"/>' +
-        '<path d="M8 17 Q8.11 15.2 8.38 13.58" stroke="#5ea648" stroke-width="1.09" fill="none" stroke-linecap="round"/>' +
-        '<path d="M8 17 Q9.48 16.24 12.37 15.48" stroke="#345c30" stroke-width="1.09" fill="none" stroke-linecap="round"/>' +
-        '<path d="M19 16 Q17.28 15.12 13.94 14.24" stroke="#345c30" stroke-width="1.27" fill="none" stroke-linecap="round"/>' +
-        '<path d="M19 16 Q19.13 13.91 19.44 12.04" stroke="#5ea648" stroke-width="1.27" fill="none" stroke-linecap="round"/>' +
-        '<path d="M19 16 Q20.72 15.12 24.06 14.24" stroke="#345c30" stroke-width="1.27" fill="none" stroke-linecap="round"/>' +
-        '</pattern>');
+      var pattern = svgEl.querySelector('#bloom-grass-pattern');
+      if (!pattern) {
+        pattern = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
+        pattern.setAttribute('id', 'bloom-grass-pattern');
+        pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+        defs.appendChild(pattern);
+      }
+      var tileW = Math.max(4, cellPixelWidth());
+      pattern.setAttribute('width', tileW);
+      pattern.setAttribute('height', tileW);
+      pattern.innerHTML = grassPatternMarkup(tileW);
     }
 
     // Eases the range shape from one tile center to the next over ~450ms
@@ -8926,7 +9002,13 @@
         // background wash and blade strokes are kept deliberately faint
         // (see ensureGrassPattern) so roads/labels underneath stay legible
         // through it, same as the flat fill's own low opacity did before.
+        // Re-run on every zoom change (not just here) so the pattern's tile
+        // size keeps tracking the real on-screen square width - otherwise
+        // the tuft count would drift right back to scaling with zoom.
         ensureGrassPattern(rangeArea._renderer._container);
+        map.on('zoomend viewreset', function () {
+          if (rangeArea) ensureGrassPattern(rangeArea._renderer._container);
+        });
         rangeArea.setStyle({ fillColor: 'url(#bloom-grass-pattern)', fillOpacity: 1 });
         var initialTarget = pickInitialCameraTarget(h.q, h.r, c);
         map.setView([initialTarget.lat, initialTarget.lng], 17);

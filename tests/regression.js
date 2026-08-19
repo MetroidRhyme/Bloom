@@ -321,6 +321,141 @@ const h = require('./harness');
   r.check('the live version has a changelog entry', out.opened === true && out.bullets > 0, out);
   r.check('the popup names the live version', out.title.indexOf(out.version) !== -1, out);
 
+  // ---- sprinklers near magic (issue #19) ---------------------------------
+  r.section('sprinklers near magic');
+  out = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var base = { q: here.q + 40, r: here.r + 40 }; // well clear of the fixture's own plants
+    var results = {};
+
+    // Rain Ring: a single-tile rune ground at (base.q, base.r).
+    rainRings = {};
+    rainRings[cellKey(base.q, base.r)] = { q: base.q, r: base.r };
+    results.rainInside = sprinklerNearMagic(base.q, base.r);
+    results.rainAdjacent = sprinklerNearMagic(base.q + 1, base.r);
+    results.rainFar = sprinklerNearMagic(base.q + 5, base.r);
+    rainRings = {};
+
+    // Grow Rune: a 2x2 footprint anchored at (base.q, base.r).
+    state.growRunes = {};
+    state.growRunes[cellKey(base.q, base.r)] = { q: base.q, r: base.r, activatedAt: Date.now() };
+    results.growInside = sprinklerNearMagic(base.q + 1, base.r + 1); // opposite corner of the block
+    results.growAdjacent = sprinklerNearMagic(base.q - 1, base.r);
+    results.growFar = sprinklerNearMagic(base.q + 5, base.r);
+    state.growRunes = {};
+
+    // Loki's Control / Scry: a 4x4 zone rectangle.
+    lokiZones = { z: { qMin: base.q, rMin: base.r, qMax: base.q + 3, rMax: base.r + 3 } };
+    results.lokiInside = sprinklerNearMagic(base.q + 1, base.r + 1);
+    results.lokiAdjacent = sprinklerNearMagic(base.q - 1, base.r);
+    results.lokiFar = sprinklerNearMagic(base.q + 10, base.r);
+    lokiZones = {};
+
+    scryZones = { z: { qMin: base.q, rMin: base.r, qMax: base.q + 3, rMax: base.r + 3 } };
+    results.scryInside = sprinklerNearMagic(base.q + 1, base.r + 1);
+    results.scryAdjacent = sprinklerNearMagic(base.q + 4, base.r); // one tile past qMax
+    results.scryFar = sprinklerNearMagic(base.q + 10, base.r);
+    scryZones = {};
+
+    return results;
+  });
+  r.check("inside a Rain Ring's rune ground counts as near magic", out.rainInside === true, out);
+  r.check('adjacent to a Rain Ring counts as near magic', out.rainAdjacent === true, out);
+  r.check('far from a Rain Ring does not', out.rainFar === false, out);
+  r.check("inside a Grow Rune's 2x2 patch counts as near magic", out.growInside === true, out);
+  r.check('adjacent to a Grow Rune counts as near magic', out.growAdjacent === true, out);
+  r.check('far from a Grow Rune does not', out.growFar === false, out);
+  r.check('inside a Loki zone counts as near magic', out.lokiInside === true, out);
+  r.check('adjacent to a Loki zone counts as near magic', out.lokiAdjacent === true, out);
+  r.check('far from a Loki zone does not', out.lokiFar === false, out);
+  r.check('inside a Scry zone counts as near magic', out.scryInside === true, out);
+  r.check('adjacent to a Scry zone counts as near magic', out.scryAdjacent === true, out);
+  r.check('far from a Scry zone does not', out.scryFar === false, out);
+
+  out = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var base = { q: here.q + 60, r: here.r + 60 };
+    state.plants = {}; state.wild = {}; state.sprinklers = {};
+    rainRings = {}; state.growRunes = {}; lokiZones = {}; scryZones = {};
+    state.sprinklerInventory = 5;
+    equippedSprinkler = true;
+
+    // A Rain Ring's rune sits at base - placing a sprinkler right next to
+    // it should be refused, with a toast naming why.
+    rainRings[cellKey(base.q, base.r)] = { q: base.q, r: base.r };
+    placeSprinklerAt(base.q + 1, base.r);
+    var blocked = !state.sprinklers[cellKey(base.q + 1, base.r)] && state.sprinklerInventory === 5;
+    var toasts = document.querySelectorAll('#toast-container .toast');
+    var toastText = toasts.length ? toasts[toasts.length - 1].textContent : '';
+
+    // Placing one well away from the rune still works normally.
+    placeSprinklerAt(base.q + 10, base.r);
+    var placedFar = !!state.sprinklers[cellKey(base.q + 10, base.r)] && state.sprinklerInventory === 4;
+
+    return { blocked: blocked, toastMentionsMagic: /magic/i.test(toastText), placedFar: placedFar };
+  });
+  r.check('placing a sprinkler adjacent to a Rain Ring is refused', out.blocked === true, out);
+  r.check('the refusal toast mentions magic', out.toastMentionsMagic === true, out);
+  r.check('placing a sprinkler away from any spell still works', out.placedFar === true, out);
+
+  out = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var base = { q: here.q + 80, r: here.r + 80 };
+    state.plants = {}; state.wild = {}; state.sprinklers = {};
+    rainRings = {}; state.growRunes = {}; lokiZones = {}; scryZones = {};
+    autoWaterAnimKeys = {}; sprinklerBrokenState = {};
+
+    function thirstyPlantAt(q, r) {
+      var c = cellCenter(q, r);
+      return { q: q, r: r, lat: c.lat, lng: c.lng, species: SPECIES[0].key,
+        color: baseColorOf(SPECIES[0].key), stage: 1, plantedAt: Date.now(),
+        lastWateredAt: Date.now() - WATER_DURATION_MS - 1, readyAt: Date.now() - 1 };
+    }
+    function sprinklerAt(q, r) {
+      var c = cellCenter(q, r);
+      return { q: q, r: r, lat: c.lat, lng: c.lng, placedAt: Date.now() };
+    }
+
+    // A working sprinkler, far from any magic, beside a thirsty plant.
+    state.sprinklers[cellKey(base.q, base.r)] = sprinklerAt(base.q, base.r);
+    var plantKeyOk = cellKey(base.q + 1, base.r);
+    state.plants[plantKeyOk] = thirstyPlantAt(base.q + 1, base.r);
+
+    // A sprinkler placed next to a Rain Ring that formed after the fact -
+    // broken - beside its own thirsty plant.
+    var ringAt = { q: base.q + 20, r: base.r };
+    rainRings[cellKey(ringAt.q, ringAt.r)] = { q: ringAt.q, r: ringAt.r };
+    var brokenPos = { q: ringAt.q + 1, r: ringAt.r };
+    state.sprinklers[cellKey(brokenPos.q, brokenPos.r)] = sprinklerAt(brokenPos.q, brokenPos.r);
+    var plantKeyBroken = cellKey(brokenPos.q + 1, brokenPos.r);
+    state.plants[plantKeyBroken] = thirstyPlantAt(brokenPos.q + 1, brokenPos.r);
+
+    tickSprinklers();
+
+    return {
+      workingWatered: !!autoWaterAnimKeys[plantKeyOk],
+      brokenNotWatered: !autoWaterAnimKeys[plantKeyBroken],
+      brokenFlagged: sprinklerBrokenState[cellKey(brokenPos.q, brokenPos.r)] === true,
+      // Only a state FLIP ever gets written (see tickSprinklers) - a
+      // sprinkler that was never near magic just never earns an entry, so
+      // "unflagged" means falsy, not strictly false.
+      workingFlagged: !sprinklerBrokenState[cellKey(base.q, base.r)]
+    };
+  });
+  r.check('a sprinkler far from magic still waters a thirsty neighbor', out.workingWatered === true, out);
+  r.check('a sprinkler next to a Rain Ring does not water its neighbor', out.brokenNotWatered === true, out);
+  r.check('tickSprinklers flags the broken one', out.brokenFlagged === true, out);
+  r.check('tickSprinklers leaves the working one unflagged', out.workingFlagged === true, out);
+
+  // ---- range shape grass texture (issue #20) -----------------------------
+  r.section('range shape grass texture');
+  out = await page.evaluate(() => ({
+    fillsWithPattern: rangeArea.options.fillColor === 'url(#bloom-grass-pattern)',
+    patternInDom: !!document.querySelector('#bloom-grass-pattern')
+  }));
+  r.check('the range shape fills with the grass pattern, not a flat color', out.fillsWithPattern === true, out);
+  r.check('the grass pattern is actually in the SVG', out.patternInDom === true, out);
+
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));
 

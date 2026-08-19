@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.38.0</span>
+      <span id="game-version">v2.39.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,15 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.0', changes: [
+        'The green highlight around you is grass now instead of a flat ' +
+          'wash - roads and paths underneath still show through fine.',
+        "Sprinklers don't work right on top of or next to a Rain Ring, " +
+          "Grow Rune, Loki's Control, or Scry - too much ambient magic for " +
+          "the machinery. A broken one shows a cracked head instead of a " +
+          "spray, and trying to place a new one that close gets turned " +
+          "away with a heads-up."
+      ] },
       { version: 'v2.38.0', changes: [
         'Big smoothness pass. A garden with a lot of flowers packed onto ' +
           'one screen used to drag the whole map down to a slideshow, and ' +
@@ -3891,11 +3900,20 @@
     // up to MAX_STAGE (water permitting) rather than resuming at one stage
     // per visit like it used to.
     var SPRINKLER_TICK_MS = 1000;
+    // Session-only cache of each placed sprinkler's last-known broken state
+    // (see SPRINKLERS NEAR MAGIC below sprinklerNearMagic) - purely so this
+    // only re-renders the map markers when one actually flips, not on every
+    // single tick regardless of whether anything changed.
+    var sprinklerBrokenState = {};
     function tickSprinklers() {
       if (!Object.keys(state.sprinklers).length) return;
       var now = Date.now();
+      var brokenChanged = false;
       Object.keys(state.sprinklers).forEach(function (skey) {
         var s = state.sprinklers[skey];
+        var broken = sprinklerNearMagic(s.q, s.r);
+        if (!!sprinklerBrokenState[skey] !== broken) { sprinklerBrokenState[skey] = broken; brokenChanged = true; }
+        if (broken) return; // ambient magic nearby - the sprinkler doesn't work
         CELL_NEIGHBORS.forEach(function (d) {
           var pkey = cellKey(s.q + d[0], s.r + d[1]);
           if (autoWaterAnimKeys[pkey]) return; // already on its way to this one
@@ -3907,6 +3925,7 @@
           startSprinklerWatering(pkey, s);
         });
       });
+      if (brokenChanged) renderSprinklers();
     }
 
     // ---------------------------------------------------------------------
@@ -3952,6 +3971,7 @@
       var reachedKeys = {};
       Object.keys(state.sprinklers).forEach(function (skey) {
         var s = state.sprinklers[skey];
+        if (sprinklerNearMagic(s.q, s.r)) return; // broken (see SPRINKLERS NEAR MAGIC) - reaches nothing
         CELL_NEIGHBORS.forEach(function (d) {
           var pkey = cellKey(s.q + d[0], s.r + d[1]);
           if (state.plants[pkey]) reachedKeys[pkey] = true;
@@ -5406,6 +5426,39 @@
     }
 
     // ---------------------------------------------------------------------
+    //  SPRINKLERS NEAR MAGIC  (issue #19 - a worldbuilding/balance rule: a
+    //  sprinkler is machinery, and it doesn't work around ambient magic)
+    //
+    //  A sprinkler refuses to work - see tickSprinklers/catchUpSprinklersOffline,
+    //  both gated on this, above - if its own tile sits on or right next to
+    //  any of the four elemental-magic formations: a Rain Ring's rune
+    //  ground or an active Grow Rune's 2x2 patch (both covered by runeAt,
+    //  which already only reports a grow rune while isGrowRuneActiveEntry
+    //  holds - see the RUNE LOOKUP section above), or a Loki's Control /
+    //  Scry zone's corner blocks and interior (lokiZones/scryZones, from
+    //  the CORNER ZONES section above - membership alone is enough,
+    //  regardless of the zone's own active/dormant flag, since the four
+    //  corner flowers forming it are physically standing there either way).
+    //  "Adjacent" reuses CELL_NEIGHBORS, the same 8-direction neighbor set
+    //  tickSprinklers itself uses for "does this sprinkler reach that
+    //  plant" - one tile of buffer around whatever ground the spell itself
+    //  occupies.
+    // ---------------------------------------------------------------------
+    function isNearZoneMagic(registry, q, r) {
+      return Object.keys(registry).some(function (zk) {
+        var z = registry[zk];
+        return q >= z.qMin - 1 && q <= z.qMax + 1 && r >= z.rMin - 1 && r <= z.rMax + 1;
+      });
+    }
+    function sprinklerNearMagic(q, r) {
+      if (runeAt(q, r)) return true;
+      for (var i = 0; i < CELL_NEIGHBORS.length; i++) {
+        if (runeAt(q + CELL_NEIGHBORS[i][0], r + CELL_NEIGHBORS[i][1])) return true;
+      }
+      return isNearZoneMagic(lokiZones, q, r) || isNearZoneMagic(scryZones, q, r);
+    }
+
+    // ---------------------------------------------------------------------
     //  WILD FLOWERS
     //  Spawned once per local calendar day along real OSM paths. See the
     //  WILD_* constants above for the placement rules and the privacy note.
@@ -6540,7 +6593,7 @@
     // it) - one shared coordinate space, not two separately-positioned
     // pieces, so the stake's own bottom edge (local y=29) actually sits
     // inside the mound instead of merely butting up against it.
-    function makeSprinklerIcon() {
+    function makeSprinklerIcon(broken) {
       var px = plantIconBase();
       _iconBuiltPx = px;
       var w = Math.round(px * 0.6);
@@ -6551,7 +6604,7 @@
         '<ellipse cx="12" cy="29" rx="4.4" ry="1.3" fill="#b98a54" opacity="0.55"/>' +
         '<ellipse cx="21" cy="30.2" rx="1.1" ry="0.8" fill="#6b431f" opacity="0.8"/>';
       var html = '<svg viewBox="0 0 ' + vw + ' ' + vh + '" width="' + w + '" height="' + dispH +
-        '" style="display:block">' + mound + sprinklerGlyphMarkup() + '</svg>';
+        '" style="display:block">' + mound + sprinklerGlyphMarkup(broken) + '</svg>';
       // Same waist-height anchor convention as makePlantIcon (61/112 down
       // its own stem, not the ground itself - see that function's comment)
       // scaled to this icon's own viewBox height, so the mound sinks toward
@@ -6868,7 +6921,7 @@
         var s = state.sprinklers[key];
         if (!inMarkerViewport(vc, s.q, s.r)) return;
         seen[key] = true;
-        var icon = makeSprinklerIcon();
+        var icon = makeSprinklerIcon(sprinklerNearMagic(s.q, s.r));
         if (sprinklerMarkers[key]) sprinklerMarkers[key].setIcon(icon);
         else sprinklerMarkers[key] = L.marker([s.lat, s.lng], { icon: icon, interactive: false, zIndexOffset: 95 }).addTo(map);
       });
@@ -8389,7 +8442,19 @@
     // viewBox alongside a dirt mound - see that function's comment. Local
     // coordinate space is a 32x32 square; callers that just want the icon
     // as-is (the toggle button, the shop stand) go through sprinklerIconSVG.
-    function sprinklerGlyphMarkup() {
+    // `broken` (see SPRINKLERS NEAR MAGIC, above the WILD FLOWERS section)
+    // swaps the working sprinkler's cyan spray for a dull grey X across the
+    // head instead - no water leaving it, and a clear "this one's not doing
+    // anything" read at a glance. Defaults to working so every other caller
+    // (the toggle button, the shop stand, via sprinklerIconSVG) is unaffected.
+    function sprinklerGlyphMarkup(broken) {
+      if (broken) {
+        return '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#b7bcc2"/>' +
+          '<circle cx="16" cy="15" r="4.5" fill="#8a939c"/>' +
+          '<g stroke="#c0392b" stroke-width="1.6" stroke-linecap="round">' +
+          '<path d="M13 12 L19 18"/><path d="M19 12 L13 18"/>' +
+          '</g>';
+      }
       return '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#8a8f98"/>' +
         '<circle cx="16" cy="15" r="4.5" fill="#5b6b7a"/>' +
         '<g fill="none" stroke="#6ec6ff" stroke-width="2.2" stroke-linecap="round">' +
@@ -8459,6 +8524,10 @@
       var key = cellKey(q, r);
       if (state.plants[key] || state.wild[key] || state.sprinklers[key]) {
         toast('Something is already there');
+        return;
+      }
+      if (sprinklerNearMagic(q, r)) {
+        toast('\u{2728} Sprinklers don\'t work near magic');
         return;
       }
       if (!(state.sprinklerInventory > 0)) {
@@ -8674,6 +8743,33 @@
       requestLocation();
     }
 
+    // ---- Grass pattern for the range shape (GitHub issue #20) -------------
+    // Injects a <pattern> into the map's own SVG renderer <defs> the one
+    // time it's needed (see the !rangeArea branch above), so the range
+    // polygon can be painted with fillColor: 'url(#bloom-grass-pattern)'
+    // instead of a flat color. A small tile of a faint green wash plus a
+    // few short blade strokes, repeated - deliberately low-opacity on both
+    // (the wash and the blades) so the basemap's roads/labels stay readable
+    // through it, same intent as the flat fill's old fillOpacity: 0.08.
+    // Guarded on the pattern's own id so calling this more than once (it
+    // won't be, today - rangeArea is only ever built once per session) is
+    // still a harmless no-op rather than a duplicate node.
+    function ensureGrassPattern(svgEl) {
+      if (svgEl.querySelector('#bloom-grass-pattern')) return;
+      var defs = svgEl.querySelector('defs');
+      if (!defs) {
+        defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        svgEl.insertBefore(defs, svgEl.firstChild);
+      }
+      defs.insertAdjacentHTML('beforeend',
+        '<pattern id="bloom-grass-pattern" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(6)">' +
+        '<rect width="14" height="14" fill="#4caf6d" fill-opacity="0.07"/>' +
+        '<path d="M2 12 L2.5 6" stroke="#3f9457" stroke-width="1.1" stroke-linecap="round" fill="none" opacity="0.55"/>' +
+        '<path d="M6 13 L6.8 7.5" stroke="#59c47c" stroke-width="1" stroke-linecap="round" fill="none" opacity="0.5"/>' +
+        '<path d="M10 12.5 L9.6 6.8" stroke="#3f9457" stroke-width="1.1" stroke-linecap="round" fill="none" opacity="0.55"/>' +
+        '</pattern>');
+    }
+
     // Eases the range shape from one tile center to the next over ~450ms
     // instead of jumping. Only runs on an actual tile change (see
     // onLocationUpdate), so ordinary GPS jitter within the same tile never
@@ -8747,6 +8843,17 @@
           color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
         }).addTo(map);
+        // GitHub issue #20: grass instead of a flat green wash. The
+        // polygon itself is unchanged (still one shape, still only ever
+        // moved via setLatLngs in animateRangeTo below - no new per-frame
+        // or per-tile cost), just repainted with a repeating SVG pattern
+        // instead of a solid fillColor - a texture the browser rasterizes
+        // once, not something Bloom's own code has to draw. The pattern's
+        // background wash and blade strokes are kept deliberately faint
+        // (see ensureGrassPattern) so roads/labels underneath stay legible
+        // through it, same as the flat fill's own low opacity did before.
+        ensureGrassPattern(rangeArea._renderer._container);
+        rangeArea.setStyle({ fillColor: 'url(#bloom-grass-pattern)', fillOpacity: 1 });
         var initialTarget = pickInitialCameraTarget(h.q, h.r, c);
         map.setView([initialTarget.lat, initialTarget.lng], 17);
         // Landed on a flower instead of the player - same reasoning as

@@ -38,14 +38,17 @@ node --check /tmp/index-script.js && echo SYNTAX_OK
 
 ## 3. Regression suite
 
-There is no committed test suite - Playwright test scripts live in the
-session scratchpad and do not survive between sessions. If prior scripts
-are still present this session (check
-`<scratchpad>/pw-test/*.js`), rerun every one relevant to the area touched.
-If they are gone (fresh session, different container), rebuild the ones
-that matter for the change before shipping - see the `bloom-playtest` skill
-for the harness pattern (CDN interception, tile aborts, chromium launch
-path). At minimum, before shipping any change, confirm:
+Run the committed suite:
+
+```bash
+./tests/setup.sh     # once per container - installs playwright-core, fetches Leaflet
+./tests/run-all.sh   # ASCII scan, syntax check, regression, zoom, pixel diff
+```
+
+`run-all.sh` covers steps 1 and 2 above as well. Add checks to
+`tests/regression.js` for whatever the change actually touches - a suite that
+never grows stops being evidence - and see the `bloom-playtest` skill for the
+harness and its gotchas. On top of what the suite already asserts, confirm:
 
 - No `pageerror` events and no unexpected `console.error` (tile-load
   `ERR_FAILED` from aborted OSM requests is expected noise and fine to ignore).
@@ -75,7 +78,9 @@ path). At minimum, before shipping any change, confirm:
   pattern.
 
 Do not commit on a "looks fine in the diff" basis - actually load the page
-in headless chromium and drive the changed code path.
+in headless chromium and drive the changed code path. `run-all.sh` finishing
+green is necessary, not sufficient: it only knows about what someone thought
+to assert before today.
 
 ## 4. Version bump
 

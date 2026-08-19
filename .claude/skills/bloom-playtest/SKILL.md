@@ -25,12 +25,17 @@ techniques that have worked repeatedly.
   directory - don't append `/chrome-linux/chrome` after it, that path
   doesn't exist and `launch()` fails with ENOENT. Run
   `ls -la /opt/pw-browsers/` first if this ever changes again.
-- Playwright test scripts written to the scratchpad do **not** persist
-  between sessions/containers. Either recreate the ones you need each
-  session, or - if a script has proven itself worth keeping across many
-  rounds of a feature (as the Greenhouse regression suite has) - consider
-  proposing to the user that it get committed into the repo itself so it
-  stops evaporating.
+- **A working suite is already committed at `tests/` - start there, don't
+  rebuild one.** `./tests/setup.sh` (installs playwright-core, fetches
+  Leaflet; both gitignored) then `./tests/run-all.sh`. It carries
+  `harness.js` (browser launch, CDN interception, geolocation stub, the GPS
+  lock, the standard fixtures, frame sampling, PNG decoding),
+  `regression.js`, `zoom.js`, `pixel-diff.js` and `perf.js`, and
+  `tests/README.md` lists the traps that waste the most time. Everything
+  below is the reasoning behind what that harness does; read it when
+  extending the suite or when something behaves oddly, not to reimplement
+  it. Ad-hoc probes still belong in the scratchpad - only things worth
+  running again belong in `tests/`.
 
 ## 1. Testing the real `index.html` (needs Leaflet + geolocation stubbed)
 

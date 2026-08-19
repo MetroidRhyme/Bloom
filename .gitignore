@@ -1,3 +1,12 @@
 # Claude Code agent worktrees - isolated working copies spun up for
 # background subagents, not project content. Never meant to be tracked.
 .claude/worktrees/
+
+# Test harness dependencies - fetched by tests/setup.sh, not project content.
+# playwright-core is large, Leaflet is third-party, and tests/out is
+# regenerated screenshot output.
+tests/node_modules/
+tests/vendor/
+tests/out/
+tests/package-lock.json
+tests/package.json

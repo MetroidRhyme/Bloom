@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.3</span>
+      <span id="game-version">v2.39.4</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,10 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.4', changes: [
+        'Grass tufts back down to half the size of the last update - too ' +
+          'big at the bigger size.'
+      ] },
       { version: 'v2.39.3', changes: [
         "Grass tufts no longer pile up the closer you zoom in (or thin out " +
           "the further you zoom out) - it's a steady four or five per " +
@@ -6734,19 +6738,20 @@
     //  moves, only their size does, same as a plant icon's own zoom
     //  rescaling.
     // ===================================================================
-    var GRASS_TUFT_SCALE = 2;       // size of one tuft glyph relative to its square
+    var GRASS_TUFT_SCALE = 1;       // size of one tuft glyph relative to its square
     var GRASS_TUFT_OPACITY = 0.75;  // 25% cut from the old fully-opaque blades
     var GRASS_WASH_OPACITY = 0.045; // same 25% cut from the old 0.06 wash
     // Design-unit-to-tile conversion: GRASS_BLADE_OFFSETS below is authored
     // in a 24-unit box, but treating that box as the *whole* real tile (a
     // straight tileW/24) reproduces the old asset's own proportions, which
     // were tuned to read well as a small *repeating* pattern rep, not as
-    // the sole content of one full square - at GRASS_TUFT_SCALE 1 it already
-    // read oversized, and doubled it overlapped into a solid mat. Dividing
-    // by a larger box instead keeps the four tufts reading as separate fans
+    // the sole content of one full square, and read oversized. Dividing by
+    // a larger box instead keeps the four tufts reading as separate fans
     // with grass-wash visible between them, matching the size the demo
-    // build (grass-clutter fix mockup) was approved at, before
-    // GRASS_TUFT_SCALE's own 2x is applied on top.
+    // build (grass-clutter fix mockup) was approved at. A GRASS_TUFT_SCALE
+    // of 2 (briefly shipped in v2.39.3) went too far the other way - it
+    // overlapped into a solid mat - so this is the tuning knob if a future
+    // request wants tufts bigger or smaller again.
     var GRASS_UNIT_PER_TILE = 48;
     var GRASS_BLADE_DARK = '#345c30';
     var GRASS_BLADE_BRIGHT = '#5ea648';

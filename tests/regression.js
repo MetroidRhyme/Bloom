@@ -511,6 +511,62 @@ const h = require('./harness');
   r.check('grassTuftPick always picks four or five tufts', out.validCount === true, out);
   r.check('grassTuftPick varies from one tile to the next', out.differsByTile === true, out);
 
+  // ---- grid mesh redraw on tab resume (stale-grass-after-midnight bug) --
+  // Reported symptom: "I'm seeing grass in an area but it's not letting me
+  // take actions in that area." Root cause: the grid mesh is a canvas layer
+  // that only repaints on an actual moveend/zoomend/viewreset/resize, or
+  // when markAccessibleToday touches the current viewport - never on the
+  // "offline catch-up on return" visibilitychange handler. A local-midnight
+  // rollover while the tab was backgrounded resets state.todayAccessible
+  // (inRange() re-checks localDayKey() fresh, so it starts denying those
+  // tiles immediately), but without a forced redraw there the canvas kept
+  // showing yesterday's grass - visibly there, every action on it refused -
+  // until some unrelated pan/zoom happened to repaint that spot.
+  r.section('grid mesh redraw on tab resume');
+  // scheduleGridRedraw is RAF-debounced (see its own definition) - a page
+  // helper to wait for one to actually land before reading the canvas back
+  // out, reused for both the setup paint and the post-resume one below.
+  const settleRaf = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(function () { requestAnimationFrame(resolve); })));
+  const pixelSumNow = () => page.evaluate(() => {
+    var ctx = gridRenderer._ctx, b = gridRenderer._bounds;
+    var d = ctx.getImageData(b.min.x, b.min.y, b.getSize().x, b.getSize().y).data;
+    var s = 0;
+    for (var i = 0; i < d.length; i += 97) s += d[i];
+    return s;
+  });
+
+  await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    for (var i = -6; i <= 6; i++) markAccessibleToday(here.q + i, here.r);
+    scheduleGridRedraw();
+  });
+  await settleRaf(); // let the walked strip actually paint before measuring "before"
+  const beforePixels = await pixelSumNow();
+  const beforeInRange = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    return inRange(here.q + 6, here.r); // outside live PLANT_RANGE, inside the walked strip above
+  });
+
+  // Simulate a local-midnight rollover with no map interaction at all -
+  // exactly "left the tab backgrounded overnight, reopened it the next day
+  // before taking a step" - then fire the same visibilitychange path the
+  // real app's offline-catch-up handler runs on resume.
+  const afterInRange = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    state.todayAccessibleDay = 'not-today';
+    state.lastSeenAt = Date.now() - 999999999;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return false; } });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
+    document.dispatchEvent(new Event('visibilitychange'));
+    return inRange(here.q + 6, here.r);
+  });
+  await settleRaf(); // let any redraw the resume handler triggered actually land
+  const afterPixels = await pixelSumNow();
+
+  r.check('the test tile is in range before the rollover', beforeInRange === true, { beforeInRange });
+  r.check('the test tile drops out of range after the rollover (inRange re-checks the day fresh)', afterInRange === false, { afterInRange });
+  r.check('the grid mesh canvas actually redraws on tab resume (stale grass cleared)', afterPixels !== beforePixels, { before: beforePixels, after: afterPixels });
+
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));
 

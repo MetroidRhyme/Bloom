@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.4</span>
+      <span id="game-version">v2.39.5</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.5', changes: [
+        "Fixed a bug where grass could keep showing over ground you'd " +
+          "walked the day before, even though it no longer counted as in " +
+          "range - reopening the app the next day now clears it right away " +
+          "instead of leaving it looking usable until you pan or zoom."
+      ] },
       { version: 'v2.39.4', changes: [
         'Grass tufts back down to half the size of the last update - too ' +
           'big at the bigger size.'
@@ -8746,6 +8752,18 @@
       catchUpRainRingsOffline();
       tickPlants();
       maybeSpawnWild();
+      // The grid mesh's grass fill is a canvas layer, not markers - it only
+      // repaints on an actual moveend/zoomend/viewreset/resize, or when
+      // markAccessibleToday touches the current viewport (see
+      // renderGridMesh). A local-midnight rollover while backgrounded
+      // resets state.todayAccessible (inRange() re-checks localDayKey()
+      // fresh, so it correctly starts denying those tiles right away), but
+      // without this the canvas keeps showing yesterday's grass right where
+      // the player is looking until some unrelated pan/zoom happens to
+      // repaint that spot - grass visibly there, every action on it
+      // refused. Force a redraw here so the mesh always matches whatever
+      // catch-up just did to state.
+      scheduleGridRedraw();
       state.lastSeenAt = Date.now();
       saveState();
     });

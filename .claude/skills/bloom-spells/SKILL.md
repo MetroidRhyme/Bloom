@@ -101,8 +101,9 @@ Search `CORNER ZONES` for the section banner. The reusable pieces:
   last watered) and the "is this tile covered right now" query.
 - `zoneLatLngs(z)` / `renderZoneRegistry(registry, layers, styleFor, onTransition)` -
   the shared boundary-rectangle Leaflet rendering, with per-spell color/
-  style and an `onTransition(active)` callback for the active<->dormant
-  toast.
+  style and an `onTransition(active)` callback. Per the toast convention
+  below, `onTransition` only toasts the `!active` (lapsed) case - becoming
+  active is silent, the boundary rendering itself is the confirmation.
 
 A new tier-based rectangle-corner spell is almost entirely boilerplate on
 top of this foundation - see `lokiZones`/`scryZones` and their thin
@@ -246,6 +247,22 @@ forget the others, which is exactly what happened building the grow rune:
 
 ## Design conventions worth keeping
 
+- **`toast()` is reserved for errors/problems, not status news.** A spell
+  casting, activating, or completing successfully is never worth a toast -
+  the rune appearing, the zone's boundary rendering, or the marker's own
+  state change is the confirmation. Only toast the case that blocks the
+  player or reports something gone wrong (e.g. `renderLokiZones`/
+  `renderScryZones` toast the corner-wilted/lapsed transition, never the
+  became-active one - see the CORNER ZONES section above). This was a
+  deliberate cleanup (v2.37.0 removed the rain rune's activate/top-up toast
+  and the grow spell's fire toast entirely) - don't add a new one back in
+  for a future spell's own cast/activate moment.
+- **No camera moves the player didn't initiate.** Casting or a spell's
+  effect completing should never fly/pan the map on its own (the
+  welcome-back tour that used to do this for "here's what happened" status
+  was removed in v2.37.0 for the same reason) - if something needs
+  surfacing, it waits for the player to look, the same way a grown flower
+  or a lapsed zone just sits there until they check on it.
 - **No in-game hint/tutorial for these spells** (per the original RAIN_RING
   comment) - discovery is part of the design, at least for now. Don't add
   a spellbook UI unless asked.

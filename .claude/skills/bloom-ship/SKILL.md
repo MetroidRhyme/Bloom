@@ -54,6 +54,15 @@ path). At minimum, before shipping any change, confirm:
 - `localStorage` migration still works if `state` shape changed at all -
   load an old-shaped saved blob, confirm it upgrades without data loss, and
   confirm a *second* load doesn't re-apply the migration (idempotency).
+- Any new `toast(...)` call added by the change only fires for something
+  that actually blocks the player (out of range, out of stock, GPS not
+  locked, an invalid action) - not routine confirmation of something that
+  just succeeded (planted, watered, sold, bought, unlocked, activated).
+  Same for camera movement: nothing should `flyTo`/`panTo`/`setView` on its
+  own outside the player's own GPS-follow. Both were deliberately stripped
+  out of the whole game in v2.37.0 (the "welcome-back tour" and most of the
+  toast "action log") - don't let a new feature quietly reintroduce either
+  pattern.
 
 Do not commit on a "looks fine in the diff" basis - actually load the page
 in headless chromium and drive the changed code path.

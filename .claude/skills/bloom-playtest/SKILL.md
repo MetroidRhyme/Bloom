@@ -174,6 +174,32 @@ comparing each marker's actual rendered `<svg width>` against
 version of the same test produced inconsistent results that didn't clearly
 point at the real bug.
 
+**Gotcha: `regression.js` runs every section on one page in sequence, so a
+zoom level left over from an earlier section silently changes what a later
+section's *fixed tile offset* actually tests.** A check like "the tile 6
+columns over from the player is/isn't painted" implicitly assumes how many
+real tiles fit across the current viewport width - and that shrinks at
+higher zoom, since each tile takes up more screen pixels. If some earlier
+section zoomed to test icon rescaling or a zoom-dependent pattern (see the
+gotcha above) and never zoomed back, a later section's offset can land
+outside the viewport-culled render loop entirely and read as "not
+painted" for a reason that has nothing to do with whatever the check was
+actually written to test - no error, no crash, just a wrong-looking
+failure that points at the feature instead of the leftover zoom (this is
+exactly what happened writing the grass-scope regression check in
+`bloom-range`: the check failed with the tile simply never reached by
+`renderGridMesh`'s loop, not because the grass logic was wrong). Don't
+assume a section inherits a known zoom from whatever ran before it - pin
+it explicitly at the top of any section whose assertions depend on a
+specific tile-to-pixel relationship:
+```js
+await page.evaluate(() => new Promise((resolve) => {
+  if (map.getZoom() === 18) { resolve(); return; }
+  map.once('zoomend', resolve);
+  map.setZoom(18, { animate: false });
+}));
+```
+
 ## 2. Profiling and performance regression
 
 Read `bloom-perf` for what the numbers mean and which ones matter; this

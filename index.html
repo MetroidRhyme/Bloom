@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.6</span>
+      <span id="game-version">v2.39.7</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.7', changes: [
+        "Grass no longer shows over ground you walked earlier today but " +
+          "aren't actively standing near anymore - it now only covers the " +
+          "area you actively control right now, so grass never implies " +
+          "you can water or harvest there when you actually can't."
+      ] },
       { version: 'v2.39.6', changes: [
         'Fixed the grass clumps in your walking range reshuffling to a new ' +
           "layout every time you zoomed - they now stay put in the same " +
@@ -5575,10 +5581,10 @@
       });
       if (added) {
         saveState();
-        // The green today-access fill (see renderGridMesh) needs to grow
-        // right away, not just on the next pan/zoom - e.g. the player is
-        // walking with 'following' off, so nothing else is about to pan the
-        // map and trigger a redraw on its own. scheduleGridRedraw is
+        // The live-control grass wash (see renderGridMesh/liveControl) needs
+        // to move right away, not just on the next pan/zoom - e.g. the
+        // player is walking with 'following' off, so nothing else is about
+        // to pan the map and trigger a redraw on its own. scheduleGridRedraw is
         // declared later in the file, textually, but function declarations
         // (unlike var) are hoisted whole, not just their name, so it's
         // already callable here regardless of source order. renderGridMesh
@@ -5588,41 +5594,53 @@
       }
     }
 
+    // True if (q, r) is under the player's control RIGHT NOW - live
+    // PLANT_RANGE around their current GPS position, or a currently active
+    // Scry/Loki extension - without crediting the "was in range at some
+    // point earlier today" grant inRange() below also allows. Split out so
+    // renderGridMesh's ambient grass wash (see its own comment) can show
+    // only ground actively controlled this instant, not the whole of
+    // today's walk - that wider "remembered" area still grants real
+    // gameplay access via inRange(), it just no longer paints as grass.
+    function liveControl(q, r, now) {
+      // Cheat Mode: no distance limit - every tile counts as in range, so
+      // plant/water/harvest/sell/fertilize/pick/sprinkler all work anywhere
+      // on the map, not just near the player's live position.
+      if (state.cheatMode) return true;
+      if (state.userPos) {
+        var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
+        if (cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
+      }
+      // SCRY: unlike Loki, this needs no prior visit or grant of any kind,
+      // only that the zone covering (q, r) is structurally complete and
+      // unwilted right now (see the CORNER ZONES section, below the GROW
+      // SPELL section).
+      if (isInActiveScryZone(q, r, now)) return true;
+      // LOKI'S CONTROL: this extension has its own real timestamp,
+      // independent of the daily bucket. An extension only ever counts
+      // while BOTH its own timer hasn't run out AND the zone granting it is
+      // still actually active right now - a wilted corner drops this
+      // immediately, it doesn't ride out the remainder of an already-
+      // stamped window (see markAccessibleToday and isInActiveLokiZone,
+      // below the GROW SPELL section).
+      var until = state.lokiAccess[cellKey(q, r)];
+      return !!until && until > now && isInActiveLokiZone(q, r, now);
+    }
+
     // The one gate every plant/water/harvest/sell/fertilize/pick/sprinkler
-    // action goes through: true if the player's LIVE position is within
-    // PLANT_RANGE of (q, r) right now, OR if (q, r) was within range at any
-    // point earlier today (state.todayAccessible) - rewarding the walk
-    // itself rather than requiring the player to be standing right next to
-    // a tile at the exact moment they want to tend it. The day check is
+    // action goes through: true if (q, r) is under live control right now
+    // (see liveControl above), OR if it was within range at any point
+    // earlier today (state.todayAccessible) - rewarding the walk itself
+    // rather than requiring the player to be standing right next to a tile
+    // at the exact moment they want to tend it. The day check is
     // re-verified here (not just trusted from whenever todayAccessible was
     // last written) so a set left over from before a midnight rollover that
     // simply hasn't been touched yet is never mistaken for today's.
     function inRange(q, r) {
       if (!state.userPos) return false;
-      // Cheat Mode: no distance limit - every tile counts as in range, so
-      // plant/water/harvest/sell/fertilize/pick/sprinkler all work anywhere
-      // on the map, not just near the player's live position.
-      if (state.cheatMode) return true;
-      var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-      if (cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
       var now = Date.now();
-      // SCRY: checked before the day/today-access checks below - unlike
-      // Loki, this needs no prior visit or grant of any kind, only that
-      // the zone covering (q, r) is structurally complete and unwilted
-      // right now (see the CORNER ZONES section, below the GROW SPELL
-      // section).
-      if (isInActiveScryZone(q, r, now)) return true;
-      if (state.todayAccessibleDay === localDayKey() && state.todayAccessible[cellKey(q, r)]) return true;
-      // LOKI'S CONTROL: checked even when the day check above just failed -
-      // this extension has its own real timestamp, independent of the
-      // daily bucket. An extension only ever counts while BOTH its own
-      // timer hasn't run out AND the zone granting it is still actually
-      // active right now - a wilted corner drops this immediately, it
-      // doesn't ride out the remainder of an already-stamped window (see
-      // markAccessibleToday and isInActiveLokiZone, below the GROW SPELL
-      // section).
-      var until = state.lokiAccess[cellKey(q, r)];
-      return !!until && until > now && isInActiveLokiZone(q, r, now);
+      if (liveControl(q, r, now)) return true;
+      return state.todayAccessibleDay === localDayKey() && !!state.todayAccessible[cellKey(q, r)];
     }
 
     // Priority + rejection sampling. First fills from state.visited - tiles
@@ -6841,16 +6859,19 @@
 
     // Soft outline mesh over the current viewport so planting spots read at a
     // glance, plus (drawn first, so the mesh lines above still show through
-    // it) a grass fill over every tile the player currently has access to
-    // today (see markAccessibleToday/inRange/todayAccessible) - not just the
-    // live PLANT_RANGE square they're standing in right now (that one still
-    // gets its own separate, more solid grass-filled rangeArea polygon - see
-    // onLocationUpdate), but everywhere along today's walk that still counts
-    // as in range (GitHub issue #20: "any area the player has walked in and
-    // has control of" - todayAccessible IS that control set; the permanent
-    // state.visited, used only to bias wild-flower spawns, never grants
-    // control and stays out of this). Both share the same viewport-bounded
-    // tile loop below, since recomputing that twice would be pure waste.
+    // it) a grass fill over every tile the player actively controls RIGHT
+    // NOW (see liveControl) - the same live PLANT_RANGE circle the separate,
+    // more solid rangeArea polygon fills (see onLocationUpdate), redrawn
+    // here as a lighter wash across the wider viewport plus a currently
+    // active Scry/Loki extension, if any. Deliberately does NOT extend to
+    // the whole of state.todayAccessible (everywhere still in range via
+    // today's walk, per inRange) - that wider set keeps granting real
+    // gameplay access, it just no longer paints as grass, so grass never
+    // reads as "walk here" when a tile has quietly gone back out of live
+    // control (see the "grass in an area I don't control" report this
+    // replaced markAccessibleToday's wider paint for). Both layers share the
+    // same viewport-bounded tile loop below, since recomputing that twice
+    // would be pure waste.
     function renderGridMesh() {
       if (!gridRenderer._ctx || !gridRenderer._bounds) return;
       var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
@@ -6894,11 +6915,12 @@
       function colOn(i) { return xOk[i] || xOk[i + 1]; }
       function rowOn(j) { return yOk[j] || yOk[j + 1]; }
 
-      // Re-validated against localDayKey() here too, same guard inRange()
-      // itself uses - a todayAccessible set left over from before a
-      // midnight rollover that simply hasn't been touched yet since must
-      // never paint as if it were still today's.
-      if (state.todayAccessibleDay === localDayKey()) {
+      // liveControl (not the wider inRange) gates every tile here - see the
+      // function comment above renderGridMesh for why the ambient wash
+      // deliberately stops at live control instead of following the whole
+      // of today's walk.
+      if (state.userPos || state.cheatMode) {
+        var meshNow = Date.now();
         ctx.fillStyle = hexToRgba(GRASS_WASH, GRASS_WASH_OPACITY);
         var grassCells = [];
         for (var aq = minQ; aq <= maxQ; aq++) {
@@ -6907,7 +6929,7 @@
           for (var ar = minR; ar <= maxR; ar++) {
             var aj = ar - minR;
             if (!rowOn(aj)) continue;
-            if (!state.todayAccessible[cellKey(aq, ar)]) continue;
+            if (!liveControl(aq, ar, meshNow)) continue;
             // An axis-aligned rectangle, which is all a cell has ever been
             // on this grid - fillRect instead of building and filling a
             // four-point path per tile.

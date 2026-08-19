@@ -494,10 +494,9 @@ const h = require('./harness');
   r.check('the pattern tile resizes on zoom instead of the tuft count scaling', out.before !== out.after, out);
   r.check('tuft count is still exactly four after the zoom change', out.stillFourTufts === true, out);
 
-  // The grid mesh's todayAccessible fill (GitHub issue #20 follow-up - grass
-  // over anywhere the player has walked and still has control of, not just
-  // the live range ring) places a deterministic 4-5 tufts per real tile via
-  // grassTuftPick, seeded off q,r - not a repeating fixed-pixel pattern.
+  // grassTuftPick (the per-tile 4-5-tuft layout the grid mesh paints with)
+  // is still deterministic and per-tile, independent of which cells the
+  // mesh actually chooses to call it for.
   out = await page.evaluate(() => {
     var a = grassTuftPick(5, 9), b = grassTuftPick(5, 9), c = grassTuftPick(6, 9);
     var countOf = function (pick) { return pick.skip === -1 ? 5 : 4; };
@@ -511,61 +510,66 @@ const h = require('./harness');
   r.check('grassTuftPick always picks four or five tufts', out.validCount === true, out);
   r.check('grassTuftPick varies from one tile to the next', out.differsByTile === true, out);
 
-  // ---- grid mesh redraw on tab resume (stale-grass-after-midnight bug) --
+  // ---- grid mesh grass tracks live control only, not the whole walk ------
   // Reported symptom: "I'm seeing grass in an area but it's not letting me
-  // take actions in that area." Root cause: the grid mesh is a canvas layer
-  // that only repaints on an actual moveend/zoomend/viewreset/resize, or
-  // when markAccessibleToday touches the current viewport - never on the
-  // "offline catch-up on return" visibilitychange handler. A local-midnight
-  // rollover while the tab was backgrounded resets state.todayAccessible
-  // (inRange() re-checks localDayKey() fresh, so it starts denying those
-  // tiles immediately), but without a forced redraw there the canvas kept
-  // showing yesterday's grass - visibly there, every action on it refused -
-  // until some unrelated pan/zoom happened to repaint that spot.
-  r.section('grid mesh redraw on tab resume');
-  // scheduleGridRedraw is RAF-debounced (see its own definition) - a page
-  // helper to wait for one to actually land before reading the canvas back
-  // out, reused for both the setup paint and the post-resume one below.
+  // take actions in that area" - a tile the player walked past earlier
+  // today (and so still passes inRange(), rewarding the walk as designed)
+  // kept painting as grass long after they moved on, reading as if it were
+  // still under active control. Fix: renderGridMesh now gates each tile on
+  // liveControl (live PLANT_RANGE, or a currently active Scry/Loki
+  // extension) instead of the wider state.todayAccessible, so the wash
+  // shrinks to the player's real live footprint immediately - no day
+  // rollover needed to see it happen, and no stale-canvas redraw bug is
+  // possible either, since there is no longer a wider "remembered" area to
+  // go stale in the first place.
+  r.section('grid mesh grass tracks live control, not the whole walk');
   const settleRaf = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(function () { requestAnimationFrame(resolve); })));
-  const pixelSumNow = () => page.evaluate(() => {
-    var ctx = gridRenderer._ctx, b = gridRenderer._bounds;
-    var d = ctx.getImageData(b.min.x, b.min.y, b.getSize().x, b.getSize().y).data;
-    var s = 0;
-    for (var i = 0; i < d.length; i += 97) s += d[i];
-    return s;
-  });
+  // Alpha of the pixel at a cell's own screen center - 0 means renderGridMesh
+  // painted nothing there, since ctx.clearRect leaves fully transparent
+  // pixels and any grass fill/tuft stroke writes a non-zero alpha. Leaflet's
+  // canvas renderer draws using world layer-point coordinates (it
+  // ctx.translate()s the context to compensate), but getImageData reads raw
+  // buffer pixels and ignores that transform - so a layer point has to be
+  // converted into buffer space by hand: subtract the renderer's own bounds
+  // origin, then scale by the canvas's actual pixel size over its logical
+  // (CSS) size, which differs on a retina buffer.
+  const cellPaintedAlpha = (dq, dr) => page.evaluate(([dq, dr]) => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var c = cellCenter(here.q + dq, here.r + dr);
+    var p = map.latLngToLayerPoint([c.lat, c.lng]);
+    var b = gridRenderer._bounds, canvas = gridRenderer._ctx.canvas;
+    var scale = canvas.width / b.getSize().x;
+    var x = Math.round((p.x - b.min.x) * scale), y = Math.round((p.y - b.min.y) * scale);
+    return gridRenderer._ctx.getImageData(x, y, 1, 1).data[3];
+  }, [dq, dr]);
 
   await page.evaluate(() => {
     var here = latLngToCell(state.userPos.lat, state.userPos.lng);
     for (var i = -6; i <= 6; i++) markAccessibleToday(here.q + i, here.r);
     scheduleGridRedraw();
   });
-  await settleRaf(); // let the walked strip actually paint before measuring "before"
-  const beforePixels = await pixelSumNow();
-  const beforeInRange = await page.evaluate(() => {
+  await settleRaf();
+
+  const farInRange = await page.evaluate(() => {
     var here = latLngToCell(state.userPos.lat, state.userPos.lng);
     return inRange(here.q + 6, here.r); // outside live PLANT_RANGE, inside the walked strip above
   });
+  const farAlpha = await cellPaintedAlpha(6, 0);
+  const nearAlpha = await cellPaintedAlpha(1, 0); // inside live PLANT_RANGE
 
-  // Simulate a local-midnight rollover with no map interaction at all -
-  // exactly "left the tab backgrounded overnight, reopened it the next day
-  // before taking a step" - then fire the same visibilitychange path the
-  // real app's offline-catch-up handler runs on resume.
-  const afterInRange = await page.evaluate(() => {
+  r.check('a tile walked past earlier today still counts as in range (the real access, unchanged)', farInRange === true, { farInRange });
+  r.check('but that same tile does not paint as grass once out of live range', farAlpha === 0, { farAlpha });
+  r.check('a tile still inside live range does paint as grass', nearAlpha > 0, { nearAlpha });
+
+  // The day-rollover behavior inRange() itself still needs (today's walk
+  // stops granting access at local midnight) is unrelated to what the mesh
+  // paints, but still worth its own direct check.
+  const afterRolloverInRange = await page.evaluate(() => {
     var here = latLngToCell(state.userPos.lat, state.userPos.lng);
     state.todayAccessibleDay = 'not-today';
-    state.lastSeenAt = Date.now() - 999999999;
-    Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return false; } });
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: function () { return 'visible'; } });
-    document.dispatchEvent(new Event('visibilitychange'));
     return inRange(here.q + 6, here.r);
   });
-  await settleRaf(); // let any redraw the resume handler triggered actually land
-  const afterPixels = await pixelSumNow();
-
-  r.check('the test tile is in range before the rollover', beforeInRange === true, { beforeInRange });
-  r.check('the test tile drops out of range after the rollover (inRange re-checks the day fresh)', afterInRange === false, { afterInRange });
-  r.check('the grid mesh canvas actually redraws on tab resume (stale grass cleared)', afterPixels !== beforePixels, { before: beforePixels, after: afterPixels });
+  r.check('that access itself still expires on a day rollover', afterRolloverInRange === false, { afterRolloverInRange });
 
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));

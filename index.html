@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.1</span>
+      <span id="game-version">v2.39.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.2', changes: [
+        'New grass look: small tufts of blades instead of a faint diagonal ' +
+          'wash, both right where you are standing and across everywhere ' +
+          "you've walked today."
+      ] },
       { version: 'v2.39.1', changes: [
         'The grass now covers everywhere you have walked today and still ' +
           'have planting range over, not just the small patch right where ' +
@@ -6710,32 +6715,47 @@
     }
 
     // Canvas counterpart to ensureGrassPattern (the SVG <pattern> the live
-    // rangeArea polygon fills with - see onLocationUpdate) - same look, a
-    // faint green wash plus a few blade strokes, just built as a small
-    // offscreen tile handed to ctx.createPattern instead of an SVG element,
-    // since renderGridMesh below paints on a Leaflet canvas layer, not an
-    // SVG one. Built once and cached: the tile bitmap never changes, so
-    // every redraw (every pan/zoom) reuses the same CanvasPattern object
-    // rather than re-drawing it.
+    // rangeArea polygon fills with - see onLocationUpdate) - built as a
+    // small offscreen tile handed to ctx.createPattern instead of an SVG
+    // element, since renderGridMesh below paints on a Leaflet canvas layer,
+    // not an SVG one. Same "Meadow Tufts" layout as the SVG version -
+    // literally the same four tuft coordinates/colors, just replayed with
+    // canvas calls instead of baked into static <path> data - so the live
+    // ring and the wider walked-area fill read as the same material rather
+    // than two different textures that happen to be both green. Built once
+    // and cached: the tile bitmap never changes, so every redraw (every
+    // pan/zoom) reuses the same CanvasPattern object rather than re-drawing it.
     var _grassCanvasPattern = null;
     function grassCanvasPattern(ctx) {
       if (_grassCanvasPattern) return _grassCanvasPattern;
       var tile = document.createElement('canvas');
-      tile.width = 14; tile.height = 14;
+      tile.width = 24; tile.height = 24;
       var tctx = tile.getContext('2d');
-      tctx.fillStyle = 'rgba(76,175,109,0.09)';
-      tctx.fillRect(0, 0, 14, 14);
+      tctx.fillStyle = 'rgba(76,175,109,0.06)';
+      tctx.fillRect(0, 0, 24, 24);
       tctx.lineCap = 'round';
-      tctx.strokeStyle = 'rgba(63,148,87,0.55)';
-      tctx.lineWidth = 1.1;
-      tctx.beginPath();
-      tctx.moveTo(2, 12); tctx.lineTo(2.5, 6);
-      tctx.moveTo(10, 12.5); tctx.lineTo(9.6, 6.8);
-      tctx.stroke();
-      tctx.strokeStyle = 'rgba(89,196,124,0.5)';
-      tctx.beginPath();
-      tctx.moveTo(6, 13); tctx.lineTo(6.8, 7.5);
-      tctx.stroke();
+      // Four three-blade fans (a darker pair framing a brighter center
+      // blade - the same shape convention and the same greens,
+      // #345c30/#5ea648, CLUMP_SHAPE/clumpMarkup use for a flower's own
+      // ambient grass) at fixed spots/scales across the tile.
+      var tufts = [
+        { bx: 5, by: 7, s: 0.85 }, { bx: 16, by: 5, s: 1.05 },
+        { bx: 8, by: 17, s: 0.95 }, { bx: 19, by: 16, s: 1.1 }
+      ];
+      var blades = [
+        [-2.6, -0.8, -4.6, -1.6, '#345c30'], [0.2, -1.9, 0.4, -3.6, '#5ea648'],
+        [2.6, -0.8, 4.6, -1.6, '#345c30']
+      ];
+      tufts.forEach(function (t) {
+        blades.forEach(function (b) {
+          tctx.strokeStyle = b[4];
+          tctx.lineWidth = 1.15 * t.s;
+          tctx.beginPath();
+          tctx.moveTo(t.bx, t.by);
+          tctx.quadraticCurveTo(t.bx + b[0] * t.s * 0.6, t.by + b[1] * t.s, t.bx + b[2] * t.s, t.by + b[3] * t.s);
+          tctx.stroke();
+        });
+      });
       _grassCanvasPattern = ctx.createPattern(tile, 'repeat');
       return _grassCanvasPattern;
     }
@@ -8786,10 +8806,16 @@
     // Injects a <pattern> into the map's own SVG renderer <defs> the one
     // time it's needed (see the !rangeArea branch above), so the range
     // polygon can be painted with fillColor: 'url(#bloom-grass-pattern)'
-    // instead of a flat color. A small tile of a faint green wash plus a
-    // few short blade strokes, repeated - deliberately low-opacity on both
-    // (the wash and the blades) so the basemap's roads/labels stay readable
-    // through it, same intent as the flat fill's old fillOpacity: 0.08.
+    // instead of a flat color. "Meadow Tufts": four small three-blade fans
+    // (a darker pair framing a brighter center blade, same shape convention
+    // GROUND_MOUND/clumpMarkup use for a flower's own ambient grass, and the
+    // exact same greens - #345c30/#5ea648 - so this reads as the same
+    // material) over a faint green wash, deliberately low-opacity so the
+    // basemap's roads/labels stay readable through it. Picked from a set of
+    // six candidates previewed for and chosen by the repo owner; the
+    // canvas twin of this exact tuft layout is grassCanvasPattern, below
+    // the WILD FLOWERS section's own grid-mesh renderer - see its comment
+    // for why the two share coordinates instead of each inventing their own.
     // Guarded on the pattern's own id so calling this more than once (it
     // won't be, today - rangeArea is only ever built once per session) is
     // still a harmless no-op rather than a duplicate node.
@@ -8801,11 +8827,20 @@
         svgEl.insertBefore(defs, svgEl.firstChild);
       }
       defs.insertAdjacentHTML('beforeend',
-        '<pattern id="bloom-grass-pattern" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(6)">' +
-        '<rect width="14" height="14" fill="#4caf6d" fill-opacity="0.07"/>' +
-        '<path d="M2 12 L2.5 6" stroke="#3f9457" stroke-width="1.1" stroke-linecap="round" fill="none" opacity="0.55"/>' +
-        '<path d="M6 13 L6.8 7.5" stroke="#59c47c" stroke-width="1" stroke-linecap="round" fill="none" opacity="0.5"/>' +
-        '<path d="M10 12.5 L9.6 6.8" stroke="#3f9457" stroke-width="1.1" stroke-linecap="round" fill="none" opacity="0.55"/>' +
+        '<pattern id="bloom-grass-pattern" width="24" height="24" patternUnits="userSpaceOnUse">' +
+        '<rect width="24" height="24" fill="#4caf6d" fill-opacity="0.06"/>' +
+        '<path d="M5 7 Q3.67 6.32 1.09 5.64" stroke="#345c30" stroke-width="0.98" fill="none" stroke-linecap="round"/>' +
+        '<path d="M5 7 Q5.1 5.39 5.34 3.94" stroke="#5ea648" stroke-width="0.98" fill="none" stroke-linecap="round"/>' +
+        '<path d="M5 7 Q6.33 6.32 8.91 5.64" stroke="#345c30" stroke-width="0.98" fill="none" stroke-linecap="round"/>' +
+        '<path d="M16 5 Q14.36 4.16 11.17 3.32" stroke="#345c30" stroke-width="1.21" fill="none" stroke-linecap="round"/>' +
+        '<path d="M16 5 Q16.13 3 16.42 1.22" stroke="#5ea648" stroke-width="1.21" fill="none" stroke-linecap="round"/>' +
+        '<path d="M16 5 Q17.64 4.16 20.83 3.32" stroke="#345c30" stroke-width="1.21" fill="none" stroke-linecap="round"/>' +
+        '<path d="M8 17 Q6.52 16.24 3.63 15.48" stroke="#345c30" stroke-width="1.09" fill="none" stroke-linecap="round"/>' +
+        '<path d="M8 17 Q8.11 15.2 8.38 13.58" stroke="#5ea648" stroke-width="1.09" fill="none" stroke-linecap="round"/>' +
+        '<path d="M8 17 Q9.48 16.24 12.37 15.48" stroke="#345c30" stroke-width="1.09" fill="none" stroke-linecap="round"/>' +
+        '<path d="M19 16 Q17.28 15.12 13.94 14.24" stroke="#345c30" stroke-width="1.27" fill="none" stroke-linecap="round"/>' +
+        '<path d="M19 16 Q19.13 13.91 19.44 12.04" stroke="#5ea648" stroke-width="1.27" fill="none" stroke-linecap="round"/>' +
+        '<path d="M19 16 Q20.72 15.12 24.06 14.24" stroke="#345c30" stroke-width="1.27" fill="none" stroke-linecap="round"/>' +
         '</pattern>');
     }
 

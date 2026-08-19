@@ -571,6 +571,25 @@ const h = require('./harness');
   });
   r.check('that access itself still expires on a day rollover', afterRolloverInRange === false, { afterRolloverInRange });
 
+  // ---- grass tufts stay inside their own tile's row, not the row south ---
+  // Reported symptom: a stray row of grass tufts printed just past the
+  // bottom (south) edge of the live-control highlight, outside the green
+  // range polygon entirely. Cause: drawGrassTufts's per-cell anchor used
+  // the tile's BOTTOM screen edge as its (x, y) origin and then added a
+  // positive (top-to-bottom) spot.y fraction of a tile width - pushing
+  // every tuft up to a tile-height further south/down than its own cell,
+  // which the wash rectangles masked everywhere except the live-control
+  // area's southmost row, where the displaced tufts had no cell below to
+  // land in and printed outside the highlight. Sampled at the excluded
+  // tile's own center (well within where a south-shifted tuft would land)
+  // rather than its edge, so this fails the same way the visual bug did.
+  r.section('grass tufts do not bleed past the live-control boundary');
+  const livePlantRange = await page.evaluate(() => PLANT_RANGE);
+  const southOfRangeAlpha = await cellPaintedAlpha(0, -(livePlantRange + 1)); // one tile past the southmost live row
+  const southmostInRangeAlpha = await cellPaintedAlpha(0, -livePlantRange);   // the southmost live row itself
+  r.check('the tile just south of live range is not painted as grass', southOfRangeAlpha === 0, { southOfRangeAlpha });
+  r.check('the southmost tile still inside live range does paint as grass', southmostInRangeAlpha > 0, { southmostInRangeAlpha });
+
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));
 

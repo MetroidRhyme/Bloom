@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.7</span>
+      <span id="game-version">v2.39.8</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.8', changes: [
+        "Fixed a sliver of grass printing just past the bottom edge of " +
+          "your control area, outside the green highlight - grass now " +
+          "stays exactly inside the highlighted square, never past it."
+      ] },
       { version: 'v2.39.7', changes: [
         "Grass no longer shows over ground you walked earlier today but " +
           "aren't actively standing near anymore - it now only covers the " +
@@ -6934,7 +6939,17 @@
             // on this grid - fillRect instead of building and filling a
             // four-point path per tile.
             ctx.fillRect(xs[ai], ys[aj], xs[ai + 1] - xs[ai], ys[aj + 1] - ys[aj]);
-            grassCells.push({ x: xs[ai], y: ys[aj], pick: grassTuftPick(aq, ar) });
+            // Tuft spots (GRASS_TUFT_SPOTS) are authored as top-to-bottom
+            // fractions of one tile, so the anchor here has to be the
+            // tile's own TOP (north) edge - ys[aj+1], the smaller of the
+            // row's two y-pixels, not ys[aj]/the bottom edge the fillRect
+            // above starts from. Anchoring at the bottom edge instead (as
+            // this did before) pushed every tuft up to a whole tile-height
+            // further south than its own cell, which the wash rectangles
+            // masked everywhere except the live-control area's southmost
+            // row, where the displaced tufts had no cell below to land in
+            // and printed as a stray row of grass south of the highlight.
+            grassCells.push({ x: xs[ai], y: ys[aj + 1], pick: grassTuftPick(aq, ar) });
           }
         }
         drawGrassTufts(ctx, grassCells, cellPixelWidth());

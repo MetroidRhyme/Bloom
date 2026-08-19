@@ -510,20 +510,33 @@ const h = require('./harness');
   r.check('grassTuftPick always picks four or five tufts', out.validCount === true, out);
   r.check('grassTuftPick varies from one tile to the next', out.differsByTile === true, out);
 
-  // ---- grid mesh grass tracks live control only, not the whole walk ------
-  // Reported symptom: "I'm seeing grass in an area but it's not letting me
-  // take actions in that area" - a tile the player walked past earlier
-  // today (and so still passes inRange(), rewarding the walk as designed)
-  // kept painting as grass long after they moved on, reading as if it were
-  // still under active control. Fix: renderGridMesh now gates each tile on
-  // liveControl (live PLANT_RANGE, or a currently active Scry/Loki
-  // extension) instead of the wider state.todayAccessible, so the wash
-  // shrinks to the player's real live footprint immediately - no day
-  // rollover needed to see it happen, and no stale-canvas redraw bug is
-  // possible either, since there is no longer a wider "remembered" area to
-  // go stale in the first place.
-  r.section('grid mesh grass tracks live control, not the whole walk');
+  // ---- grid mesh grass tracks the whole day's walk, resets at midnight ---
+  // Reported symptom (of the OPPOSITE kind from what shipped in v2.39.7):
+  // ground the player had actually walked through earlier today - and which
+  // still grants real plant/water/harvest access all day, per inRange() -
+  // stopped reading as grass the moment they walked on, even though nothing
+  // about their access to it had changed. The "memory" was real in state
+  // (todayAccessible) but invisible on the map. Fix: renderGridMesh gates
+  // each tile on the same inRange() every gameplay action already goes
+  // through (live PLANT_RANGE/Scry/Loki OR anywhere walked within range
+  // earlier today), not just the live-position half of it (liveControl) -
+  // so grass always matches what's actually usable, and only shrinks back
+  // at a real local-midnight rollover (state.todayAccessible resetting),
+  // never just because the player moved on.
+  r.section("grid mesh grass tracks the whole day's walk, resets at midnight");
   const settleRaf = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(function () { requestAnimationFrame(resolve); })));
+  // The previous section leaves the map at whatever zoom its own resize
+  // check last toggled to (18 or 19) - a higher zoom shows fewer real tiles
+  // across the same 420px viewport, so a fixed tile offset calibrated for
+  // one zoom can land outside the padded viewport at another and never get
+  // reached by renderGridMesh's loop at all, independent of inRange(). Pin
+  // it back to a known zoom rather than depend on what the last section
+  // happened to leave behind.
+  await page.evaluate(() => new Promise((resolve) => {
+    if (map.getZoom() === 18) { resolve(); return; }
+    map.once('zoomend', resolve);
+    map.setZoom(18, { animate: false });
+  }));
   // Alpha of the pixel at a cell's own screen center - 0 means renderGridMesh
   // painted nothing there, since ctx.clearRect leaves fully transparent
   // pixels and any grass fill/tuft stroke writes a non-zero alpha. Leaflet's
@@ -557,19 +570,28 @@ const h = require('./harness');
   const farAlpha = await cellPaintedAlpha(6, 0);
   const nearAlpha = await cellPaintedAlpha(1, 0); // inside live PLANT_RANGE
 
-  r.check('a tile walked past earlier today still counts as in range (the real access, unchanged)', farInRange === true, { farInRange });
-  r.check('but that same tile does not paint as grass once out of live range', farAlpha === 0, { farAlpha });
-  r.check('a tile still inside live range does paint as grass', nearAlpha > 0, { nearAlpha });
+  r.check('a tile walked past earlier today counts as in range (real access)', farInRange === true, { farInRange });
+  r.check('and that same tile DOES paint as grass, even though it is out of live range', farAlpha > 0, { farAlpha });
+  r.check('a tile still inside live range also paints as grass', nearAlpha > 0, { nearAlpha });
 
-  // The day-rollover behavior inRange() itself still needs (today's walk
-  // stops granting access at local midnight) is unrelated to what the mesh
-  // paints, but still worth its own direct check.
+  // A real local-midnight rollover - not just moving away - is what should
+  // make the remembered strip stop reading as grass. Mirrors the "offline
+  // catch-up on tab resume" handler's own scheduleGridRedraw call (see
+  // v2.39.5) so the mesh actually repaints, the same way it would for a
+  // player who backgrounded the tab overnight.
+  await page.evaluate(() => { state.todayAccessibleDay = 'not-today'; scheduleGridRedraw(); });
+  await settleRaf();
+
   const afterRolloverInRange = await page.evaluate(() => {
     var here = latLngToCell(state.userPos.lat, state.userPos.lng);
-    state.todayAccessibleDay = 'not-today';
     return inRange(here.q + 6, here.r);
   });
-  r.check('that access itself still expires on a day rollover', afterRolloverInRange === false, { afterRolloverInRange });
+  const afterRolloverFarAlpha = await cellPaintedAlpha(6, 0);
+  const afterRolloverNearAlpha = await cellPaintedAlpha(1, 0); // still live, unaffected by the rollover
+
+  r.check('that access itself expires on a day rollover', afterRolloverInRange === false, { afterRolloverInRange });
+  r.check('and the remembered tile stops painting as grass once it does', afterRolloverFarAlpha === 0, { afterRolloverFarAlpha });
+  r.check('a tile still inside live range keeps painting through the rollover', afterRolloverNearAlpha > 0, { afterRolloverNearAlpha });
 
   // ---- grass tufts stay inside their own tile's row, not the row south ---
   // Reported symptom: a stray row of grass tufts printed just past the

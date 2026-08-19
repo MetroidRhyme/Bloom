@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.8</span>
+      <span id="game-version">v2.39.9</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.9', changes: [
+        "Grass (and the green highlight under it) is back to covering " +
+          "everywhere you've walked in range of today, not just the " +
+          "little circle right around you - it only clears at midnight, " +
+          "same as your walk always kept granting you access there."
+      ] },
       { version: 'v2.39.8', changes: [
         "Fixed a sliver of grass printing just past the bottom edge of " +
           "your control area, outside the green highlight - grass now " +
@@ -5586,8 +5592,8 @@
       });
       if (added) {
         saveState();
-        // The live-control grass wash (see renderGridMesh/liveControl) needs
-        // to move right away, not just on the next pan/zoom - e.g. the
+        // The grass wash (see renderGridMesh/inRange) needs to update right
+        // away, not just on the next pan/zoom - e.g. the
         // player is walking with 'following' off, so nothing else is about
         // to pan the map and trigger a redraw on its own. scheduleGridRedraw is
         // declared later in the file, textually, but function declarations
@@ -5602,11 +5608,11 @@
     // True if (q, r) is under the player's control RIGHT NOW - live
     // PLANT_RANGE around their current GPS position, or a currently active
     // Scry/Loki extension - without crediting the "was in range at some
-    // point earlier today" grant inRange() below also allows. Split out so
-    // renderGridMesh's ambient grass wash (see its own comment) can show
-    // only ground actively controlled this instant, not the whole of
-    // today's walk - that wider "remembered" area still grants real
-    // gameplay access via inRange(), it just no longer paints as grass.
+    // point earlier today" grant inRange() below also allows. Split out as
+    // its own function purely for readability (inRange is the "live OR
+    // today's walk" union of this plus the today-access fallback) - both
+    // renderGridMesh's grass wash and every gameplay action gate on the
+    // wider inRange(), not this on its own.
     function liveControl(q, r, now) {
       // Cheat Mode: no distance limit - every tile counts as in range, so
       // plant/water/harvest/sell/fertilize/pick/sprinkler all work anywhere
@@ -6864,19 +6870,22 @@
 
     // Soft outline mesh over the current viewport so planting spots read at a
     // glance, plus (drawn first, so the mesh lines above still show through
-    // it) a grass fill over every tile the player actively controls RIGHT
-    // NOW (see liveControl) - the same live PLANT_RANGE circle the separate,
-    // more solid rangeArea polygon fills (see onLocationUpdate), redrawn
-    // here as a lighter wash across the wider viewport plus a currently
-    // active Scry/Loki extension, if any. Deliberately does NOT extend to
-    // the whole of state.todayAccessible (everywhere still in range via
-    // today's walk, per inRange) - that wider set keeps granting real
-    // gameplay access, it just no longer paints as grass, so grass never
-    // reads as "walk here" when a tile has quietly gone back out of live
-    // control (see the "grass in an area I don't control" report this
-    // replaced markAccessibleToday's wider paint for). Both layers share the
-    // same viewport-bounded tile loop below, since recomputing that twice
-    // would be pure waste.
+    // it) a grass fill over every tile still in range RIGHT NOW - the live
+    // PLANT_RANGE circle the separate, more solid rangeArea polygon fills
+    // (see onLocationUpdate), a currently active Scry/Loki extension, AND
+    // everywhere else the player has walked within range of today (see
+    // inRange/state.todayAccessible/markAccessibleToday), all redrawn here
+    // as a lighter wash across the wider viewport. This intentionally
+    // matches inRange() exactly, not just its live-position half
+    // (liveControl) - inRange() is the one gate every plant/water/harvest/
+    // sell/fertilize/pick/sprinkler action actually goes through, so a tile
+    // that reads as grass is always a tile those actions actually work on,
+    // and a tile that stops reading as grass (a local-midnight rollover -
+    // see the offline-catch-up handler's own scheduleGridRedraw call, and
+    // markAccessibleToday resetting state.todayAccessible - both keep this
+    // in sync) is always a tile where they stop working. Both layers share
+    // the same viewport-bounded tile loop below, since recomputing that
+    // twice would be pure waste.
     function renderGridMesh() {
       if (!gridRenderer._ctx || !gridRenderer._bounds) return;
       var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
@@ -6920,12 +6929,11 @@
       function colOn(i) { return xOk[i] || xOk[i + 1]; }
       function rowOn(j) { return yOk[j] || yOk[j + 1]; }
 
-      // liveControl (not the wider inRange) gates every tile here - see the
+      // inRange (not just liveControl) gates every tile here - see the
       // function comment above renderGridMesh for why the ambient wash
-      // deliberately stops at live control instead of following the whole
-      // of today's walk.
+      // deliberately follows the whole of today's walk instead of stopping
+      // at live control.
       if (state.userPos || state.cheatMode) {
-        var meshNow = Date.now();
         ctx.fillStyle = hexToRgba(GRASS_WASH, GRASS_WASH_OPACITY);
         var grassCells = [];
         for (var aq = minQ; aq <= maxQ; aq++) {
@@ -6934,7 +6942,7 @@
           for (var ar = minR; ar <= maxR; ar++) {
             var aj = ar - minR;
             if (!rowOn(aj)) continue;
-            if (!liveControl(aq, ar, meshNow)) continue;
+            if (!inRange(aq, ar)) continue;
             // An axis-aligned rectangle, which is all a cell has ever been
             // on this grid - fillRect instead of building and filling a
             // four-point path per tile.

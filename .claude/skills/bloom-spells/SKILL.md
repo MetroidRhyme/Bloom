@@ -175,6 +175,23 @@ forget the others, which is exactly what happened building the grow rune:
   wrong in the diff that caused it - trace any zoom-size bug straight to
   this list before looking anywhere else. See the `bloom-playtest` skill's
   own gotcha for how to actually test this.
+- **The rune's render function must be viewport-virtualized, and the order
+  inside it matters.** A rune is not one layer - the rain rune is *seven*
+  (glyph, tile lattice, circle, two stars, ticks, diamonds), all real lat/lng
+  geometry that Leaflet reprojects on every zoom. Left unvirtualized, every
+  rune the player has ever made stays alive forever anywhere on Earth, and
+  zoom cost grows with the lifetime rune count instead of with what is on
+  screen. Copy `renderRainRings`/`renderGrowRunes`: build only entries passing
+  `boxInMarkerViewport(vc, q, r, <the rune's own half-span in tiles>)` and let
+  the existing `seen`-sweep tear the rest down. Test the box against the
+  rune's *boundary* extent, not its center tile - a grow rune spans
+  `GROW_PULSE_RADIUS` tiles either way, so its ring can fill the screen while
+  its center sits well off it. Two ordering rules inside the function: any
+  state bookkeeping (the grow rune's own expiry prune) runs **before** the
+  viewport check, or off-screen runes never expire and pile up in the save;
+  and `_iconBuiltPx` is written **before** it too, unconditionally, or the
+  zoom-rescale gotcha above comes straight back on a pass where nothing was in
+  view. See the `bloom-perf` skill for the wider picture.
 - **Rune ground is never a valid plant target, from every path a seed can
   land through**: `runeAt(q, r)` (returns `{ kind: 'rain'|'grow', key }`)
   is the one shared lookup - `rainRings[key]` directly for rain's single

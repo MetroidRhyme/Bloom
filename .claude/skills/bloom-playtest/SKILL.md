@@ -1,6 +1,6 @@
 ---
 name: bloom-playtest
-description: Use when verifying Bloom UI/game-logic changes with Playwright, or when asked for a standalone/isolated demo build of one Bloom subsystem, or when a JS-driven playtest build isn't loading for the user and a dependency-free static reference is needed instead. Covers the headless-chromium test harness, testing zoom-dependent map behavior (marker icon sizing) against the real Leaflet map, the splice-a-standalone-tool pattern, and the static-bake fallback.
+description: Use when verifying Bloom UI/game-logic changes with Playwright, when profiling Bloom's frame rate or proving a performance change didn't alter what the game looks like, when asked for a standalone/isolated demo build of one Bloom subsystem, or when a JS-driven playtest build isn't loading for the user and a dependency-free static reference is needed instead. Covers the headless-chromium test harness, building a realistic lifetime-save fixture, frame-time sampling, pixel-diffing the map against the previous build, A/B-ing a suite against the shipped code, testing zoom-dependent map behavior (marker icon sizing) against the real Leaflet map, the splice-a-standalone-tool pattern, and the static-bake fallback.
 ---
 
 # Testing and demoing Bloom
@@ -88,6 +88,33 @@ entirely, with no error to flag it. Always compute both from one source:
 `var c = cellCenter(q, r); rainRings[k] = { q: q, r: r, lat: c.lat, lng: c.lng };`
 then `map.setView([c.lat, c.lng], zoom)` - not the other way around.
 
+**Gotcha: lock GPS *before* building any fixture, or the fixture lands at
+coordinates the viewport math will never match.** `onGpsLocked` rewrites the
+global `CELL_LNG_DEG` once, correcting it for the player's latitude, and then
+persists it to `bloom_cell_lng`. Every `q`/`r` is lat/lng divided by that
+constant (see the gotcha above), so a fixture built *before* the lock is
+indexed against the uncorrected value and every one of its tiles sits ~26%
+further out (at SF latitudes) than anything computed after. The symptom is
+maximally confusing: no error, no console output, `state.plants` full of
+perfectly valid-looking entries, and `renderPlants()` building **zero**
+markers because `viewportCellBounds()` returns a `q` range nowhere near the
+fixture's. Note the lock does not happen just because you waited - with a
+brand-new save, `state.gpsPrimerSeen` is false, so the GPS primer modal opens
+and `requestLocation()` is never called at all. Force it yourself first:
+
+```js
+// twice: the first call creates rangeArea and triggers onGpsLocked (which is
+// what rewrites CELL_LNG_DEG), the second runs against the corrected value
+onLocationUpdate({ coords: { latitude: 37.7749, longitude: -122.4194, accuracy: 5 } });
+onLocationUpdate({ coords: { latitude: 37.7749, longitude: -122.4194, accuracy: 5 } });
+var here = latLngToCell(37.7749, -122.4194);   // only NOW is this stable
+```
+
+If a test reports zero markers for a garden you know you just built, this is
+almost always why. Print `latLngToCell(lat, lng)` next to
+`viewportCellBounds(0.5)` and compare the `q` ranges - a clean ~1.26x ratio
+between them is the fingerprint.
+
 **Gotcha: a test helper that fast-forwards growth by calling `applyWatering`
 directly can silently skip a spell's own trigger.** Several mutation hooks
 (the grow spell's `checkGrowBlocksAround`, for instance - see the
@@ -142,7 +169,131 @@ comparing each marker's actual rendered `<svg width>` against
 version of the same test produced inconsistent results that didn't clearly
 point at the real bug.
 
-## 2. Building a standalone, dependency-free playtest tool
+## 2. Profiling and performance regression
+
+Read `bloom-perf` for what the numbers mean and which ones matter; this
+section is how to get them. All of it builds on the section 1 harness (CDN
+interception, tile aborts, geolocation stub, GPS locked before any fixture).
+
+### A realistic lifetime-save fixture
+
+Perf problems in Bloom are problems of *accumulation*, so a fixture of ten
+flowers proves nothing. Two shapes are worth having:
+
+- **Lifetime save** - ~1500 plants scattered over a +/-120-tile "city" with a
+  few dozen near the player, plus ~6000 `state.visited` tiles. This is what
+  exercises the O(save size) paths: `saveState`, `updateHUD`, `tickPlants`.
+- **Dense viewport** - every tile on screen planted (~350 markers at zoom 18
+  on a 420x900 viewport). This is what exercises the per-frame paths, and it
+  is a *plausible* save, not a pathological one: a player filling in their own
+  neighbourhood over months arrives here.
+
+Derive lat/lng from `cellCenter(q, r)` and never the other way round (see the
+`q`/`r` gotcha in section 1), and seed the randomness so runs are comparable.
+
+### Frame-time sampling - the number that means "choppy"
+
+Per-call microbenchmarks miss the actual complaint. Sample real frame deltas:
+
+```js
+const frames = await page.evaluate(() => new Promise((resolve) => {
+  var d = [], last = performance.now(), n = 0;
+  function tick(t) { d.push(t - last); last = t; if (++n < 140) requestAnimationFrame(tick); else resolve(d); }
+  requestAnimationFrame(tick);
+}));
+const s = frames.slice(10).sort((a, b) => a - b);   // drop warm-up frames
+// report p50, p95, and the count over 20ms
+```
+
+Report **frames over 20ms out of the sample** alongside p50/p95. A p50 of
+16.7ms with 40% of frames long is a real stutter that a mean would hide.
+
+To attribute a cost, toggle one thing and re-sample in the same page - much
+faster and less noisy than separate runs. Injecting a `<style>` override is
+the easiest scalpel:
+
+```js
+// isolate ambient animation cost without touching the file
+await page.evaluate(() => document.body.classList.add('bg-paused'));
+// or override individual rules to bisect which animation is responsible
+```
+
+Sweeping a live constant works the same way - `WIND_ANIM_BUDGET` is a plain
+`var`, so `page.evaluate((v) => { WIND_ANIM_BUDGET = v; applyWindBudget(); })`
+gives a whole cost curve in one page load. That curve is how the shipped
+budget was chosen; redo it rather than guessing a new value.
+
+### Pixel-diffing the map (proving an optimization changed nothing)
+
+This is the check that makes a rendering optimization safe to ship. Screenshot
+`#map` on the old and new builds with `reducedMotion: 'reduce'` in the context
+options - that freezes every ambient animation on *both* sides, so only real
+rendering differences survive - then compare the decompressed PNG pixel data:
+
+```js
+const page = await browser.newPage({ viewport: { width: 420, height: 900 }, reducedMotion: 'reduce' });
+// ... build the same seeded fixture, same setView, then:
+await page.locator('#map').screenshot({ path: out });
+```
+
+```python
+# compare raw pixels, not file bytes - PNG encoders are not deterministic
+import zlib, struct
+def raw(p):
+    d = open(p, 'rb').read(); i = 8; idat = b''
+    while i < len(d):
+        ln = struct.unpack('>I', d[i:i+4])[0]; typ = d[i+4:i+8]
+        if typ == b'IDAT': idat += d[i+8:i+8+ln]
+        i += 12 + ln
+    return zlib.decompress(idat)
+print('IDENTICAL' if raw(a) == raw(b) else 'DIFFERS')
+```
+
+Get the previous build with `git show HEAD:index.html > /tmp/old-index.html`
+and point the same script at each file in turn. Put everything visually
+load-bearing in one shot - grid mesh, the today-access fill, markers across
+several species and stages, a rain rune and a grow rune with their full
+boundaries - so one comparison covers the lot. **Byte-identical is a
+realistic bar**, not an aspiration: every optimization in v2.38.0 met it.
+
+### A/B a whole suite against the shipped build
+
+Take the target file as `process.argv[2]` in every test script. Then the same
+suite runs against both builds, which separates "my change broke this" from
+"this was already broken / my test is wrong" in one step - and it is
+frequently the latter. Guard checks for functions that only exist on one side
+so the script survives both:
+
+```js
+const hasFeature = await page.evaluate(() => typeof writeSaveNow === 'function');
+console.log('-- save coalescing --' + (hasFeature ? '' : ' (SKIPPED - not in this build)'));
+if (hasFeature) { /* ... */ }
+```
+
+The expected shape of a good result: the new build passes everything, and the
+old build fails **only** the checks covering what you deliberately changed.
+Anything else failing on both is a pre-existing issue or a harness bug - fix
+the harness before reading anything into it.
+
+### Perf checks worth keeping in the suite
+
+Beyond frame timing, these caught real things and are cheap to assert:
+
+- **Save coalescing behaves**: a burst of 200 `saveState()` calls collapses to
+  a small number of real writes, the *last* value is what persists, and
+  backgrounding force-flushes. Fake `document.hidden` with
+  `Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })`
+  and dispatch `visibilitychange`. Remember `flushSave()` writes nothing
+  unless something called `saveState()` first - a fixture that mutates `state`
+  directly and then flushes silently saves nothing.
+- **Virtualization actually virtualizes**: put one entity on screen and one
+  500 tiles away, assert only one layer set exists, pan to the far one, assert
+  they swapped.
+- **Off-screen bookkeeping still runs**: expire an off-screen grow rune and
+  assert it left `state.growRunes` anyway. Easy to break by moving a viewport
+  filter above a prune.
+
+## 3. Building a standalone, dependency-free playtest tool
 
 For handing the user something they can open and interact with, isolated
 from Leaflet/GPS entirely (built for the Greenhouse; the same shape works
@@ -173,7 +324,7 @@ change ported into these scratch source files and re-spliced - it's easy to
 ship a fix to `index.html` and forget the playtest silently drifts out of
 sync. Treat "update the playtest" as part of the change, not an afterthought.
 
-## 3. Static-bake fallback (when a JS-driven build won't load for the user)
+## 4. Static-bake fallback (when a JS-driven build won't load for the user)
 
 If the user reports an interactive playtest "won't load" and the cause
 isn't immediately obvious (and especially if it's happened more than

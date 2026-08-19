@@ -54,6 +54,16 @@ path). At minimum, before shipping any change, confirm:
 - `localStorage` migration still works if `state` shape changed at all -
   load an old-shaped saved blob, confirm it upgrades without data loss, and
   confirm a *second* load doesn't re-apply the migration (idempotency).
+- **Nothing the change added animates forever on a map marker**, and nothing
+  it added builds a Leaflet layer per entry from a registry that grows over
+  the life of a save. These two are the historical causes of Bloom feeling
+  slow, they don't show up at all on a small test save, and they are much
+  cheaper to catch here than after a player reports choppiness - see the
+  `bloom-perf` skill. If the change touches rendering, marker batching,
+  `saveState`, or anything on the per-frame/per-GPS-fix/per-tick path, also
+  pixel-diff the map against the previous build and re-run the zoom-rescale
+  walk (both recipes in `bloom-playtest`), and put the before/after numbers in
+  the commit body.
 - Any new `toast(...)` call added by the change only fires for something
   that actually blocks the player (out of range, out of stock, GPS not
   locked, an invalid action) - not routine confirmation of something that

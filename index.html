@@ -171,22 +171,19 @@
        the toolbox (which now hugs the top-left corner, see #tool-rail) so
        the two never overlap - it used to be the other way around, with the
        toolbox pushed down to clear this banner instead. */
-    /* #gps-denied-banner and #wb-tour-banner share this box exactly - the
-       three never show at once (GPS locking is a precondition for the
-       tutorial ever starting, so if the denial banner is up the tutorial
-       can't have begun; the welcome-back tour only ever starts once
-       onboarding AND the tutorial are both already done, and only after a
-       real fix, which rules out both other banners), so one shared
-       position avoids fighting over the same screen real estate. */
-    #tutorial-banner, #gps-denied-banner, #wb-tour-banner {
+    /* #gps-denied-banner shares this box exactly - GPS locking is a
+       precondition for the tutorial ever starting, so if the denial banner
+       is up the tutorial can't have begun - so one shared position avoids
+       fighting over the same screen real estate. */
+    #tutorial-banner, #gps-denied-banner {
       position: fixed; left: 12px; right: 12px; top: calc(var(--hud-top-h) + 74px); z-index: 950;
       background: linear-gradient(135deg, #fff6e0, #ffffff);
       border: 2px solid var(--amber); border-radius: 16px; box-shadow: var(--shadow);
       padding: 12px 16px; text-align: center; display: none;
     }
-    #tutorial-banner.open, #gps-denied-banner.open, #wb-tour-banner.open { display: block; }
-    #tutorial-text, #gps-denied-text, #wb-tour-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
-    #tutorial-skip-link, #wb-tour-skip-link {
+    #tutorial-banner.open, #gps-denied-banner.open { display: block; }
+    #tutorial-text, #gps-denied-text { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
+    #tutorial-skip-link {
       display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700;
       color: var(--text-dim); text-decoration: underline; cursor: pointer;
     }
@@ -195,31 +192,6 @@
       background: var(--green); color: #fff; font-size: 13px; font-weight: 800; cursor: pointer;
     }
     #gps-retry-btn:active { background: var(--green-dark); }
-    #wb-tour-progress {
-      font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 2px;
-    }
-    /* The pulsing ring dropped at each tour stop (see advanceWelcomeBackTour)
-       - an expanding, fading circle rather than anything painted onto the
-       plant's own marker, since that marker gets rebuilt independently on
-       zoom/tick and fighting that rebuild for a transient effect isn't
-       worth it. Colored per stop type, echoing the same map-badge colors
-       used everywhere else (green = ready, blue = wilted). */
-    .wb-tour-ping {
-      width: 100%; height: 100%; border-radius: 50%; box-sizing: border-box;
-      background: rgba(76,175,109,0.25); border: 3px solid var(--green);
-      animation: wbTourPing 1.1s ease-out infinite;
-    }
-    .wb-tour-ping.wilted { background: rgba(74,163,255,0.25); border-color: var(--blue); }
-    .wb-tour-ping.wildNew { background: rgba(240,169,58,0.28); border-color: var(--amber); }
-    .wb-tour-ping.wildGone { background: rgba(138,132,120,0.22); border-color: var(--text-dim); }
-    @keyframes wbTourPing {
-      0% { transform: scale(0.55); opacity: 0.9; }
-      70% { transform: scale(1.5); opacity: 0.15; }
-      100% { transform: scale(0.55); opacity: 0; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .wb-tour-ping { animation: none; opacity: 0.55; }
-    }
 
     /* ================= PLANT PANEL ================= */
     #plant-panel {
@@ -1451,7 +1423,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.36.1</span>
+      <span id="game-version">v2.37.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1532,17 +1504,6 @@
   <div id="gps-denied-banner">
     <div id="gps-denied-text">Bloom needs your location to know which flowers are near you.</div>
     <button id="gps-retry-btn" onclick="retryLocation()">Try Again</button>
-  </div>
-
-  <!-- The welcome-back tour - see startWelcomeBackTourIfAny. Shares this
-       same slot with the two banners above; the three can never be open at
-       once (this only ever starts once onboarding and the tutorial are
-       both already done, and only after a real GPS fix, which rules out
-       both). -->
-  <div id="wb-tour-banner">
-    <div id="wb-tour-progress">&nbsp;</div>
-    <div id="wb-tour-text">&nbsp;</div>
-    <span id="wb-tour-skip-link" onclick="skipWelcomeBackTour()">Skip</span>
   </div>
 
   <div id="hud-bottom">
@@ -1841,6 +1802,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.37.0', changes: [
+        'Removed the welcome-back tour - the camera no longer flies around ' +
+          'on its own to show what happened while you were away. Also ' +
+          'trimmed the pop-up messages way down: routine stuff like ' +
+          'planting, watering, selling, and buying no longer announces ' +
+          'itself - only real problems (out of seeds, out of range, ' +
+          'waiting on GPS, and the like) still pop up a message.'
+      ] },
       { version: 'v2.36.1', changes: [
         'Fixed the grow rune\'s center icon randomly rendering too small ' +
           'or too large while zooming in and out - it now stays locked to ' +
@@ -3122,13 +3091,13 @@
         // existing player's OS permission decision was already made long
         // ago and re-explaining it now would be pure friction for no benefit.
         gpsPrimerSeen: false,
-        // When the player was last actually in the game - the checkpoint
-        // the welcome-back tour diffs against (see startWelcomeBackTourIfAny,
-        // set at the end of every onGpsLocked()). null means "no checkpoint
-        // yet" - both a brand-new save and an existing save that predates
-        // this feature land here, and both correctly get no tour on the
-        // very next load (nothing to compare against), only from the visit
-        // after that once a real checkpoint exists.
+        // When the player was last actually in the game - the checkpoint the
+        // offline catch-up (sprinklers, rain rings, plant growth, wild
+        // spawn) measures the gap against, set at the end of every
+        // onGpsLocked() and every visibilitychange resume. null means "no
+        // checkpoint yet" - both a brand-new save and an existing save that
+        // predates this field land here, and both correctly skip catch-up on
+        // the very next load (nothing to measure against).
         lastSeenAt: null,
         // Version string the player last actually saw (via #game-version),
         // for the "What's New" popup - see maybeShowWhatsNew/openWhatsNew.
@@ -3478,8 +3447,6 @@
       saveState();
       renderPlants();
       updateHUD();
-      toast('\u{1F331} ' + variantName(vk) + ' planted! It will be ready for water in ' +
-        formatDuration(waitMs) + '.');
       vibrate(20);
       tutorialOnPlant(key);
       return key;
@@ -3579,7 +3546,7 @@
       if (!p) return;
       var now = Date.now();
       var res = applyWatering(p, now);
-      var grew = res.grew, revealed = res.revealed;
+      var grew = res.grew;
 
       recomputePlant(p, now);   // refresh derived state for immediate UI feedback
       saveState();
@@ -3587,18 +3554,10 @@
       if (viewingKey === key) renderPlantPanel(key);
       updateHUD();
 
-      // A routine top-up (not grown, not a cross reveal) gets no toast at
-      // all - watering is a plain tap done in a row across a whole bed, and
-      // the can-pour animation plus the marker's own instant change (badge
-      // gone, wilt cleared) already say "watered" without a popup on top.
-      // Only the two genuinely new pieces of news - a stage advanced, or a
-      // mystery cross opened - are worth a line, and both are rare enough
-      // per tap not to pile up.
-      if (revealed) {
-        toast('\u{1F338} Your cross opened - it\'s a ' + variantName(revealed) + '!');
-      } else if (grew) {
-        toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
-      }
+      // Watering never pops a toast - it's a plain tap done in a row across
+      // a whole bed, and the can-pour animation plus the marker's own
+      // instant change (badge gone, wilt cleared, stage art advanced)
+      // already say "watered" without a popup on top.
       vibrate(grew ? 30 : 15);
       tutorialOnWater(key);
       // A manual tap is the most common way a plant reaches MAX_STAGE - see
@@ -3655,12 +3614,10 @@
         updateHUD();
         closePlantPanel();
         vibrate(20);
-        toast('\u{1F331} Undone - got your ' + variantName(vk) + ' seed back');
         return 0;
       }
 
       var isCluster = d.stage >= MAX_STAGE;
-      var label = variantName(vk) + (isCluster ? ' cluster' : '');
       delete state.plants[key];
       // This tile just went empty - either it was a ring's own now-broken
       // spoke, or it was blocking a candidate center that can now form (see
@@ -3679,13 +3636,11 @@
         state.currency += value;
         state.stats.sold++;
         state.stats.earned += value;
-        toast('Sold your ' + label + ' for ' + value + ' \u{1F338}');
       } else {
         var gained = rollWeighted(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
         state.seeds[vk] = (state.seeds[vk] || 0) + gained;
         state.stats.extracted += gained;
         state.stats.extractedFlowers++;
-        toast('\u{1F331} Got ' + gained + ' seed' + (gained === 1 ? '' : 's') + ' from your ' + label);
       }
 
       saveState();
@@ -3780,17 +3735,16 @@
     function nextSprinklerCost() {
       return SPRINKLER_COST + SPRINKLER_COST_STEP * sprinklerOwnedCount();
     }
-    // Fires the one-time "you can buy this now" toast the moment the gate
-    // above first opens. Called from every place stats.grown changes
-    // (harvestPlant, pickWild) rather than off a timer, so it lands right at
-    // the harvest that actually crossed the line - and the persisted flag
-    // means it can never repeat even though every call site rechecks the
-    // same threshold.
+    // Flips the one-time unlock flag the moment the gate above first opens.
+    // Called from every place stats.grown changes (harvestPlant, pickWild)
+    // rather than off a timer, so it lands right at the harvest that
+    // actually crossed the line - and the persisted flag means it can never
+    // repeat even though every call site rechecks the same threshold. The
+    // Shop itself is what shows sprinklers becoming available.
     function checkSprinklerUnlock() {
       if (state.sprinklerUnlockAnnounced || !sprinklerUnlocked()) return;
       state.sprinklerUnlockAnnounced = true;
       saveState();
-      toast('\u{1F4A6} Sprinklers unlocked! Check the Shop \u{1F338}');
     }
 
     // Runs on its own short interval (SPRINKLER_TICK_MS, well under
@@ -3845,8 +3799,7 @@
     //  second. This is the offline counterpart: called once at the top of
     //  every real "resume" (a fresh page load, and the visibilitychange
     //  listener's real-gap branch - see both call sites), before anything
-    //  else reads plant state, in particular before the welcome-back tour
-    //  builds its stops from recomputePlant.
+    //  else reads plant state via recomputePlant.
     //
     //  Same timestamp-derived philosophy as recomputePlant (see the GROWTH
     //  ENGINE section above): a plant's own lastWateredAt/readyAt/stage
@@ -4062,13 +4015,9 @@
     // through `rainRings`.
     function activateRainRune(key) {
       var now = Date.now();
-      var wasActive = isRuneActive(key, now);
       state.runeWater[key] = now;
       saveState();
       renderRainRings();
-      toast(wasActive
-        ? '\u{1F4A7} The rain rune tops back up - a full 24 hours to go again'
-        : '\u{1F4A7} The rain rune stirs - it will rain for the next 24 hours');
       vibrate(20);
     }
 
@@ -4552,11 +4501,6 @@
       renderPlants();
       updateHUD();
       if (viewingKey === pkey) renderPlantPanel(pkey);
-      if (res.revealed) {
-        toast('\u{1F338} Your cross opened - it\'s a ' + variantName(res.revealed) + '!');
-      } else if (res.grew) {
-        toast('\u{1F4A6} ' + GROWTH_MESSAGES[p.stage]);
-      }
       // A landed droplet is the only way a plant reaches MAX_STAGE outside
       // a manual tap - see waterPlant's own call to this same check.
       if (res.grew && p.stage >= MAX_STAGE) checkGrowBlocksAround(p.q, p.r);
@@ -4632,7 +4576,6 @@
     }
 
     function resolveGrowBlock(aq, ar, cells) {
-      var vk = variantKey(cells[0].species, colorOfPlant(cells[0]));
       var corners = [[aq, ar], [aq + 1, ar], [aq, ar + 1], [aq + 1, ar + 1]];
       corners.forEach(function (c) {
         delete state.plants[cellKey(c[0], c[1])];
@@ -4661,7 +4604,6 @@
       // waits that start after this moment (applyWatering's own
       // growRuneSpeedupActiveAt check handles that ongoing case for every
       // stage transition for as long as the rune stays lit).
-      var sped = 0;
       Object.keys(state.plants).forEach(function (key) {
         var p = state.plants[key];
         if (p.stage >= MAX_STAGE || p.readyAt <= now) return; // nothing left to advance, or not waiting
@@ -4670,7 +4612,6 @@
         });
         if (!near) return;
         p.readyAt = now + Math.round((p.readyAt - now) / GROW_RUNE_MULTIPLIER);
-        sped++;
       });
 
       saveState();
@@ -4678,10 +4619,6 @@
       updateHUD();
       closePlantPanel();
       renderGrowRunes();
-      toast('\u{1F300} The ' + variantName(vk) + ' grow spell fires! Growth within ' + GROW_PULSE_RADIUS +
-        ' tiles is ' + GROW_RUNE_MULTIPLIER + 'x faster for the next ' + (GROW_RUNE_MS / HOUR) + ' hours' +
-        (sped ? ' - ' + sped + ' nearby flower' + (sped === 1 ? '' : 's') + ' ' +
-          (sped === 1 ? 'is' : 'are') + ' already closer to ready.' : '.'));
       vibrate(30);
     }
 
@@ -5281,9 +5218,9 @@
     var lokiZoneLayers = {}; // zoneKey -> { polygon, active }
     function renderLokiZones() {
       renderZoneRegistry(lokiZones, lokiZoneLayers, lokiZoneStyle, function (active) {
-        toast(active
-          ? '\u{1F451} Loki\'s Control is active - this area holds control for up to 3 days now.'
-          : '\u{1F451} A corner wilted - Loki\'s Control has lapsed here until every corner is rewatered.');
+        if (!active) {
+          toast('\u{1F451} A corner wilted - Loki\'s Control has lapsed here until every corner is rewatered.');
+        }
       });
     }
 
@@ -5317,9 +5254,9 @@
     var scryZoneLayers = {}; // zoneKey -> { polygon, active }
     function renderScryZones() {
       renderZoneRegistry(scryZones, scryZoneLayers, scryZoneStyle, function (active) {
-        toast(active
-          ? '\u{1F441} Scry is active - this area is in range even where you have never walked.'
-          : '\u{1F441} A corner wilted - Scry has lapsed here until every corner is rewatered.');
+        if (!active) {
+          toast('\u{1F441} A corner wilted - Scry has lapsed here until every corner is rewatered.');
+        }
       });
     }
 
@@ -5576,7 +5513,6 @@
       }
 
       var spots = pickWildSpots(needed);
-      var rareSpawned = false;
       spots.forEach(function (h) {
         var c = cellCenter(h.q, h.r);
         var sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
@@ -5588,7 +5524,6 @@
         var col = rare
           ? WILD_RARE_COLORS[Math.floor(Math.random() * WILD_RARE_COLORS.length)]
           : STANDARD_COLORS[Math.floor(Math.random() * STANDARD_COLORS.length)];
-        if (rare) rareSpawned = true;
         state.wild[cellKey(h.q, h.r)] = {
           q: h.q, r: h.r, lat: c.lat, lng: c.lng, species: sp.key, color: col,
           stage: 2, spawnedAt: Date.now()
@@ -5601,18 +5536,8 @@
       updateHUD();
 
       if (spots.length > 0) {
-        var near = nearestWild();
         wildStatus = spots.length + ' scattered within ' + WILD_SPAWN_RADIUS_M +
           'm. They wilt after ' + (WILD_WILT_MS / HOUR) + 'h and are gone by ' + (WILD_GONE_MS / HOUR) + 'h.';
-        // Lead with the distance to the closest one - most of the crop lands
-        // off-screen, so otherwise this announces blooms against a map that
-        // looks completely unchanged. A rare color in the batch gets its own
-        // call-out rather than blending into the ordinary count, since
-        // otherwise the one thing worth hurrying out for reads identically
-        // to every other day's crop.
-        toast((rareSpawned ? '\u{2728} A rare-colored wild flower is out there today! ' : '\u{1F33C} ') +
-          spots.length + ' wild ' + (spots.length === 1 ? 'flower' : 'flowers') + ' bloomed nearby' +
-          (near ? ' - nearest is ' + Math.round(near.dist) + 'm ' + near.dir : '') + '!');
         vibrate(25);
       } else {
         wildStatus = 'Nowhere free to scatter any - your flowers cover the area.';
@@ -6544,9 +6469,6 @@
     // to it snapping to their location again.
     map.on('dragstart', function () {
       state.following = false; saveState();
-      // A manual drag is the player reaching for control of the camera -
-      // don't fight it by flying to the next tour stop out from under them.
-      if (wbTour.active) skipWelcomeBackTour();
     });
 
     // Tile mesh is only drawn once zoomed in this close - below it the tile
@@ -6899,7 +6821,6 @@
       renderWeeds();
       updateCurrencyPill();
       playWeedPluckFx(w);
-      toast('\u{1F33F} Plucked a weed - +1 \u{1F338}');
       vibrate(15);
     }
 
@@ -8279,7 +8200,6 @@
       renderSprinklers();
       tickSprinklers(); // an adjacent plant may already be ready/wilted - catch it up right away
       updateHUD();
-      toast('\u{1F4A6} Sprinkler placed - it waters every flower next to it automatically');
       vibrate(20);
       if (!(state.sprinklerInventory > 0)) unequipSprinkler(); else renderSprinklerToggle();
     }
@@ -8297,7 +8217,6 @@
       saveState();
       renderSprinklers();
       equipSprinkler(); // also vibrates - the one buzz covers both "picked up" and "equipped"
-      toast('Picked up the sprinkler \u{1F4A6} - tap a spot to move it');
     }
 
     document.getElementById('sprinkler-toggle').addEventListener('click', onSprinklerToggleClick);
@@ -8327,177 +8246,34 @@
     });
 
     // -----------------------------------------------------------------------
-    //  WELCOME-BACK TOUR
-    //  A short, skippable camera tour offering a status check-in whenever the
-    //  player is "back" - either a fresh page load once onboarding/tutorial/
-    //  fertilizer-unlock are all already done (see onGpsLocked), or the tab
-    //  becoming visible again after a real gap (see the visibilitychange
-    //  listener below, for the common case of backgrounding/minimizing
-    //  rather than fully closing the tab - the JS keeps running and
-    //  onGpsLocked never fires again on its own). Every stop is derived from
-    //  timestamps the plant/wild objects already carry (readyAt,
-    //  lastWateredAt, spawnedAt) - new wild flowers and vanished wild
-    //  flowers are diffed against state.lastSeenAt (a one-off event only
-    //  worth mentioning once), but a ready or wilted plant is reported by
-    //  its CURRENT state regardless of when it first became that way - it's
-    //  still true and still actionable, so a flower that was already ready
-    //  before the player last left is exactly the kind of thing a "here's
-    //  what needs you" check-in should surface, not silently omit for being
-    //  old news. Purely a presentation layer: it never changes game state
-    //  itself (aside from advancing the checkpoint), so skipping it early
-    //  costs nothing and loses no information - the plant or wild flower it
-    //  would have shown you is still sitting on the map exactly where it was.
+    //  OFFLINE CATCH-UP ON RETURN
+    //  Whenever the tab becomes visible again after a real gap (backgrounding
+    //  or minimizing rather than fully closing it - the JS keeps running and
+    //  onGpsLocked never fires again on its own), catch every timestamp-
+    //  derived system up to now: sprinklers, rain rings, plant stages, and
+    //  today's wild-flower spawn. No camera movement and no message pops for
+    //  any of it - the map markers and HUD already reflect the caught-up
+    //  state on their own next render, exactly as if the tab had been open
+    //  the whole time.
     // -----------------------------------------------------------------------
-    var wbTour = { active: false, stops: [], index: -1, timer: null, marker: null };
-    var WB_TOUR_MAX_STOPS = 6;   // caps a long absence at a highlight reel, not a slog
-    var WB_TOUR_DWELL_MS = 1600; // "a quick 1 or 2 second focus on each thing"
-    var WB_TOUR_ZOOM = 17;       // comfortable close-up zoom for each stop and the fly-back home
     // How long the tab has to have been hidden before becoming visible again
-    // counts as "away" - keeps a quick alt-tab from retriggering the tour on
-    // every single switch. Only gates the visibilitychange path; a fresh
-    // page load (onGpsLocked) always checks, same as before.
-    var WB_TOUR_MIN_AWAY_MS = 5 * 60 * 1000;
+    // is worth a catch-up pass - keeps a quick alt-tab from re-running this
+    // on every single switch. Only gates the visibilitychange path; a fresh
+    // page load (onGpsLocked) always runs it, same as before.
+    var AWAY_CATCHUP_MIN_MS = 5 * 60 * 1000;
 
-    // Wild flowers that finished vanishing while the game was closed. Has to
-    // be captured before tickPlants() sweeps them out of state.wild - by the
-    // time buildWelcomeBackTour would otherwise look, they're already gone
-    // and unrecoverable, since nothing else remembers a wild flower once
-    // it's swept.
-    function collectGoneWild(now) {
-      return Object.keys(state.wild)
-        .filter(function (key) { return wildDerived(state.wild[key], now).gone; })
-        .map(function (key) { return state.wild[key]; });
-    }
-
-    // lastSeen is the checkpoint from BEFORE this session (captured in
-    // onGpsLocked before state.lastSeenAt is advanced to now); goneWild is
-    // collectGoneWild()'s pre-sweep snapshot. Returns nothing - starts the
-    // tour itself if there is anything worth showing.
-    function buildAndStartWelcomeBackTour(lastSeen, goneWild) {
-      if (!lastSeen) return; // no prior checkpoint yet - nothing to diff against
-      var now = Date.now();
-      var stops = [];
-
-      Object.keys(state.plants).forEach(function (key) {
-        var p = state.plants[key];
-        var d = recomputePlant(p, now);
-        var vk = variantKey(p.species, colorOfPlant(p));
-        // Current state, not "became true since lastSeen" - a flower that
-        // was already ready or wilted before the player last left is still
-        // exactly as actionable as one that turned that way in between, so
-        // it stays a stop rather than being silently swallowed for being
-        // old news (see the section comment above). Readiness outranks wilt
-        // everywhere else in the UI (map badge, HUD, panel) - one stop per
-        // plant here too, rather than two competing messages about the same
-        // flower.
-        if (d.ready) {
-          stops.push({ type: 'ready', lat: p.lat, lng: p.lng,
-            text: variantName(vk) + ' is ready to water \u{1F4A7}' });
-        } else if (d.wilted) {
-          stops.push({ type: 'wilted', lat: p.lat, lng: p.lng,
-            text: variantName(vk) + ' is looking a little wilted' });
-        }
-      });
-
-      Object.keys(state.wild).forEach(function (key) {
-        var w = state.wild[key];
-        if (w.spawnedAt > lastSeen) {
-          stops.push({ type: 'wildNew', lat: w.lat, lng: w.lng,
-            text: 'A wild ' + variantName(variantKey(w.species, w.color)) + ' appeared nearby \u{1F33C}' });
-        }
-      });
-      goneWild.forEach(function (w) {
-        stops.push({ type: 'wildGone', lat: w.lat, lng: w.lng,
-          text: 'A wild ' + variantName(variantKey(w.species, w.color)) + ' slipped away' });
-      });
-
-      if (!stops.length) return;
-
-      // Lead with the good news - ready plants and fresh wild flowers first,
-      // the merely cosmetic/informational stops last.
-      var order = { ready: 0, wildNew: 1, wilted: 2, wildGone: 3 };
-      stops.sort(function (a, b) { return order[a.type] - order[b.type]; });
-      if (stops.length > WB_TOUR_MAX_STOPS) stops = stops.slice(0, WB_TOUR_MAX_STOPS);
-
-      wbTour.active = true;
-      wbTour.stops = stops;
-      wbTour.index = -1;
-      document.getElementById('wb-tour-banner').classList.add('open');
-      advanceWelcomeBackTour();
-    }
-
-    function advanceWelcomeBackTour() {
-      if (wbTour.marker) { map.removeLayer(wbTour.marker); wbTour.marker = null; }
-      wbTour.index++;
-      if (wbTour.index >= wbTour.stops.length) { endWelcomeBackTour(); return; }
-      var stop = wbTour.stops[wbTour.index];
-
-      document.getElementById('wb-tour-progress').textContent =
-        (wbTour.index + 1) + ' of ' + wbTour.stops.length;
-      document.getElementById('wb-tour-text').textContent = stop.text;
-
-      if (reduceMotion) map.setView([stop.lat, stop.lng], WB_TOUR_ZOOM);
-      else map.flyTo([stop.lat, stop.lng], WB_TOUR_ZOOM, { duration: 0.7 });
-
-      wbTour.marker = L.marker([stop.lat, stop.lng], {
-        icon: L.divIcon({ html: '<div class="wb-tour-ping ' + stop.type + '"></div>',
-          iconSize: [46, 46], iconAnchor: [23, 23], className: '' }),
-        interactive: false, zIndexOffset: 500
-      }).addTo(map);
-
-      wbTour.timer = setTimeout(advanceWelcomeBackTour, WB_TOUR_DWELL_MS);
-    }
-
-    function endWelcomeBackTour() {
-      clearTimeout(wbTour.timer);
-      if (wbTour.marker) { map.removeLayer(wbTour.marker); wbTour.marker = null; }
-      wbTour.active = false;
-      document.getElementById('wb-tour-banner').classList.remove('open');
-      // Return to the player's own position regardless of state.following -
-      // the tour deliberately overrode the camera to get here, so it should
-      // deliberately hand it back, the same way it took it.
-      if (userCellQ !== null && userCellR !== null) {
-        var back = cellCenter(userCellQ, userCellR);
-        if (reduceMotion) map.setView([back.lat, back.lng], WB_TOUR_ZOOM);
-        else map.flyTo([back.lat, back.lng], WB_TOUR_ZOOM, { duration: 0.7 });
-      }
-    }
-
-    function skipWelcomeBackTour() { endWelcomeBackTour(); }
-
-    // The other half of "what triggers the welcome-back tour": onGpsLocked
-    // only ever runs once, the moment the page first gets a GPS fix, so a
-    // full tab close+reopen (a real page load) is the only thing that used
-    // to reach it - backgrounding or minimizing a still-alive tab, by far
-    // the more common way a phone browser is "closed and reopened", left
-    // the page running with nothing to notice the player had ever left.
-    // Page Visibility firing 'visible' again is that actual moment.
-    //
-    // Deliberately narrower than onGpsLocked's own resume chain: this only
-    // ever offers the welcome-back tour, never onboarding/tutorial/
-    // fertilizer-unlock - those have their own state machines (startTutorial
-    // in particular RESETS tutorial.step back to 'plant' if called again
-    // mid-flight) that are only safe to re-enter from a real page load, not
-    // an arbitrary tab-visibility flicker, so this backs off entirely
-    // (shows nothing) if any of them isn't already resolved.
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState !== 'visible') return;
-      if (!rangeArea) return; // GPS never locked yet this session - nothing to diff against
-      if (wbTour.active || document.getElementById('modal-overlay').classList.contains('open')) return;
-      if (!state.seenWelcome || !state.tutorialDone || (state.fertReady && !state.fertUnlocked)) return;
+      if (!rangeArea) return; // GPS never locked yet this session - nothing to catch up
       var lastSeen = state.lastSeenAt;
-      if (!lastSeen || Date.now() - lastSeen < WB_TOUR_MIN_AWAY_MS) return;
-      var goneWild = collectGoneWild(Date.now()); // must run before tickPlants() sweeps its answer away
-      // Full offline catch-up first, before tickPlants()/buildAndStartWelcomeBackTour
-      // read any plant state below - see catchUpSprinklersOffline's own comment.
-      // Rain-ring catch-up runs right after: it needs `rainRings` to already
-      // reflect anything a sprinkler just grew into a completed ring during
-      // this same gap.
+      if (!lastSeen || Date.now() - lastSeen < AWAY_CATCHUP_MIN_MS) return;
+      // Rain-ring catch-up runs right after sprinklers: it needs `rainRings`
+      // to already reflect anything a sprinkler just grew into a completed
+      // ring during this same gap.
       catchUpSprinklersOffline();
       catchUpRainRingsOffline();
       tickPlants();
       maybeSpawnWild();
-      buildAndStartWelcomeBackTour(lastSeen, goneWild);
       state.lastSeenAt = Date.now();
       saveState();
     });
@@ -8647,10 +8423,7 @@
         markAccessible(h.q, h.r);
         markAccessibleToday(h.q, h.r);
         animateRangeTo(fromRing, cellRingLatLngs(h.q, h.r, PLANT_RANGE));
-        // Suppressed mid-tour - the welcome-back tour is deliberately
-        // showing the player somewhere else on the map for a moment, and an
-        // ordinary GPS-follow pan firing underneath it would fight that.
-        if (state.following && !wbTour.active) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
+        if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
       if (viewingKey) renderPlantPanel(viewingKey); // range may have just changed
       updateHUD();
@@ -8710,15 +8483,8 @@
       scheduleGridRedraw();
       vibrate(30);
 
-      // Both captured before tickPlants()/maybeSpawnWild() run below: the
-      // checkpoint (lastSeen) is about to be overwritten for next time, and
-      // collectGoneWild() has to run before tickPlants() sweeps its answer
-      // away. See buildAndStartWelcomeBackTour().
-      var lastSeen = state.lastSeenAt;
-      var goneWild = collectGoneWild(Date.now());
-
-      // Full offline catch-up first, before tickPlants()/buildAndStartWelcomeBackTour
-      // read any plant state below - see catchUpSprinklersOffline's own comment.
+      // Full offline catch-up first, before tickPlants() reads any plant
+      // state below - see catchUpSprinklersOffline's own comment.
       catchUpSprinklersOffline();
       catchUpRainRingsOffline();
       tickPlants();
@@ -8729,20 +8495,16 @@
       // once they dismiss it (see openWelcome). Returning to a save where the
       // tutorial was started but never finished/skipped (app closed mid-way)
       // skips straight to resuming it, since they've already seen Welcome.
-      // Only once both are already done does a returning player get the
-      // welcome-back tour instead - it would otherwise compete with either.
       // A fertilizer modal left unanswered (see maybeStartFertTutorial) resumes
-      // here too, ahead of the welcome-back tour, for the same reason as the
+      // here too, ahead of the "What's New" popup, for the same reason as the
       // tutorialDone branch above it - it would otherwise compete with it.
-      // The "What's New" popup (see maybeShowWhatsNew) is checked last,
-      // after every onboarding step is actually done, so a returning player
-      // never sees a changelog before they have even planted a seed; it
-      // only ever wins this lock's modal slot over the welcome-back tour
-      // when there is actually something new to show.
+      // The "What's New" popup (see maybeShowWhatsNew) is checked last, after
+      // every onboarding step is actually done, so a returning player never
+      // sees a changelog before they have even planted a seed.
       if (!state.seenWelcome) openWelcome();
       else if (!state.tutorialDone) startTutorial();
       else if (state.fertReady && !state.fertUnlocked) openFertTutorial();
-      else if (!maybeShowWhatsNew()) buildAndStartWelcomeBackTour(lastSeen, goneWild);
+      else maybeShowWhatsNew();
 
       // Advance the checkpoint on every lock, regardless of which branch
       // above ran - a brand-new save's very first lock needs this too, or
@@ -8861,14 +8623,11 @@
         state.currency += SELL_SINGLE;
         state.stats.sold++;
         state.stats.earned += SELL_SINGLE;
-        toast('Sold a wild ' + variantName(vk) + ' for ' + SELL_SINGLE + ' \u{1F338}');
       } else {
         var gained = rollWeighted(SEED_YIELD_SINGLE); // wild blooms are always single-stage
         state.seeds[vk] = (state.seeds[vk] || 0) + gained;
         state.stats.extracted += gained;
         state.stats.extractedFlowers++;
-        toast('\u{1F331} Got ' + gained + ' seed' + (gained === 1 ? '' : 's') + ' from a wild ' +
-          variantName(vk));
       }
 
       saveState();
@@ -9145,7 +8904,6 @@
       updateHUD();
       syncFertTool(); // fertilizer just dropped by one - the toolbox petal may need to disappear
       closePlantPanel();
-      toast('\u{1F331} A seedling came up between them! Water it to see what it is.');
       vibrate(30);
     }
 
@@ -10299,7 +10057,6 @@
       // cache, so calling it first would still see the pre-toggle numbers.
       renderPlants();
       updateHUD();
-      toast(on ? 'Cheat Mode on - unlimited Petals & seeds, plant anywhere, 15s growth \u{1F31F}' : 'Cheat Mode off');
     }
     function toggleCheatMode() { setCheatMode(!state.cheatMode); }
     function renderCheatToggle() {
@@ -10497,7 +10254,6 @@
       saveState();
       renderShopRows();
       updateCurrencyPill();
-      toast('Bought a ' + variantName(vk) + ' seed \u{1F331}');
       vibrate(15);
       tutorialOnBuy();
     }
@@ -10511,7 +10267,6 @@
       renderShopRows();
       updateCurrencyPill();
       syncFertTool(); // first bag ever bought - the toolbox petal can show up now
-      toast('Bought a bag of fertilizer \u{1F331}');
       vibrate(15);
     }
 
@@ -10545,7 +10300,6 @@
       renderShopRows();
       updateCurrencyPill();
       updateHUD(); // the equipment toggle can show up now, same as syncFertTool above
-      toast('Bought a sprinkler for ' + cost + ' \u{1F338}');
       vibrate(15);
     }
 
@@ -10612,14 +10366,14 @@
     function greenhouseAvailableForPurchase() {
       return !state.greenhouseUnlocked && state.stats.grown >= GREENHOUSE_UNLOCK_FLOWERS;
     }
-    // Fires the one-time "you can buy this now" toast - same pattern and
-    // same reasoning as checkSprinklerUnlock, called from the same harvest
-    // sites (see harvestPlant/pickWild/harvestPottedPlant).
+    // Flips the one-time teaser flag - same pattern and same reasoning as
+    // checkSprinklerUnlock, called from the same harvest sites (see
+    // harvestPlant/pickWild/harvestPottedPlant). The Shop itself is what
+    // shows the Greenhouse becoming available.
     function checkGreenhouseTeaser() {
       if (state.greenhouseTeaserAnnounced || !greenhouseAvailableForPurchase()) return;
       state.greenhouseTeaserAnnounced = true;
       saveState();
-      toast('\u{1F331} The Greenhouse is available in the Shop!');
     }
 
     // Slots [0, GREENHOUSE_STARTER_POTS) start clean and empty - yours from
@@ -10655,7 +10409,6 @@
       renderShopRows();
       updateCurrencyPill();
       syncGreenhouseUnlockUI();
-      toast('\u{1F331} Greenhouse unlocked! Find it in the menu.');
       vibrate(20);
     }
 
@@ -10854,7 +10607,6 @@
       saveState();
       updateCurrencyPill();
       renderGreenhouse();
-      toast('Pot fixed \u{1F331}');
       vibrate(20);
     }
 
@@ -10903,8 +10655,6 @@
       closeModal();
       renderGreenhouse();
       updateHUD();
-      toast('\u{1F331} ' + variantName(vk) + ' planted! It will be ready for water in ' +
-        formatDuration(stageReadyMs()) + '.');
       vibrate(20);
     }
 
@@ -10965,11 +10715,6 @@
       recomputePlant(p, now);
       saveState();
       renderGreenhouse();
-      if (res.revealed) {
-        toast('\u{1F338} Your cross opened - it\'s a ' + variantName(res.revealed) + '!');
-      } else if (res.grew) {
-        toast('\u{1F4A7} ' + GROWTH_MESSAGES[p.stage]);
-      }
       vibrate(res.grew ? 30 : 15);
       return res;
     }
@@ -10999,7 +10744,6 @@
       var d = recomputePlant(p, Date.now());
       var isCluster = d.stage >= MAX_STAGE;
       var vk = variantKey(p.species, p.color);
-      var label = variantName(vk) + (isCluster ? ' cluster' : '');
       pot.plant = null;
       if (!p.grownCredited) recordGrown(vk);
 
@@ -11008,13 +10752,11 @@
         state.currency += value;
         state.stats.sold++;
         state.stats.earned += value;
-        toast('Sold your potted ' + label + ' for ' + value + ' \u{1F338}');
       } else {
         var gained = rollWeighted(isCluster ? SEED_YIELD_CLUSTER : SEED_YIELD_SINGLE);
         state.seeds[vk] = (state.seeds[vk] || 0) + gained;
         state.stats.extracted += gained;
         state.stats.extractedFlowers++;
-        toast('\u{1F331} Got ' + gained + ' seed' + (gained === 1 ? '' : 's') + ' from your potted ' + label);
       }
 
       saveState();
@@ -11211,7 +10953,6 @@
         saveState();
         closeModal();
         syncFertUnlockUI();
-        toast('Fertilizer is in the Shop, and Crossing Notes is in the menu \u{1F338}');
       };
       document.getElementById('modal-overlay').classList.add('open');
     }
@@ -11229,9 +10970,7 @@
     //  surfacing "what's new" for versions a returning player already
     //  lived through unannounced.
     // ---------------------------------------------------------------------
-    // Returns true if it opened the popup (so onGpsLocked's caller can skip
-    // the welcome-back tour on this same lock, the same way it already
-    // defers to the fertilizer/tutorial modals above it), false otherwise.
+    // Returns true if it opened the popup, false otherwise.
     function maybeShowWhatsNew() {
       var current = document.getElementById('game-version').textContent;
       if (!state.lastSeenVersion) {

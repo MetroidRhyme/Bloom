@@ -1398,6 +1398,42 @@
       .wind-grass-back, .wind-grass-front, .wind-stem { animation: none; }
     }
 
+    /* AMBIENT MOTION BUDGET - see applyWindBudget() in the script for the
+       measurements behind this, and why it is the single biggest frame-rate
+       lever in the game.
+
+       Every swaying grass clump, stem, halo and spark is an animated
+       element INSIDE an inline SVG. Chrome cannot promote those to their
+       own compositor layer (verified: `will-change: transform` on them
+       changes nothing), so each one repaints its whole SVG on the main
+       thread every single frame, forever. Cost is strictly linear in how
+       many are on screen: ~6 animated groups per flower marker, and a
+       viewport full of a densely-planted neighbourhood measured 116ms per
+       frame (8fps) at 351 markers, versus a flat 16.7ms (60fps) with the
+       exact same markers and the animations switched off.
+
+       So the number that animates is capped rather than the animation
+       removed: markers carrying .no-wind render byte-identically, they
+       just hold still. See applyWindBudget for which ones get the class. */
+    .no-wind .wind-grass-back, .no-wind .wind-grass-front, .no-wind .wind-stem,
+    .no-wind .bloom-halo, .no-wind .bloom-spark, .no-wind .wild-glow {
+      animation: none;
+    }
+
+    /* Ambient motion is also suspended outright for the length of a pan or
+       pinch. A drag is the one moment the player is directly watching the
+       map respond to their finger, and it is also the moment the main
+       thread is busiest (Leaflet repositioning panes, the grid mesh
+       redrawing) - spending what is left of the frame budget on grass that
+       nobody is looking at during a gesture is the worst possible trade.
+       Scoped to the marker/overlay panes so ordinary UI transitions (the
+       tool fan, panels, toasts) still run normally mid-drag. Resumed on
+       moveend/zoomend; an infinite ambient loop has no meaningful phase to
+       preserve, same reasoning as .bg-paused below. */
+    body.map-moving .leaflet-marker-pane *, body.map-moving .leaflet-overlay-pane * {
+      animation-play-state: paused !important;
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
@@ -1423,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.37.0</span>
+      <span id="game-version">v2.38.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1802,6 +1838,27 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.38.0', changes: [
+        'Big smoothness pass. A garden with a lot of flowers packed onto ' +
+          'one screen used to drag the whole map down to a slideshow, and ' +
+          'it got worse the more you planted. The swaying grass is now ' +
+          'budgeted: the flowers nearest the middle of the screen still ' +
+          'move in the wind, the rest hold still, and everything holds ' +
+          'still for as long as your finger is dragging or pinching the ' +
+          'map. Nothing looks different - a full screen of flowers just ' +
+          'runs about seven times smoother.',
+        'The game no longer stops to write your whole save to disk several ' +
+          'times a second while sprinklers and rain runes are watering - ' +
+          'saving is batched now, and still forced the moment you switch ' +
+          'away from the app, so nothing is lost.',
+        'Easier on your battery when you are standing still: location ' +
+          'checks quietly slow down after a few minutes without moving, ' +
+          'and snap straight back to normal the instant you step to a new ' +
+          'tile or so much as touch the screen.',
+        'Rune boundaries far off the map no longer sit there costing you ' +
+          'frames, and the map grid itself redraws about four times faster ' +
+          'when you pan and zoom.'
+      ] },
       { version: 'v2.37.0', changes: [
         'Removed the welcome-back tour - the camera no longer flies around ' +
           'on its own to show what happened while you were away. Also ' +
@@ -3300,7 +3357,69 @@
       if (changed) saveState();
     })();
 
+    // Coalesced rather than written straight through. The blob below is the
+    // WHOLE save - every plant, every visited tile, the lot - and
+    // localStorage.setItem is synchronous, so the serialize-and-write pair
+    // lands entirely inside whatever frame happened to call it. Measured at
+    // 1500 plants and a realistic lifetime `visited` set that is a ~590KB
+    // blob costing 4-11ms per write on desktop, and it grows for the whole
+    // life of a save - which is exactly the shape of "it gets choppy the
+    // longer I play".
+    //
+    // There are 50-odd call sites and several of them fire in bursts: a
+    // single walk to a new tile calls this twice back to back (see
+    // markAccessible then markAccessibleToday), and every sprinkler or
+    // rain-ring droplet that lands calls it again (see finishAutoWatering)
+    // - which, with a few sprinklers running, is several full saves a
+    // second, all writing state that is about to be overwritten by the next
+    // one anyway.
+    //
+    // So saveState() now just marks the save dirty and lets at most one
+    // real write happen per SAVE_DEBOUNCE_MS, with SAVE_MAX_DEFER_MS as a
+    // ceiling so a long unbroken burst still reaches disk regularly instead
+    // of being starved by its own churn. Deliberately kept inside
+    // saveState() itself rather than pushed out to the call sites: every
+    // existing caller keeps its plain "I changed something, save it"
+    // contract and none of them need to know about any of this.
+    //
+    // Durability: the flush is forced on the two events that actually
+    // precede losing the page - visibilitychange to hidden (the reliable
+    // one on mobile, where a tab is usually killed while backgrounded
+    // rather than closed outright) and pagehide. Worst case a crash inside
+    // the debounce window loses under half a second of play.
+    var SAVE_DEBOUNCE_MS = 400;
+    var SAVE_MAX_DEFER_MS = 2000;
+    var _saveTimer = null, _saveDirty = false, _lastSaveAt = 0;
     function saveState() {
+      _saveDirty = true;
+      var now = Date.now();
+      if (!_lastSaveAt) _lastSaveAt = now;
+      // Held off for longer than the ceiling allows (a steady stream of
+      // droplet landings, say) - write through now rather than deferring
+      // again on the strength of yet another change.
+      if (now - _lastSaveAt >= SAVE_MAX_DEFER_MS) { flushSave(); return; }
+      if (_saveTimer) return; // a write is already queued; it will pick this change up
+      _saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+    }
+    function flushSave() {
+      if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+      if (!_saveDirty) return;
+      _saveDirty = false;
+      _lastSaveAt = Date.now();
+      writeSaveNow();
+    }
+    // Drops a queued write on the floor. Only onResetSave needs this: it
+    // clears STORAGE_KEY and reloads, and a debounced write still sitting
+    // in a timer would otherwise fire in between and put the save it just
+    // erased straight back.
+    function cancelPendingSave() {
+      if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+      _saveDirty = false;
+    }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) flushSave(); });
+    window.addEventListener('pagehide', flushSave);
+
+    function writeSaveNow() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
         weeds: state.weeds, lastWeedSpawnAt: state.lastWeedSpawnAt,
@@ -4274,13 +4393,27 @@
     // never need a rebuild call here at all (real lat/lng geometry, not
     // pixel icons), only teardown when a ring itself goes away.
     var rainRingLayers = {}; // centerKey -> { marker, lattice, circle, star1, star2, ticks, diamonds }
+    // Viewport-virtualized on exactly the same grounds as the plant/wild/
+    // sprinkler/weed markers above (see MARKER_VIEWPORT_PAD), and with more
+    // to gain per entry: a single rain ring is not one marker but SEVEN
+    // Leaflet layers - the center glyph plus a lattice polyline covering
+    // every tile of the 5x5 watered block, an outer circle, two star
+    // polygons, a tick polyline and a diamond polygon - all of them real
+    // lat/lng vector geometry that Leaflet reprojects on every zoom and
+    // viewreset. Before this, every ring the player had ever completed kept
+    // all seven alive forever, anywhere on Earth, so the cost of a zoom
+    // gesture grew with the lifetime count of rings rather than with how
+    // many are actually on screen (which is almost always zero or one).
+    var RAIN_RUNE_VIEWPORT_EXTENT = RAIN_RING_RADIUS + 1;
     function renderRainRings() {
       var seen = {};
       var basePx = plantIconBase();
       _iconBuiltPx = basePx; // same bookkeeping makeSprinklerIcon does with its own unscaled px
       var px = Math.round(basePx * 0.92);
+      var vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(rainRings).forEach(function (key) {
         var ring = rainRings[key];
+        if (!boxInMarkerViewport(vc, ring.q, ring.r, RAIN_RUNE_VIEWPORT_EXTENT)) return; // off screen - torn down by the sweep below
         seen[key] = true;
         var existing = rainRingLayers[key];
         var iconKey = px + '';
@@ -4856,6 +4989,12 @@
     // plus once a minute from tickPlants) that this is the only cleanup the
     // registry ever needs.
     var growRuneLayers = {}; // key ("q,r") -> { marker, square, stars, diamonds }
+    // Same viewport virtualization as renderRainRings (see its comment for
+    // the reasoning). A grow rune's boundary spans GROW_PULSE_RADIUS tiles
+    // out from its own 2x2 block, so the extent it has to be tested against
+    // is far larger than the rain ring's - a 21x21-tile square, comfortably
+    // bigger than the viewport itself at typical zoom.
+    var GROW_RUNE_VIEWPORT_EXTENT = GROW_PULSE_RADIUS + 2;
     function renderGrowRunes() {
       var now = Date.now();
       var seen = {};
@@ -4863,9 +5002,15 @@
       var basePx = plantIconBase();
       _iconBuiltPx = basePx; // same bookkeeping renderRainRings does with its own unscaled px
       var px = Math.round(basePx * 0.92);
+      var vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(state.growRunes).forEach(function (key) {
         var entry = state.growRunes[key];
+        // The expiry check deliberately runs BEFORE the viewport check
+        // below: pruning an expired rune out of state.growRunes is real
+        // bookkeeping, not drawing, and skipping it for off-screen runes
+        // would leave dead entries in the save forever.
         if (!isGrowRuneActiveEntry(entry, now)) { delete state.growRunes[key]; pruned = true; return; }
+        if (!boxInMarkerViewport(vc, entry.q, entry.r, GROW_RUNE_VIEWPORT_EXTENT)) return; // off screen - torn down by the sweep below
         seen[key] = true;
         var existing = growRuneLayers[key];
         var iconKey = px + '';
@@ -6525,6 +6670,39 @@
       var minQ = vc.minQ, maxQ = vc.maxQ, minR = vc.minR, maxR = vc.maxR;
       if ((maxQ - minQ) * (maxR - minR) > GRID_MAX_CELLS) return;
 
+      // The grid's pixel geometry is precomputed per ROW and per COLUMN
+      // rather than per cell. Web Mercator maps lng to x and lat to y
+      // independently, so every cell in a column shares one pair of x
+      // edges and every cell in a row shares one pair of y edges - which
+      // means the ~1000 cells of a viewport need about 70 projections
+      // between them, not 4000. (cellVerticesPx, which this used to call
+      // twice per cell, projects all four corners of every single cell and
+      // allocates five objects doing it; at a viewport's worth of tiles
+      // that was several thousand projections and ~10k short-lived objects
+      // per redraw, on a function that runs on every pan and zoom.) This is
+      // not an approximation - the numbers below are the exact same
+      // projections cellVerticesPx would have produced, just computed once
+      // each instead of once per cell that shares them.
+      var b4 = { minX: b.min.x - 4, maxX: b.max.x + 4, minY: b.min.y - 4, maxY: b.max.y + 4 };
+      var nQ = maxQ - minQ + 1, nR = maxR - minR + 1;
+      var xs = new Array(nQ + 1), ys = new Array(nR + 1);
+      var xOk = new Array(nQ + 1), yOk = new Array(nR + 1);
+      for (var xi = 0; xi <= nQ; xi++) {
+        xs[xi] = map.latLngToLayerPoint([0, (minQ + xi - 0.5) * CELL_LNG_DEG]).x;
+        xOk[xi] = xs[xi] >= b4.minX && xs[xi] <= b4.maxX;
+      }
+      for (var yi = 0; yi <= nR; yi++) {
+        ys[yi] = map.latLngToLayerPoint([(minR + yi - 0.5) * CELL_LAT_DEG, 0]).y;
+        yOk[yi] = ys[yi] >= b4.minY && ys[yi] <= b4.maxY;
+      }
+      // cellOnScreen's test is "at least one of the four corners is inside
+      // the padded canvas bounds". The four corners are exactly the cross
+      // product of this cell's two x edges and its two y edges, so that is
+      // the same thing as "at least one x edge is in range AND at least one
+      // y edge is in range" - identical result, no per-cell work.
+      function colOn(i) { return xOk[i] || xOk[i + 1]; }
+      function rowOn(j) { return yOk[j] || yOk[j + 1]; }
+
       // Re-validated against localDayKey() here too, same guard inRange()
       // itself uses - a todayAccessible set left over from before a
       // midnight rollover that simply hasn't been touched yet since must
@@ -6532,17 +6710,16 @@
       if (state.todayAccessibleDay === localDayKey()) {
         ctx.fillStyle = 'rgba(76,175,109,0.10)';
         for (var aq = minQ; aq <= maxQ; aq++) {
+          var ai = aq - minQ;
+          if (!colOn(ai)) continue;
           for (var ar = minR; ar <= maxR; ar++) {
+            var aj = ar - minR;
+            if (!rowOn(aj)) continue;
             if (!state.todayAccessible[cellKey(aq, ar)]) continue;
-            var averts = cellVerticesPx(aq, ar);
-            if (!cellOnScreen(averts)) continue;
-            ctx.beginPath();
-            ctx.moveTo(averts[0].x, averts[0].y);
-            ctx.lineTo(averts[1].x, averts[1].y);
-            ctx.lineTo(averts[2].x, averts[2].y);
-            ctx.lineTo(averts[3].x, averts[3].y);
-            ctx.closePath();
-            ctx.fill();
+            // An axis-aligned rectangle, which is all a cell has ever been
+            // on this grid - fillRect instead of building and filling a
+            // four-point path per tile.
+            ctx.fillRect(xs[ai], ys[aj], xs[ai + 1] - xs[ai], ys[aj + 1] - ys[aj]);
           }
         }
       }
@@ -6551,14 +6728,18 @@
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (var q = minQ; q <= maxQ; q++) {
+        var i = q - minQ;
+        if (!colOn(i)) continue;
         for (var r = minR; r <= maxR; r++) {
-          var verts = cellVerticesPx(q, r);
-          if (!cellOnScreen(verts)) continue;
-          // Bottom edge (0-1) and left edge (3-0).
-          ctx.moveTo(verts[0].x, verts[0].y);
-          ctx.lineTo(verts[1].x, verts[1].y);
-          ctx.moveTo(verts[3].x, verts[3].y);
-          ctx.lineTo(verts[0].x, verts[0].y);
+          var j = r - minR;
+          if (!rowOn(j)) continue;
+          // Bottom edge and left edge, same two of the four as before -
+          // each cell drawing only two of its sides is what keeps shared
+          // edges from being stroked twice.
+          ctx.moveTo(xs[i], ys[j]);
+          ctx.lineTo(xs[i + 1], ys[j]);
+          ctx.moveTo(xs[i], ys[j + 1]);
+          ctx.lineTo(xs[i], ys[j]);
         }
       }
       ctx.stroke();
@@ -6603,6 +6784,17 @@
     function inMarkerViewport(vc, q, r) {
       return q >= vc.minQ && q <= vc.maxQ && r >= vc.minR && r <= vc.maxR;
     }
+    // The same test for something that is not a point. A rune is drawn as a
+    // whole boundary spanning many tiles either side of its own center tile
+    // (2 for a rain ring, 10 for a grow rune), so a rune whose center sits
+    // off screen can still have most of its ring crossing the middle of the
+    // viewport - testing the center alone would pop those out of existence
+    // exactly when they are most visible. `extent` is that half-span in
+    // tiles; the test is a plain box overlap against the viewport.
+    function boxInMarkerViewport(vc, q, r, extent) {
+      return q + extent >= vc.minQ && q - extent <= vc.maxQ &&
+        r + extent >= vc.minR && r - extent <= vc.maxR;
+    }
 
     // Every plant/wild/weed marker below is keyed not just by cell but by an
     // "_iconKey" fingerprint of everything that could change how it looks
@@ -6638,6 +6830,7 @@
       Object.keys(plantMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(plantMarkers[key]); delete plantMarkers[key]; }
       });
+      scheduleWindBudget(); // the marker set just changed - re-rank what may sway
     }
     // Wild flowers sit just under the player's own plants (zIndexOffset 90 vs
     // 100), so on the rare overlap your garden is never hidden by scenery.
@@ -6662,6 +6855,7 @@
       Object.keys(wildMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(wildMarkers[key]); delete wildMarkers[key]; }
       });
+      scheduleWindBudget(); // the marker set just changed - re-rank what may sway
     }
     // Sits between wild (90) and the player's own plants (100) - sprinklers
     // are the player's too, but a tile can never hold both at once, so the
@@ -6709,7 +6903,75 @@
       Object.keys(weedMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(weedMarkers[key]); delete weedMarkers[key]; }
       });
+      scheduleWindBudget(); // the marker set just changed - re-rank what may sway
     }
+
+    // ---- Ambient motion budget --------------------------------------------
+    // The one lever that actually decides Bloom's frame rate. See the
+    // .no-wind CSS rule for the measurements; the short version is that a
+    // swaying grass clump is an animated group inside an inline SVG, Chrome
+    // cannot composite those, and so each one costs a main-thread repaint
+    // every frame for as long as it is on screen. Six of them per flower
+    // marker, times however many flowers the viewport happens to hold.
+    //
+    // Viewport virtualization (above) already bounds that by what is on
+    // screen rather than by lifetime garden size, which was the difference
+    // between "unplayable" and "playable". It does not bound it by
+    // DENSITY, though, and density is exactly what grows over a long life
+    // of a save: a player who has spent months filling in their own
+    // neighbourhood tile by tile ends up with every tile in the viewport
+    // planted, which is 350+ markers and 2000+ animated groups on screen at
+    // once - measured at 116ms per frame, roughly 8fps, purely on ambient
+    // grass. That is the "it gets choppy after a while" this budget fixes,
+    // and it is why the fix has to be a cap rather than more culling.
+    //
+    // So: only the WIND_ANIM_BUDGET markers nearest the middle of the
+    // screen actually sway. Everything else renders exactly the same
+    // pixels and simply holds still. Wind in Bloom was always a travelling
+    // wave rather than every plant twitching at once (see windDelayFor),
+    // so a subset moving still reads as a breeze crossing the map - and in
+    // any garden sparse enough to be under the budget, which is most of
+    // them, nothing changes at all.
+    var WIND_ANIM_BUDGET = 16;
+    var _windBudgetPending = false;
+    function scheduleWindBudget() {
+      if (_windBudgetPending) return;
+      _windBudgetPending = true;
+      requestAnimationFrame(function () { _windBudgetPending = false; applyWindBudget(); });
+    }
+    function applyWindBudget() {
+      var center = map.getSize().divideBy(2);
+      var list = [];
+      function collect(markers) {
+        Object.keys(markers).forEach(function (key) {
+          var m = markers[key], el = m.getElement();
+          if (!el) return; // built this frame, not laid out yet - next pass catches it
+          var pt = map.latLngToContainerPoint(m.getLatLng());
+          var dx = pt.x - center.x, dy = pt.y - center.y;
+          list.push({ el: el, d: dx * dx + dy * dy }); // squared distance - no sqrt needed to rank
+        });
+      }
+      collect(plantMarkers); collect(wildMarkers); collect(weedMarkers);
+      // Under budget there is nothing to rank, and the loop below leaves
+      // every marker swaying - skip the sort entirely in the common case.
+      if (list.length > WIND_ANIM_BUDGET) list.sort(function (a, b) { return a.d - b.d; });
+      for (var i = 0; i < list.length; i++) {
+        var still = i >= WIND_ANIM_BUDGET;
+        // Only touch classList on a real change. An unconditional toggle
+        // on every marker on every render pass is itself a style recalc
+        // across the whole marker pane, which is the sort of thing this
+        // function exists to avoid spending frames on.
+        if (still !== list[i].el.classList.contains('no-wind')) {
+          list[i].el.classList.toggle('no-wind', still);
+        }
+      }
+    }
+
+    // Suspends all ambient marker/overlay motion for the duration of a pan
+    // or pinch - see the body.map-moving CSS rule for why a gesture is the
+    // worst possible moment to be spending frame budget on grass.
+    map.on('movestart zoomstart', function () { document.body.classList.add('map-moving'); });
+    map.on('moveend zoomend', function () { document.body.classList.remove('map-moving'); });
 
     // Rebuilds every visible marker at the new zoom's icon size once a zoom
     // gesture settles (see plantIconBase()/makePlantIcon above for why this
@@ -7824,6 +8086,7 @@
     // and replayed on every one of those calls forever, even with nothing
     // equipped and nothing changing - see popSeedToggle() below, which is
     // what the actual equip/unequip transitions call instead.
+    var _seedToggleHtml = null;
     function renderSeedToggle() {
       var toggle = document.getElementById('seed-toggle');
       toggle.classList.toggle('seed-packet', !equippedSeed);
@@ -7839,8 +8102,15 @@
         toggle.style.borderColor = '';
         toggle.style.color = '';
       }
-      toggle.innerHTML = (equippedSeed ? variantChip(equippedSeed, 26) : seedPacketIconSVG(24)) +
+      // Same reasoning as setStatusLine: this is called from updateHUD on
+      // every GPS fix and every 60s tick, and the contents (a seed-packet
+      // SVG or a variant chip, plus a count badge) are identical almost
+      // every time. Rebuilding an inline SVG's DOM twelve times a minute to
+      // paint the exact same pixels is pure waste, so the markup is only
+      // written when it actually differs from what is already mounted.
+      var html = (equippedSeed ? variantChip(equippedSeed, 26) : seedPacketIconSVG(24)) +
         seedCountBadgeHtml(equippedSeed ? (state.seeds[equippedSeed] || 0) : totalSeedCount());
+      if (html !== _seedToggleHtml) { _seedToggleHtml = html; toggle.innerHTML = html; }
       toggle.title = equippedSeed ? ('Put away the ' + variantName(equippedSeed) + ' seed') : 'Seeds';
     }
     // Small spring pop so an equip/unequip genuinely reads as a physical
@@ -8140,11 +8410,14 @@
         sprinklerGlyphMarkup() + '</svg>';
     }
 
+    var _sprinklerToggleHtml = null;
     function renderSprinklerToggle() {
       var btn = document.getElementById('sprinkler-toggle');
       btn.classList.toggle('show', state.sprinklerInventory > 0 || equippedSprinkler);
       btn.classList.toggle('active', equippedSprinkler);
-      btn.innerHTML = sprinklerIconSVG(24) + seedCountBadgeHtml(state.sprinklerInventory);
+      // Same skip-the-identical-rebuild reasoning as renderSeedToggle above.
+      var html = sprinklerIconSVG(24) + seedCountBadgeHtml(state.sprinklerInventory);
+      if (html !== _sprinklerToggleHtml) { _sprinklerToggleHtml = html; btn.innerHTML = html; }
       btn.title = equippedSprinkler ? 'Put away the sprinkler' : 'Sprinkler';
     }
 
@@ -8290,41 +8563,106 @@
     // over the ~10-15m a person covers in 5s at a stroll) doesn't actually
     // feel.
     var GPS_POLL_MS = 5000;
-    var _gpsPollTimer = null, _gpsStarted = false;
+
+    // ---- Standing-still backoff -------------------------------------------
+    // The 5s cadence above is a WALKING cadence, and a walking game left
+    // open on a phone spends most of its time not walking: sitting on a
+    // desk, in a pocket, on a table while the player waits for a flower to
+    // be ready. Polling a stationary phone's GPS every five seconds for an
+    // hour is the same battery draw as polling a moving one, and every one
+    // of those fixes resolves to the tile the last twelve resolved to.
+    //
+    // So the cadence stretches out the longer nothing suggests the player
+    // is on the move, and snaps straight back to GPS_POLL_MS the moment
+    // something does. Two things count as "on the move": actually crossing
+    // into a new tile (see onLocationUpdate), and the player touching the
+    // screen at all - someone who has picked the phone up and is looking at
+    // Bloom is exactly who is about to start walking, and a touch is a much
+    // earlier signal of that than the next fix would be.
+    //
+    // This is deliberately automatic rather than a manual "GPS off" switch:
+    // a switch has to be remembered in both directions, and the failure
+    // mode of forgetting to turn it back on (walking a whole route that
+    // never registers, tiles never granted, flowers never waterable) is far
+    // worse than the failure mode here, which is at most one backed-off
+    // interval of lag before the first tile of a walk registers - and a
+    // touch clears even that.
+    var GPS_BACKOFF_STEPS = [
+      { idleFor: 2 * 60 * 1000, every: 15000 },
+      { idleFor: 5 * 60 * 1000, every: 30000 },
+      { idleFor: 15 * 60 * 1000, every: 60000 }
+    ];
+    var _gpsPollTimer = null, _gpsStarted = false, _lastMovedAt = Date.now();
+    function gpsPollInterval() {
+      var idle = Date.now() - _lastMovedAt, ms = GPS_POLL_MS;
+      for (var i = 0; i < GPS_BACKOFF_STEPS.length; i++) {
+        if (idle >= GPS_BACKOFF_STEPS[i].idleFor) ms = GPS_BACKOFF_STEPS[i].every;
+      }
+      return ms;
+    }
     function pollLocation() {
       navigator.geolocation.getCurrentPosition(onLocationUpdate, onLocationError, {
         enableHighAccuracy: true, maximumAge: 3000, timeout: 15000
       });
     }
+    // A self-rescheduling timeout rather than setInterval, since the whole
+    // point is that the gap between polls is not a constant. Always clears
+    // whatever was already pending first, so no path through here can leave
+    // two chains of polls running at once.
+    function scheduleNextPoll() {
+      if (_gpsPollTimer) { clearTimeout(_gpsPollTimer); _gpsPollTimer = null; }
+      if (!_gpsStarted || document.hidden) return;
+      _gpsPollTimer = setTimeout(function () { pollLocation(); scheduleNextPoll(); }, gpsPollInterval());
+    }
+    // "Something says the player is active again." Cheap enough to call
+    // from a raw pointerdown: while already at the walking cadence it is
+    // one Date.now() and one comparison, and it only re-arms the timer on
+    // the transition back out of a backed-off state. `pollNow` asks for an
+    // immediate fix on that transition - right for a touch (the player is
+    // looking at the map and its range shape should be current), pointless
+    // for a tile change, which by definition just came from a fresh fix.
+    function noteGpsActivity(pollNow) {
+      var wasBackedOff = gpsPollInterval() !== GPS_POLL_MS;
+      _lastMovedAt = Date.now();
+      if (!_gpsStarted || !wasBackedOff) return;
+      if (pollNow) pollLocation();
+      scheduleNextPoll();
+    }
+    document.addEventListener('pointerdown', function () { noteGpsActivity(true); }, true);
+
     // The actual permission request - split out so both the normal startup
     // path and the primer's "Allow Location" button (see openGpsPrimer) and
-    // retryLocation() can all trigger it the same way. Clears any prior
-    // timer first so a retry (permission granted after an initial denial)
-    // can never stack a second interval on top of the first.
+    // retryLocation() can all trigger it the same way. scheduleNextPoll
+    // clears any prior timer itself, so a retry (permission granted after
+    // an initial denial) can never stack a second chain of polls on top of
+    // the first.
     function requestLocation() {
       _gpsStarted = true;
-      if (_gpsPollTimer) clearInterval(_gpsPollTimer);
+      _lastMovedAt = Date.now(); // a fresh start is never "standing still"
       pollLocation(); // don't make the very first lock wait out a full interval
-      if (!document.hidden) _gpsPollTimer = setInterval(pollLocation, GPS_POLL_MS);
+      scheduleNextPoll();
     }
     // Nothing GPS-driven is visible while the tab/app is backgrounded (same
     // reasoning as the CSS .bg-paused rule above), so polling stops
     // entirely rather than just continuing to spend battery unseen - and
     // picks back up with one immediate fix, not a stale position left over
-    // from before, the moment it's visible again.
+    // from before, the moment it's visible again. Coming back to the app is
+    // itself a sign of activity, so the backoff resets with it.
     document.addEventListener('visibilitychange', function () {
       if (!_gpsStarted) return; // still on the GPS primer, or geolocation unsupported
       if (document.hidden) {
-        if (_gpsPollTimer) { clearInterval(_gpsPollTimer); _gpsPollTimer = null; }
-      } else if (!_gpsPollTimer) {
-        pollLocation();
-        _gpsPollTimer = setInterval(pollLocation, GPS_POLL_MS);
+        if (_gpsPollTimer) { clearTimeout(_gpsPollTimer); _gpsPollTimer = null; }
+        return;
       }
+      _lastMovedAt = Date.now();
+      pollLocation();
+      scheduleNextPoll();
     });
 
     if (!navigator.geolocation) {
       document.getElementById('gps-status').textContent = 'NO GPS';
       document.getElementById('hud-status-line').textContent = 'Geolocation is not supported on this device.';
+      _statusLineHtml = null; // written around setStatusLine - drop its cached copy
     } else if (!state.gpsPrimerSeen) {
       // Brand-new device: explain why Bloom wants location before the
       // browser's own permission dialog fires, rather than surprising a
@@ -8416,8 +8754,14 @@
         // fix doesn't immediately yank the view back to the player and
         // undo the point of centering here in the first place.
         if (initialTarget.onFlower) { state.following = false; saveState(); }
+        noteGpsActivity(false); // first lock of the session - start at the walking cadence
         onGpsLocked();
       } else if (h.q !== userCellQ || h.r !== userCellR) {
+        // Actually crossed into a new tile - the player is walking, so hold
+        // the poll cadence at GPS_POLL_MS (see the standing-still backoff
+        // above). No immediate re-poll: this branch is already running off
+        // a fix that arrived a moment ago.
+        noteGpsActivity(false);
         var fromRing = cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE);
         userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
@@ -8434,10 +8778,11 @@
       var badge = document.getElementById('gps-status');
       badge.textContent = 'NO GPS'; badge.className = 'err';
       document.getElementById('hud-status-line').textContent = msgs[err.code] || err.message;
+      _statusLineHtml = null; // written around setStatusLine - drop its cached copy
       // code 1 = permission denied is the one case with no automatic
       // recovery - codes 2/3 (position unavailable / timeout) resolve on
-      // their own as the next poll comes around (see pollLocation's
-      // interval), so only 1 needs a way back in. See retryLocation()/
+      // their own as the next poll comes around (see scheduleNextPoll), so
+      // only 1 needs a way back in. See retryLocation()/
       // onLocationUpdate for how this clears.
       if (err.code === 1) document.getElementById('gps-denied-banner').classList.add('open');
     }
@@ -8970,6 +9315,19 @@
     // ---------------------------------------------------------------------
     //  HUD / MENU / MODAL / TOAST
     // ---------------------------------------------------------------------
+    // Every write to an element's innerHTML costs a parse and a subtree
+    // rebuild even when the string is byte-identical to what is already
+    // there. updateHUD runs on every GPS fix and every 60s tick and the
+    // status line genuinely does not change most of those times ("12
+    // growing, 4 in bloom" for minutes on end), so the comparison is
+    // essentially always the cheap branch.
+    var _statusLineHtml = null;
+    function setStatusLine(html) {
+      if (html === _statusLineHtml) return;
+      _statusLineHtml = html;
+      document.getElementById('hud-status-line').innerHTML = html;
+    }
+
     function updateHUD() {
       // The seed packet's own badge (and the equipped icon's, if any) needs
       // to stay current after every state change, not just while its fan is
@@ -8982,42 +9340,41 @@
       // A tool in hand takes over the status line entirely: while you're in a
       // mode, what that mode does is the only thing worth saying.
       if (activeTool) {
-        document.getElementById('hud-status-line').innerHTML = TOOL_HUD[activeTool];
+        setStatusLine(TOOL_HUD[activeTool]);
         return;
       }
       if (equippedSeed) {
-        document.getElementById('hud-status-line').innerHTML =
-          'Tap empty ground in range to plant a ' + variantName(equippedSeed) + ' \u{1F331}';
+        setStatusLine('Tap empty ground in range to plant a ' + variantName(equippedSeed) + ' \u{1F331}');
         return;
       }
       if (equippedSprinkler) {
-        document.getElementById('hud-status-line').innerHTML =
-          'Tap empty ground in range to place the sprinkler \u{1F4A6}';
+        setStatusLine('Tap empty ground in range to place the sprinkler \u{1F4A6}');
         return;
       }
-      var keys = Object.keys(state.plants);
-      var total = keys.length;
-      var wilted = keys.filter(function (k) {
-        var d = state.plants[k]._d;
-        return d && d.wilted;
-      }).length;
+      // One pass, three tallies. These used to be three separate
+      // Object.keys().filter() chains over the whole garden, which meant
+      // four full walks (plus three throwaway arrays) every time the HUD
+      // line was recomputed - and it is recomputed on every GPS fix and
+      // every 60s tick, forever, whether or not any of the numbers moved.
+      //
       // state.stats.bloomed is a lifetime "ever reached bloom" counter (it
       // never decrements, even after that plant is harvested) - that's right
       // for the How to Play footer, but wrong here: "N in bloom" needs to
       // count what's actually blooming right now, so a harvested flower
       // stops being counted immediately instead of lingering forever.
-      var blooming = keys.filter(function (k) {
-        var d = state.plants[k]._d;
-        return d && d.stage >= 2;
-      }).length;
-
-      // Ready-to-grow outranks merely wilted: it is the one line that sends
-      // the player out the door, and it is the only status that a watering
-      // visit converts into actual progress.
-      var ready = keys.filter(function (k) {
-        var d = state.plants[k]._d;
-        return d && d.ready;
-      }).length;
+      //
+      // Ready-to-grow outranks merely wilted below: it is the one line that
+      // sends the player out the door, and it is the only status that a
+      // watering visit converts into actual progress.
+      var total = 0, wilted = 0, blooming = 0, ready = 0;
+      for (var pk in state.plants) {
+        total++;
+        var pd = state.plants[pk]._d;
+        if (!pd) continue;
+        if (pd.wilted) wilted++;
+        if (pd.stage >= 2) blooming++;
+        if (pd.ready) ready++;
+      }
 
       // Wild flowers are a standing "there's something out there to find", so
       // they get a tail on every line rather than competing for the whole one.
@@ -9028,8 +9385,7 @@
 
       var line;
       if (total === 0) {
-        line = 'Tap the map near you to plant your first seed \u{1F331}' + wildTail;
-        document.getElementById('hud-status-line').innerHTML = line;
+        setStatusLine('Tap the map near you to plant your first seed \u{1F331}' + wildTail);
         return;
       }
       if (ready > 0) {
@@ -9044,7 +9400,7 @@
         // reassure the player about, and the line needs room for wildTail.
         line = '\u{1F338} ' + total + ' growing &bull; ' + blooming + ' in bloom';
       }
-      document.getElementById('hud-status-line').innerHTML = line + wildTail;
+      setStatusLine(line + wildTail);
     }
 
     function toggleMenu() {
@@ -9119,7 +9475,15 @@
     // renderSprinklerToggle) so a flower harvested elsewhere while the
     // panel happens to be open still hides the arrows correctly.
     function syncPlantCycleArrows() {
-      var show = viewingKey !== null && !viewingWild && sortedPlantKeys().length > 1;
+      // Deliberately NOT sortedPlantKeys() here, even though that is what
+      // the arrows actually cycle through - all this needs is "is there
+      // more than one flower", and sortedPlantKeys() pays for a full
+      // Object.keys plus a comparator sort of the entire lifetime garden to
+      // answer it (0.65ms at 1500 plants). updateHUD calls this on every
+      // GPS fix and every 60s tick, so that was a whole-garden sort running
+      // several times a minute forever to decide whether to show two
+      // chevrons. The count alone is the same answer for free.
+      var show = viewingKey !== null && !viewingWild && Object.keys(state.plants).length > 1;
       document.getElementById('plant-cycle-prev').classList.toggle('show', show);
       document.getElementById('plant-cycle-next').classList.toggle('show', show);
     }
@@ -9181,6 +9545,7 @@
     function onResetSave() {
       toggleMenu();
       if (!confirm('Erase your save completely - garden, seeds, Petals, and all progress? This cannot be undone.')) return;
+      cancelPendingSave(); // see cancelPendingSave - a queued write must not outlive the wipe
       localStorage.removeItem(STORAGE_KEY);
       location.reload();
     }

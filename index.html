@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.9</span>
+      <span id="game-version">v2.39.10</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.10', changes: [
+        "Fixed the grass around you sometimes looking freshly reshuffled " +
+          "the very first time you zoomed after locking onto GPS - it's " +
+          "drawn correctly from the first frame now instead of snapping " +
+          "into place on your first zoom."
+      ] },
       { version: 'v2.39.9', changes: [
         "Grass (and the green highlight under it) is back to covering " +
           "everywhere you've walked in range of today, not just the " +
@@ -9167,6 +9173,14 @@
           var hh = latLngToCell(state.userPos.lat, state.userPos.lng);
           userCellQ = hh.q; userCellR = hh.r;
           rangeArea.setLatLngs(cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE));
+          // The grass pattern (see ensureGrassPattern) was also built a
+          // moment ago against the uncorrected CELL_LNG_DEG - its tileW
+          // came from cellPixelWidth(), which depends on it. Left alone,
+          // that stale pattern sits on rangeArea until the player's next
+          // real zoom fires 'zoomend' and happens to refresh it - which
+          // reads as the grass suddenly rearranging itself the moment they
+          // zoom, rather than being correct from the very first frame.
+          ensureGrassPattern(rangeArea._renderer._container);
         }
       }
       // The map.setView() a moment ago in onLocationUpdate already fired

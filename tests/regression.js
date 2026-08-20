@@ -307,6 +307,39 @@ const h = require('./harness');
   r.check('greenhouse opens', out.greenhouse === true, out);
   r.check('plant panel opens', out.plant === true, out);
 
+  // ---- planting the last seed of a variant --------------------------------
+  // The trailing native 'click' behind a pointer-resolved tap (see
+  // suppressNextMapClick's own comment) used to fall through to "occupied
+  // tile -> open its panel" specifically when the tap spent the LAST seed of
+  // a variant, because unequipping cleared the guard the click handler
+  // relies on before that click arrived. Exercises the real pointerup path
+  // (onToolPointerUp), not a hand-set flag, so it actually proves the fix is
+  // wired in rather than just that the fix exists somewhere.
+  r.section('planting the last seed of a variant');
+  out = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var q = here.q + 1, rr = here.r, key = cellKey(q, rr);
+    delete state.plants[key];
+    var c = cellCenter(q, rr);
+    var vk = SPECIES[1].key + ':' + baseColorOf(SPECIES[1].key);
+    state.seeds[vk] = 1; // exactly one - the case that used to break
+    equipSeed(vk);
+    pointerState = { id: 4242, x: 250, y: 250, cell: { q: q, r: rr }, target: null, moved: false, completed: false, mode: 'seed' };
+    onToolPointerUp({ pointerId: 4242 });
+    var afterTap = { planted: !!state.plants[key], seedsLeft: state.seeds[vk] || 0, equippedSeed: equippedSeed };
+    // The trailing click Leaflet fires right behind that same tap.
+    map.fire('click', { latlng: L.latLng(c.lat, c.lng) });
+    return {
+      afterTap: afterTap,
+      panelOpen: document.getElementById('plant-panel').classList.contains('open'),
+      viewingKey: viewingKey,
+      key: key
+    };
+  });
+  r.check('the last seed still plants', out.afterTap.planted, out);
+  r.check('the seed is spent and unequipped', out.afterTap.seedsLeft === 0 && !out.afterTap.equippedSeed, out);
+  r.check("the flower's panel does NOT open from the trailing click", !out.panelOpen, out);
+
   // ---- What's New ------------------------------------------------------
   r.section("What's New popup");
   out = await page.evaluate(() => {

@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.10</span>
+      <span id="game-version">v2.39.11</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.11', changes: [
+        "Planting the very last seed of a color no longer pops that " +
+          "flower's detail pane open on the same tap - it just plants, " +
+          "the way any other planting tap does."
+      ] },
       { version: 'v2.39.10', changes: [
         "Fixed the grass around you sometimes looking freshly reshuffled " +
           "the very first time you zoomed after locking onto GPS - it's " +
@@ -7341,6 +7346,12 @@
     // TOOLS section below, which drives itself off pointer events so it can
     // tell a tap from a press-and-hold.
     map.on('click', function (e) {
+      // The trailing native click behind a tap already resolved via
+      // onToolPointerUp (see suppressNextMapClick's own comment) - swallow
+      // it unconditionally rather than trusting activeTool/equippedSeed to
+      // still be set, since the seed case can unequip itself as part of
+      // resolving that very tap.
+      if (suppressNextMapClick) { suppressNextMapClick = false; return; }
       // A tap anywhere else on the map while the tool fan is out is just a
       // "never mind" - it closes the fan instead of planting or opening a
       // panel underneath it. See onToolboxPointerUp for why the fan can be
@@ -7910,6 +7921,18 @@
     // dragging across tiles for a range selection (see RANGE SELECTION
     // below), so they share one pointer chain rather than two similar ones.
     var pointerState = null;
+    // A plain tap handled here (resolveToolTap/resolveSeedTap, below) is
+    // still followed by a native 'click' event reaching map.on('click', ...)
+    // - that handler normally bows out on its own by seeing activeTool/
+    // equippedSeed still set (see its own comment), but planting the very
+    // last seed of a variant unequips it (see plantEquippedSeedAt) before
+    // that trailing click arrives, so the guard was gone by the time it was
+    // needed and the click fell through to "occupied tile -> open its
+    // panel" - opening the flower that tap had just planted. Set right
+    // before dispatching either resolve function and consumed by the very
+    // next map click, whatever it decides, so it never leaks past the one
+    // click it exists to swallow.
+    var suppressNextMapClick = false;
     // Which mode is currently claiming the map, or null if neither - the
     // one thing every gesture below branches on first.
     function equippedMapMode() {
@@ -7920,6 +7943,10 @@
     function onToolPointerDown(ev) {
       var mode = equippedMapMode();
       if (!mode || pointerState) return;
+      // Defensive reset: a fresh gesture starting means the previous one's
+      // trailing click, if it was ever coming, has already had its chance -
+      // never let a stale flag from some skipped click swallow this new tap.
+      suppressNextMapClick = false;
       if (ev.pointerType === 'mouse' && ev.button !== 0) return;
       var ll = map.mouseEventToLatLng(ev);
       var h = latLngToCell(ll.lat, ll.lng);
@@ -7974,6 +8001,7 @@
       // same as releasing early on a single-tile hold loses nothing.
       if (rangeGesture) endRangeSelection();
       if (ps.moved || ps.completed) return;
+      suppressNextMapClick = true;
       if (ps.mode === 'tool') resolveToolTap(ps); else resolveSeedTap(ps);
     }
 

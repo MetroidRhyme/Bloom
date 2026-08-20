@@ -283,6 +283,55 @@ const h = require('./harness');
     r.check('a tile change snaps back to 5s', out.afterMove === 5000, out);
   }
 
+  // ---- camera re-anchors on zoom while following ------------------------
+  // A pinch/scroll/double-tap zoom is Leaflet's own built-in zoom-around-
+  // center handling, and it doesn't round-trip exactly - the CRS project/
+  // unproject math drifts the map's ground center by a small but real
+  // amount on every zoom step, and it accumulates. Since the grass texture
+  // covers the whole screen, that drift reads as "the grass moved" far
+  // more obviously than it would on a few sparse markers. See the
+  // map.on('zoomend', ...) handler right after map.on('dragstart', ...).
+  const hasZoomAnchor = await page.evaluate(() => userCellQ !== null);
+  r.section('camera re-anchors on zoom while following', hasZoomAnchor ? '' : '(SKIPPED - not in this build)');
+  if (hasZoomAnchor) {
+    out = await page.evaluate(() => {
+      var c = cellCenter(userCellQ, userCellR);
+      // A drifted center a real zoom-around-a-point could plausibly leave -
+      // a fraction of a tile off in both directions.
+      var drifted = [c.lat + CELL_LAT_DEG * 0.3, c.lng + CELL_LNG_DEG * 0.3];
+
+      state.following = true;
+      map.panTo(drifted, { animate: false });
+      map.fire('zoomend');
+      var afterFollowing = map.getCenter();
+
+      state.following = false;
+      map.panTo(drifted, { animate: false });
+      map.fire('zoomend');
+      var afterNotFollowing = map.getCenter();
+
+      // Restore what the rest of the suite expects the camera to be doing.
+      state.following = true;
+      map.panTo([c.lat, c.lng], { animate: false });
+
+      return {
+        target: c, drifted: { lat: drifted[0], lng: drifted[1] },
+        afterFollowing: { lat: afterFollowing.lat, lng: afterFollowing.lng },
+        afterNotFollowing: { lat: afterNotFollowing.lat, lng: afterNotFollowing.lng }
+      };
+    });
+    // A lat/lng -> pixel -> lat/lng round trip (exactly the imprecision
+    // this fix exists to correct for) is never bit-exact, so "snapped
+    // back" means much closer to the target than the drift was, not
+    // exactly equal to it.
+    var dist = function (a, b) { return Math.hypot(a.lat - b.lat, a.lng - b.lng); };
+    var driftSize = dist(out.drifted, out.target);
+    var snappedBack = dist(out.afterFollowing, out.target) < driftSize * 0.05;
+    var stayedDrifted = dist(out.afterNotFollowing, out.drifted) < driftSize * 0.05;
+    r.check('while following, a zoomend snaps the drifted center back onto the player', snappedBack, out);
+    r.check("not following (player panned off to browse), a zoomend leaves the camera alone", stayedDrifted, out);
+  }
+
   // ---- panels ----------------------------------------------------------
   r.section('panels open cleanly');
   out = await page.evaluate(() => {

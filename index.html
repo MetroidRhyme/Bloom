@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.11</span>
+      <span id="game-version">v2.39.12</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1838,6 +1838,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.39.12', changes: [
+        "The whole map (grass included) no longer creeps a little every " +
+          "time you zoom in or out - it stays locked on your real " +
+          "position instead of drifting a bit further off with each zoom."
+      ] },
       { version: 'v2.39.11', changes: [
         "Planting the very last seed of a color no longer pops that " +
           "flower's detail pane open on the same tap - it just plants, " +
@@ -6738,6 +6743,28 @@
     // to it snapping to their location again.
     map.on('dragstart', function () {
       state.following = false; saveState();
+    });
+    // A pinch/scroll/double-tap zoom is Leaflet's own built-in handling, not
+    // anything Bloom calls itself - and re-centering on wherever the gesture
+    // happened to be anchored isn't exact: the CRS project/unproject
+    // round-trip at each zoom level rounds by a small but real amount, and
+    // it accumulates over a few zoom steps. A player standing still zooming
+    // in and out a couple of times sees the whole view drift a little each
+    // time - and since the grass texture covers the entire screen, that
+    // drift reads as "the grass moved" far more obviously than it would on
+    // a few sparse flower icons, even though every marker (and the grass
+    // itself) is still correctly anchored to its own real ground position -
+    // it's the camera's ground center that quietly slid, not them.
+    // Silently re-snaps onto the player's actual position once the zoom
+    // settles, same reference point onRecenter already uses (the snapped
+    // tile center, not raw GPS, so this can't itself introduce a mismatch
+    // against the live range square). Only while actually following - a
+    // player who's deliberately panned off to browse elsewhere (see
+    // dragstart above) should never have their own camera control fought.
+    map.on('zoomend', function () {
+      if (!state.following || userCellQ === null) return;
+      var c = cellCenter(userCellQ, userCellR);
+      map.panTo([c.lat, c.lng], { animate: false });
     });
 
     // Tile mesh is only drawn once zoomed in this close - below it the tile

@@ -109,14 +109,17 @@
        syncGreenhouseUnlockUI() in the GREENHOUSE section. */
     #menu-dropdown button#menu-greenhouse-btn { display: none; position: relative; }
     body.greenhouse-unlocked #menu-dropdown button#menu-greenhouse-btn { display: block; }
-    /* Same gate, same reasoning, for the Spell Book - see renderCheatToggle's
-       body.cheat-mode toggle in the CHEAT MODE section. Unlike Crossing
-       Notes/Greenhouse this one can also go back to hidden (turning Cheat
-       Mode back off), which the other two never do - display: none is
-       reapplied any time the class comes off, same as it would for a fresh
-       save that never turned Cheat Mode on at all. */
+    /* Same gate, same reasoning, for the Spell Book - see
+       syncSpellbookUnlockUI() in the SPELL BOOK section. Shows once any one
+       spell has unlocked (a player discovering the flowers a spell needs -
+       see isRainRingUnlocked and friends there), or immediately under Cheat
+       Mode as a dev-testing shortcut. Unlike Crossing Notes/Greenhouse this
+       one can still go back to hidden (turning Cheat Mode back off before
+       anything has actually unlocked), which the other two never do -
+       display: none is reapplied any time the class comes off, same as it
+       would for a fresh save that qualifies for neither yet. */
     #menu-dropdown button#menu-spellbook-btn { display: none; }
-    body.cheat-mode #menu-dropdown button#menu-spellbook-btn { display: block; }
+    body.spellbook-unlocked #menu-dropdown button#menu-spellbook-btn { display: block; }
     /* How many pots are ready to grow or wilted right now (see
        greenhouseReadyCount) - same filled-pill language as the seed pouch's
        own count badge, just blue for "water" rather than green for
@@ -929,9 +932,13 @@
     }
 
     /* ================= SPELL BOOK ================= */
-    /* Cheat-mode-only reference page (see openSpellbook/menu-spellbook-btn) -
-       one card per basic-magic formation, same aged-paper page as the
-       journal/milestones above. */
+    /* One card per basic-magic formation, same aged-paper page as the
+       journal/milestones above - see openSpellbook/menu-spellbook-btn.
+       Each card unlocks independently as its own flowers are discovered
+       (see syncSpellbookUnlockUI/isRainRingUnlocked and friends in the
+       script's SPELL BOOK section); a still-locked card renders as a
+       silhouette via .spell-card.locked/.locked-diagram below rather than
+       being left out of the page. */
     .spellbook-intro { margin: 0 0 20px; line-height: 22px; font-size: 13px; color: var(--text-dim); text-align: center; }
     .spell-card { margin: 0 0 26px; }
     .spell-card:last-child { margin-bottom: 0; }
@@ -956,6 +963,16 @@
     }
     .spell-cell.empty { border: 1px dashed rgba(90,61,34,0.25); border-radius: 4px; height: 34px; margin-bottom: 4px; }
     .spell-card p { margin: 0; line-height: 22px; font-size: 13.5px; color: var(--text); }
+    /* A not-yet-discovered card (see lockedSpellCard in the script) - the
+       silhouette diagram and the hint text both dim, same "not earned yet"
+       language the sticker book's own blank cells use elsewhere. */
+    .spell-card.locked .spell-card-head { color: var(--text-dim); }
+    .spell-diagram.locked-diagram {
+      width: 76px; height: 76px; display: flex; align-items: center; justify-content: center;
+      border: 2px dashed rgba(90,61,34,0.25); background: rgba(90,61,34,0.03);
+      font-size: 32px; font-weight: 800; color: rgba(90,61,34,0.3);
+    }
+    .spell-card.locked p { color: var(--text-dim); font-style: italic; }
 
     /* ================= MILESTONES (STICKER BOOK) ================= */
     /* One row per track: an icon/label/blurb header, then always exactly
@@ -1459,7 +1476,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.40.0</span>
+      <span id="game-version">v2.41.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1481,9 +1498,10 @@
          and the GREENHOUSE section, same reasoning as menu-crossnotes-btn
          above. -->
     <button id="menu-greenhouse-btn" onclick="openGreenhouse()">Greenhouse</button>
-    <!-- Cheat Mode only - see renderCheatToggle()'s body.cheat-mode toggle
-         and the SPELL BOOK section of the script. Starts hidden in the
-         markup itself, same reasoning as menu-crossnotes-btn above. -->
+    <!-- Hidden until any one spell unlocks (or Cheat Mode is on) - see
+         syncSpellbookUnlockUI() and the SPELL BOOK section of the script.
+         Starts hidden in the markup itself, same reasoning as
+         menu-crossnotes-btn above. -->
     <button id="menu-spellbook-btn" onclick="openSpellbook()">Spell Book</button>
     <button onclick="openHowToPlay()">How to Play</button>
     <button class="danger" onclick="onResetSave()">Reset Save</button>
@@ -1702,9 +1720,13 @@
     // than breaking anything. Tapping the rune opens a small panel with
     // what it does and how long it has left. See the RAIN RINGS section
     // (below catchUpSprinklersOffline) for the actual detection/watering
-    // logic. There is deliberately no in-game hint that this exists yet
-    // (spellbook/tutorial copy is a later feature) - the only tell is
-    // whatever a player can actually see happen on the map.
+    // logic. There is deliberately no in-game hint for a player who hasn't
+    // found this recipe yet - the Spell Book (see the SPELL BOOK section)
+    // only reveals a spell's own card once its prerequisite flowers are
+    // already discovered (see isRainRingUnlocked there), so it documents a
+    // formation after the fact rather than teaching it up front; until
+    // then the only tell is whatever a player can actually see happen on
+    // the map.
     var RAIN_RING_COLOR = 'blue';
     var RAIN_RING_RADIUS = 2;   // Chebyshev distance from the center tile that gets rained on - a 5x5 block
 
@@ -1844,6 +1866,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.41.0', changes: [
+        "The Spell Book is no longer Cheat Mode only - it now shows up in " +
+          "the menu for everyone the moment you've discovered the flowers " +
+          "a spell needs (every species of Blue for the Rain Ring, every " +
+          "species in one shared color for the Grow Spell, every color of " +
+          "a tier for Loki's Control/Scry). Still-locked spells show up as " +
+          "a '?' card with a hint instead of disappearing."
+      ] },
       { version: 'v2.40.0', changes: [
         "The Grow Spell now needs four different species (all the same " +
           "color) instead of four matching flowers, and Loki's Control/" +
@@ -3782,9 +3812,15 @@
     // lost" guarantee as the rest of the save.
     function recordGrown(vk) {
       var e = state.inventory[vk];
+      var isFirst = !e;
       if (!e) e = state.inventory[vk] = { count: 0, firstAt: Date.now() };
       e.count++;
       state.stats.grown++;
+      // A first-ever discovery of this variant is the only case that could
+      // have just unlocked a spell (see isRainRingUnlocked and friends,
+      // above the SPELL BOOK section) - every one of those predicates is a
+      // pure function of which variants exist in state.inventory at all.
+      if (isFirst) syncSpellbookUnlockUI();
     }
 
     // Picks a fully-grown plant (single bloom or flourishing cluster) whether
@@ -10150,19 +10186,73 @@
     }
 
     // ---------------------------------------------------------------------
-    //  SPELL BOOK (see menu-spellbook-btn and renderCheatToggle's
-    //  body.cheat-mode toggle) - a read-only reference page for the basic
-    //  elemental magic above (RAIN RINGS, GROW SPELL, LOKI'S CONTROL, and
-    //  the CORNER ZONES/SCRY section). It doesn't detect or grant anything
-    //  itself - just a diagram of each formation's planting layout (built
-    //  from the same buildPlantVisual() art the map itself renders, not a
-    //  drawn illustration), the spell's rune/sigil, and a player-facing
-    //  description of what it does. Gated behind Cheat Mode rather than
-    //  shipping as a real in-game hint - see the "no in-game hint" line on
-    //  the RAIN RING comment up top; this stays a dev/testing reference,
-    //  not a tutorial the normal game teaches.
+    //  SPELL BOOK (see menu-spellbook-btn and syncSpellbookUnlockUI below)
+    //  - a read-only reference page for the basic elemental magic above
+    //  (RAIN RINGS, GROW SPELL, LOKI'S CONTROL, and the CORNER ZONES/SCRY
+    //  section). It doesn't detect or grant anything itself - just a
+    //  diagram of each formation's planting layout (built from the same
+    //  buildPlantVisual() art the map itself renders, not a drawn
+    //  illustration), the spell's rune/sigil, and a player-facing
+    //  description of what it does.
+    //
+    //  Each spell's own card is independently gated behind a discovery
+    //  requirement - see isRainRingUnlocked/isGrowSpellUnlocked/
+    //  isLokiUnlocked/isScryUnlocked just below - rather than the whole
+    //  page being all-or-nothing. Every one of those predicates mirrors
+    //  whichever axis that spell's own recipe treats as the fixed,
+    //  exhaustively-required one: Rain Ring needs every species already
+    //  discovered (grown, harvested, or found wild - see recordGrown) as a
+    //  Blue flower; Grow Spell needs every species discovered in any ONE
+    //  shared tier-1 color; Loki's Control needs every tier-1 color
+    //  discovered (in any species); Scry needs every tier-2 color
+    //  discovered. A locked card still shows on the page as a silhouette
+    //  (see lockedSpellCard) with a one-line hint of what's needed, rather
+    //  than disappearing outright - see renderSpellbookPage.
+    //
+    //  Deliberately NOT one more state.xUnlocked boolean like
+    //  state.greenhouseUnlocked/state.fertUnlocked (see the GREENHOUSE/
+    //  FERTILIZER UNLOCK sections) - those gate a genuine one-time event
+    //  (a purchase, a tutorial dismissal) that has no other record once it
+    //  happens. A spell's own unlock condition has nothing like that to
+    //  lose: it's a pure, cheap check against state.inventory, which
+    //  itself already never shrinks (see recordGrown's own comment) - so
+    //  recomputing it live on every render/menu-sync is both simpler than
+    //  a fifth persisted flag (no migration branch, no boot-sweep backfill
+    //  for an old save that already qualifies) and exactly as permanent in
+    //  practice, since the moment it flips true it can never flip back.
+    //  The menu entry itself still needs an explicit sync
+    //  (syncSpellbookUnlockUI, called from recordGrown/setCheatMode/INIT)
+    //  since nothing else re-renders it on every discovery.
     // ---------------------------------------------------------------------
     var SPELLBOOK_CELL_PX = 34;
+
+    // See the banner comment above for what each of these mirrors.
+    // speciesDiscoveredInColor/colorDiscovered read straight off
+    // state.inventory (see variantKey/recordGrown) - no cache, no
+    // persisted flag, just a handful of cheap lookups.
+    function speciesDiscoveredInColor(colorId) {
+      return SPECIES.every(function (s) { return !!state.inventory[variantKey(s.key, colorId)]; });
+    }
+    function colorDiscovered(colorId) {
+      return SPECIES.some(function (s) { return !!state.inventory[variantKey(s.key, colorId)]; });
+    }
+    function isRainRingUnlocked() {
+      return speciesDiscoveredInColor(RAIN_RING_COLOR);
+    }
+    function isGrowSpellUnlocked() {
+      return tierColors(GROW_TIER).some(function (c) { return speciesDiscoveredInColor(c.id); });
+    }
+    function isLokiUnlocked() {
+      return tierColors(LOKI_TIER).every(function (c) { return colorDiscovered(c.id); });
+    }
+    function isScryUnlocked() {
+      return tierColors(SCRY_TIER).every(function (c) { return colorDiscovered(c.id); });
+    }
+    // Whether the Spell Book menu entry itself should show at all - true
+    // the moment any one spell has unlocked. See syncSpellbookUnlockUI.
+    function anySpellUnlocked() {
+      return isRainRingUnlocked() || isGrowSpellUnlocked() || isLokiUnlocked() || isScryUnlocked();
+    }
 
     // One diagram cell: either a flourishing (MAX_STAGE) flower rendered at
     // spell-book scale, or (speciesKey falsy) a dashed "empty ground" tile.
@@ -10254,37 +10344,58 @@
         diagramHtml + bodyHtml + '</div>';
     }
 
+    // The not-yet-discovered version of a card - a "?" silhouette instead
+    // of the real diagram, and a one-line hint instead of the mechanic
+    // description, so a locked spell still shows something exists there
+    // without giving the recipe away. Same shape as spellCard so both can
+    // sit in the same list in renderSpellbookPage.
+    function lockedSpellCard(icon, title, hint) {
+      return '<div class="spell-card locked"><div class="spell-card-head">' + icon + ' ' + title + '</div>' +
+        '<div class="spell-diagram locked-diagram">?</div>' +
+        '<p>' + hint + '</p></div>';
+    }
+
     // All the numbers below are read from the live constants (RAIN_RING_RADIUS,
     // RUNE_ACTIVE_MS, etc.) rather than typed out by hand, so this page can
     // never quietly drift out of sync with the mechanics it's describing.
+    // Each card is built by its own unlocked-vs-locked ternary (see
+    // isRainRingUnlocked/isGrowSpellUnlocked/isLokiUnlocked/isScryUnlocked
+    // and lockedSpellCard, above) rather than the page being all-or-nothing.
     function renderSpellbookPage() {
+      var ringColorName = colorFor(RAIN_RING_COLOR).name;
       var growColors = tierColors(GROW_TIER).map(function (c) { return c.name; }).join('/');
       var lokiColors = tierColors(LOKI_TIER).map(function (c) { return c.name; }).join('/');
       var scryColors = tierColors(SCRY_TIER).map(function (c) { return c.name; }).join('/');
       var ringSpan = RAIN_RING_RADIUS * 2 + 1;
       var html =
         '<p class="spellbook-intro">Basic elemental magic - plant flowers into one of the layouts below and, ' +
-        'once every flower in it reaches a full cluster, the formation does the rest on its own. A dev/testing ' +
-        'reference - a normal save never sees this page, same as none of these spells have an in-game hint.</p>' +
+        'once every flower in it reaches a full cluster, the formation does the rest on its own. Each spell ' +
+        'reveals its own page here once you\'ve discovered (grown, harvested, or found wild) the flowers it ' +
+        'needs.</p>' +
 
-        spellCard('\u{1F4A7}', 'Rain Ring', rainRingDiagram(),
-          '<p>One of each of the eight species - all Blue, no repeats - on the eight tiles ringed around one ' +
-          'empty center tile. Water the center once every flower around it is a full cluster and a rune rises ' +
-          'there. While the rune stays watered, it keeps every plant within ' + RAIN_RING_RADIUS + ' tiles of it ' +
-          '- a ' + ringSpan + 'x' + ringSpan + ' block, including its own eight Blue flowers - watered on its ' +
-          'own for the next ' + (RUNE_ACTIVE_MS / HOUR) + ' hours. Watering it again at any point tops that ' +
-          'window back up; letting it run out just leaves it dormant until the next watering, nothing is lost.</p>') +
+        (isRainRingUnlocked() ? spellCard('\u{1F4A7}', 'Rain Ring', rainRingDiagram(),
+          '<p>One of each of the eight species - all ' + ringColorName + ', no repeats - on the eight tiles ' +
+          'ringed around one empty center tile. Water the center once every flower around it is a full cluster ' +
+          'and a rune rises there. While the rune stays watered, it keeps every plant within ' + RAIN_RING_RADIUS +
+          ' tiles of it - a ' + ringSpan + 'x' + ringSpan + ' block, including its own eight ' + ringColorName +
+          ' flowers - watered on its own for the next ' + (RUNE_ACTIVE_MS / HOUR) + ' hours. Watering it again ' +
+          'at any point tops that window back up; letting it run out just leaves it dormant until the next ' +
+          'watering, nothing is lost.</p>') :
+        lockedSpellCard('\u{1F4A7}', 'Rain Ring',
+          'Discover every species as a ' + ringColorName + ' flower to unlock.')) +
 
-        spellCard('\u{1F300}', 'Grow Spell', growSpellDiagram(),
+        (isGrowSpellUnlocked() ? spellCard('\u{1F300}', 'Grow Spell', growSpellDiagram(),
           '<p>A 2x2 block of four different species, all the exact same color - no repeats - as long as that ' +
           'color is one tier up from the four standards (' + growColors + '). The instant all four reach a full cluster, the ' +
           'block is consumed on the spot - gone for good, no seeds or Petals back - and leaves a rune behind ' +
           'at that spot: for the next ' + (GROW_RUNE_MS / HOUR) + ' hours, every flower within ' +
           GROW_PULSE_RADIUS + ' tiles grows ' + GROW_RUNE_MULTIPLIER + 'x faster. A pure timing perk, not a ' +
           'resource one - it never hands back a flower, a seed, or another cast\'s worth of material, so ' +
-          'chaining casts always costs more than it returns.</p>') +
+          'chaining casts always costs more than it returns.</p>') :
+        lockedSpellCard('\u{1F300}', 'Grow Spell',
+          'Discover every species in any single one of these colors to unlock: ' + growColors + '.')) +
 
-        spellCard('\u{1F451}', 'Loki\'s Control', lokiDiagram(),
+        (isLokiUnlocked() ? spellCard('\u{1F451}', 'Loki\'s Control', lokiDiagram(),
           '<p>A 2x2 block of any ' + lokiColors + ' flowers at each of the four corners of a square or ' +
           'rectangle between ' + ZONE_MIN_SPAN + ' and ' + ZONE_MAX_SPAN + ' tiles on a side - species can ' +
           'repeat freely, but each corner block needs at least two different colors in it, never a single ' +
@@ -10292,13 +10403,17 @@
           'inside holds your access for up to ' + (LOKI_CONTROL_MS / HOUR / 24) + ' days instead of expiring at ' +
           'midnight, as long as every corner stays flourishing. Let even one corner wilt and the extension ' +
           'lapses until every corner is rewatered - it only ever stretches access already earned by walking ' +
-          'there, never grants ground never actually reached.</p>') +
+          'there, never grants ground never actually reached.</p>') :
+        lockedSpellCard('\u{1F451}', 'Loki\'s Control',
+          'Discover a flower of every one of these colors to unlock: ' + lokiColors + '.')) +
 
-        spellCard('\u{1F441}', 'Scry', scryDiagram(),
+        (isScryUnlocked() ? spellCard('\u{1F441}', 'Scry', scryDiagram(),
           '<p>Same shape as Loki\'s Control, one tier up - ' + scryColors + ' at each of the four corners. ' +
           'While all sixteen corner flowers stay grown and watered, everywhere inside is in range ' +
           'unconditionally, even ground never actually walked to. A single wilted corner drops the effect ' +
-          'immediately until every corner is rewatered.</p>');
+          'immediately until every corner is rewatered.</p>') :
+        lockedSpellCard('\u{1F441}', 'Scry',
+          'Discover a flower of every one of these colors to unlock: ' + scryColors + '.'));
 
       document.getElementById('spellbook-body').innerHTML = html;
     }
@@ -10313,6 +10428,19 @@
     function closeSpellbook() {
       document.getElementById('spellbook-panel').classList.remove('open');
       syncToolRail();
+    }
+
+    // Reveals the Spell Book menu entry (see #menu-spellbook-btn's own
+    // body.spellbook-unlocked CSS gate) once any one spell has unlocked -
+    // see anySpellUnlocked above. Cheat Mode also forces it open, same
+    // dev-testing shortcut it already gives Unlimited currency/seeds
+    // elsewhere; turning Cheat Mode back off with nothing actually
+    // unlocked yet hides it again, same as a fresh save. Called from
+    // recordGrown (every place discovery can change), setCheatMode, and
+    // once at boot (INIT) to show it immediately for a save that already
+    // qualifies.
+    function syncSpellbookUnlockUI() {
+      document.body.classList.toggle('spellbook-unlocked', state.cheatMode || anySpellUnlocked());
     }
 
     // How many times this exact variant has ever been grown - extracted or
@@ -10873,6 +11001,7 @@
       }
       saveState();
       renderCheatToggle();
+      syncSpellbookUnlockUI();
       renderShopRows();
       updateCurrencyPill();
       // renderPlants() before updateHUD(): it's what actually recomputes each
@@ -10887,11 +11016,6 @@
       var btn = document.getElementById('cheat-toggle-btn');
       btn.textContent = 'Cheat Mode: ' + (state.cheatMode ? 'On' : 'Off');
       btn.classList.toggle('on', !!state.cheatMode);
-      // Also gates the Spell Book menu entry (see the CSS's body.cheat-mode
-      // rule on #menu-spellbook-btn) - a normal save should never see a menu
-      // item explaining mechanics that otherwise have no in-game hint by
-      // design (see the RAIN RING comment up top).
-      document.body.classList.toggle('cheat-mode', !!state.cheatMode);
     }
 
     function updateCurrencyPill() {
@@ -11841,7 +11965,8 @@
     //  INIT
     // ---------------------------------------------------------------------
     initToolRail();             // draw the three tool icons once
-    renderCheatToggle();        // show the Spell Book menu entry/toggle label right away for a save with Cheat Mode already on
+    renderCheatToggle();        // show the Cheat Mode toggle's own On/Off label right away for a save with it already on
+    syncSpellbookUnlockUI();    // show the Spell Book menu entry right away for a save that already qualifies
     syncFertUnlockUI();         // show Crossing Notes/fert sack right away for an already-unlocked save
     syncGreenhouseUnlockUI();   // show the Greenhouse menu entry right away for an already-unlocked save
     recomputeRainRingsFull();   // seed rain rings from whatever's already planted - see its own comment

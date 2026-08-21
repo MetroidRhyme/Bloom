@@ -529,6 +529,62 @@ const h = require('./harness');
   r.check('tickSprinklers flags the broken one', out.brokenFlagged === true, out);
   r.check('tickSprinklers leaves the working one unflagged', out.workingFlagged === true, out);
 
+  // ---- Spell Book progressive unlock --------------------------------------
+  const hasSpellbookUnlock = await page.evaluate(() => typeof isRainRingUnlocked === 'function');
+  r.section('Spell Book progressive unlock', hasSpellbookUnlock ? '' : '(SKIPPED - not in this build)');
+  if (hasSpellbookUnlock) {
+    out = await page.evaluate(() => {
+      // Nothing discovered, Cheat Mode off: menu hidden, every card locked.
+      state.inventory = {};
+      state.cheatMode = false;
+      syncSpellbookUnlockUI();
+      renderSpellbookPage();
+      var lockedNone = document.querySelectorAll('.spell-card.locked').length;
+      var unlockedNone = document.querySelectorAll('.spell-card:not(.locked)').length;
+      var menuHiddenAtStart = !document.body.classList.contains('spellbook-unlocked');
+
+      // Cheat Mode alone shows the menu without faking any individual
+      // spell's own unlock - it's a visibility shortcut, not a cheat on
+      // the predicates themselves.
+      state.cheatMode = true;
+      syncSpellbookUnlockUI();
+      var menuShownUnderCheat = document.body.classList.contains('spellbook-unlocked');
+      var stillNoneUnlocked = !anySpellUnlocked();
+      state.cheatMode = false;
+      syncSpellbookUnlockUI();
+      var menuHiddenAgain = !document.body.classList.contains('spellbook-unlocked');
+
+      // Discover every species as Blue -> only the Rain Ring's card unlocks.
+      SPECIES.forEach(function (s) { recordGrown(s.key + ':blue'); });
+      renderSpellbookPage();
+      var lockedAfter = document.querySelectorAll('.spell-card.locked').length;
+      var unlockedAfter = document.querySelectorAll('.spell-card:not(.locked)').length;
+      var menuShownAfterDiscovery = document.body.classList.contains('spellbook-unlocked');
+      var lockedCardsMentionHint = Array.prototype.every.call(
+        document.querySelectorAll('.spell-card.locked p'), function (p) { return p.textContent.length > 0; });
+
+      return {
+        lockedNone: lockedNone, unlockedNone: unlockedNone, menuHiddenAtStart: menuHiddenAtStart,
+        menuShownUnderCheat: menuShownUnderCheat, stillNoneUnlocked: stillNoneUnlocked, menuHiddenAgain: menuHiddenAgain,
+        lockedAfter: lockedAfter, unlockedAfter: unlockedAfter, menuShownAfterDiscovery: menuShownAfterDiscovery,
+        lockedCardsMentionHint: lockedCardsMentionHint,
+        rainUnlocked: isRainRingUnlocked(), growUnlocked: isGrowSpellUnlocked(),
+        lokiUnlocked: isLokiUnlocked(), scryUnlocked: isScryUnlocked()
+      };
+    });
+    r.check('nothing discovered -> all four cards locked', out.lockedNone === 4 && out.unlockedNone === 0, out);
+    r.check('nothing discovered -> menu entry hidden', out.menuHiddenAtStart === true, out);
+    r.check('Cheat Mode alone reveals the menu entry', out.menuShownUnderCheat === true, out);
+    r.check("...without unlocking any spell's own predicate", out.stillNoneUnlocked === true, out);
+    r.check('turning Cheat Mode back off (nothing unlocked) hides it again', out.menuHiddenAgain === true, out);
+    r.check('every species discovered as Blue -> Rain Ring unlocks, the other three stay locked',
+      out.rainUnlocked === true && out.growUnlocked === false && out.lokiUnlocked === false && out.scryUnlocked === false, out);
+    r.check('the page reflects that: 1 unlocked card, 3 still locked',
+      out.unlockedAfter === 1 && out.lockedAfter === 3, out);
+    r.check('discovery alone (no Cheat Mode) reveals the menu entry', out.menuShownAfterDiscovery === true, out);
+    r.check('every locked card still shows its own hint text', out.lockedCardsMentionHint === true, out);
+  }
+
   // ---- range shape grass texture (issue #20, grass-clutter fix) ----------
   r.section('range shape grass texture');
   out = await page.evaluate(() => ({

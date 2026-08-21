@@ -280,9 +280,20 @@ forget the others, which is exactly what happened building the grow rune:
   was removed in v2.37.0 for the same reason) - if something needs
   surfacing, it waits for the player to look, the same way a grown flower
   or a lapsed zone just sits there until they check on it.
-- **No in-game hint/tutorial for these spells** (per the original RAIN_RING
-  comment) - discovery is part of the design, at least for now. Don't add
-  a spellbook UI unless asked.
+- **No in-game hint for *discovering* a spell's formation** - a player
+  still has to stumble into or work out a recipe themselves, the same
+  "discovery is part of the design" principle as always. What changed
+  (v2.40.0-ish): there IS now a real, general-access Spell Book page
+  (search `SPELL BOOK` - `renderSpellbookPage`/`syncSpellbookUnlockUI`)
+  that documents a spell *after* it's already been found, not before -
+  each spell's own card stays a locked silhouette (`lockedSpellCard`)
+  until its own discovery predicate is met (`isRainRingUnlocked` and
+  siblings - each mirrors whichever axis that spell's recipe treats as
+  the fixed, exhaustively-required one: every species in one fixed color,
+  or every color of a tier, discovered via `recordGrown`). A new formation
+  spell should get its own such predicate and card in the same pattern
+  rather than skipping the Spell Book entirely - it's the documented
+  convention now, not an opt-in.
 - **Comment-as-spec**: every constant and section here carries a full
   prose explanation of the mechanic, not just a one-line label. Future
   changes (including AI-assisted ones) lean on these comments instead of

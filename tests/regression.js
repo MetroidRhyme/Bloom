@@ -654,6 +654,49 @@ const h = require('./harness');
     r.check('...just reorders them to reduce crossing lines', out.reordered === true, out);
   }
 
+  // ---- seed pouch: tapping a species row doesn't replay the whole column --
+  r.section('seed pouch species column stays put on a row tap');
+  out = await page.evaluate(() => {
+    state.seeds = {};
+    ['sunflower', 'tulip', 'daisy'].forEach(function (sk) {
+      state.seeds[sk + ':' + baseColorOf(sk)] = 5;
+      state.seeds[sk + ':pink'] = 3; // a 2nd color too, so the flyout has something to show
+    });
+    openSeedRail();
+    function snapshot() {
+      var out = {};
+      document.querySelectorAll('#seed-petals .seed-petal').forEach(function (el) {
+        out[el.getAttribute('data-key')] = el.style.transform;
+      });
+      return out;
+    }
+    return new Promise(function (resolve) {
+      // Two rAFs, matching animatePetalsOpen's own scheduling, so the
+      // initial open has actually landed on its final transforms before
+      // this snapshots them.
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var afterOpen = snapshot();
+          // Tap the first species row - opens its color flyout without
+          // otherwise touching the column. Snapshot the species petals'
+          // transforms SYNCHRONOUSLY, in the same tick as the tap: the bug
+          // this covers (renderSeedPetals always calling animatePetalsOpen
+          // while the rail was open) reset every petal's transform back to
+          // the closed origin synchronously, before any rAF had a chance to
+          // fly them back out - so a synchronous check catches it reliably,
+          // no animation-timing race.
+          onSeedPetalTap('sunflower');
+          var immediatelyAfterTap = snapshot();
+          resolve({ afterOpen: afterOpen, immediatelyAfterTap: immediatelyAfterTap });
+        });
+      });
+    });
+  });
+  r.check('the species column is still at its open position right after opening',
+    Object.keys(out.afterOpen).every(function (k) { return out.afterOpen[k].indexOf('scale(1)') !== -1; }), out);
+  r.check("tapping a species row leaves every OTHER petal's transform exactly where it was",
+    JSON.stringify(out.afterOpen) === JSON.stringify(out.immediatelyAfterTap), out);
+
   // ---- range shape grass texture (issue #20, grass-clutter fix) ----------
   r.section('range shape grass texture');
   out = await page.evaluate(() => ({

@@ -1504,7 +1504,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.42.0</span>
+      <span id="game-version">v2.42.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1894,6 +1894,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.42.1', changes: [
+        "Fixed the seed pouch: tapping a species to see its colors no " +
+          "longer replays the whole species list flying open again - only " +
+          "that species' own colors fan out now."
+      ] },
       { version: 'v2.42.0', changes: [
         "Crossing Notes now shows every possible recipe's lines from the " +
           "start - a dashed line means two colors are worth trying even " +
@@ -8560,11 +8565,39 @@
         });
       });
     }
-    // Rebuilds the species column. Called on open, and whenever the pouch's
-    // species set could have changed while open - a fresh set of buttons
-    // each time, not a morph, since owning/running out of a species is rare
-    // enough not to need one.
-    function renderSeedPetals() {
+    // Instantly places a freshly-rebuilt row of petals at the position
+    // they're already open to, with no fly-out transition - for a
+    // container that was already open and is just getting a fresh set of
+    // DOM nodes standing in for the old ones (e.g. renderSeedPetals
+    // redrawing the selected-row highlight after a tap). A brand-new
+    // element has no previously-painted frame for the browser to
+    // transition FROM, so writing its final transform directly here,
+    // rather than starting it at animatePetalsOpen's closed origin first,
+    // never plays the opening animation - it just appears already open,
+    // matching what was on screen the instant before. See the SEEDS
+    // section banner comment for the bug this fixes: re-tapping a species
+    // row used to replay the WHOLE species column's opening animation,
+    // not just its own color flyout.
+    function placePetalsOpen(containerId, slots) {
+      var petals = Array.prototype.slice.call(document.getElementById(containerId).children);
+      petals.forEach(function (el, i) {
+        el.style.transitionDelay = '0s, 0s';
+        el.style.transform = 'translate(' + slots[i].dx.toFixed(1) + 'px,' + slots[i].dy.toFixed(1) + 'px) scale(1)';
+      });
+    }
+    // Rebuilds the species column. Called on open (animate=true, so the
+    // whole column genuinely flies out), and whenever the pouch's species
+    // set OR the selected-row highlight could have changed while already
+    // open (animate falsy) - a fresh set of buttons each time, not a
+    // morph, since owning/running out of a species is rare enough not to
+    // need one. That highlight refresh is exactly what onSeedPetalTap
+    // calls this for on every species tap, which used to replay the WHOLE
+    // column's opening animation every time (animatePetalsOpen unconditionally,
+    // regardless of whether the rail was actually just opening) - now a
+    // rebuild while already open uses placePetalsOpen instead, which plants
+    // the fresh buttons directly at their already-open position with no
+    // transition, so only the tapped row's own color flyout visibly moves.
+    function renderSeedPetals(animate) {
       var container = document.getElementById('seed-petals');
       var keys = ownedSpeciesKeys();
       var items = keys.map(function (sk) {
@@ -8583,7 +8616,8 @@
       }).join('');
       if (seedRailOpen) {
         var slots = keys.map(function (k, i) { return { dx: 0, dy: (i + 1) * SEED_ROW }; });
-        animatePetalsOpen('seed-petals', slots, 0);
+        if (animate) animatePetalsOpen('seed-petals', slots, 0);
+        else placePetalsOpen('seed-petals', slots);
       }
     }
     // Rebuilds the color flyout for whichever species is open (seedColorSpecies),
@@ -8637,7 +8671,7 @@
     function openSeedRail() {
       seedRailOpen = true;
       seedColorSpecies = null;
-      renderSeedPetals();
+      renderSeedPetals(true); // a genuine open - the whole column should fly out
       renderSeedColorPetals(); // clears any stale flyout from a previous session
     }
     function closeSeedRail() {
@@ -8661,7 +8695,7 @@
     function onSeedPetalTap(key) {
       if (key.indexOf(':') === -1) {
         seedColorSpecies = (seedColorSpecies === key) ? null : key;
-        renderSeedPetals();       // to (un)highlight the tapped row
+        renderSeedPetals();       // to (un)highlight the tapped row - NOT a fresh open, see its own comment
         renderSeedColorPetals();
         vibrate(10);
       } else {

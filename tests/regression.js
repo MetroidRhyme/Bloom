@@ -682,8 +682,12 @@ const h = require('./harness');
     out = await page.evaluate(() => {
       // Nothing crossed at all - every valid recipe should still produce an
       // edge (structural, not a result), and every edge should render as
-      // .mystery (dashed) since nothing is discovered yet.
+      // .mystery (dashed) since nothing is discovered yet. state.crosses
+      // itself no longer drives discovery at all (see crossResultDiscovered's
+      // own comment - it has no per-species dimension to trust), but it's
+      // still reset here since state.crosses.length gates the how-to hint.
       state.crosses = {};
+      state.inventory = {};
       var edgesEmpty = computeRecipeEdges('sunflower');
       var expectedCount = Object.keys(BREED_TABLE).length + Object.keys(SIGNATURE_TABLE).length;
       var allDifferFromParents = edgesEmpty.every(function (e) { return e.child !== e.a && e.child !== e.b; });
@@ -699,11 +703,12 @@ const h = require('./harness');
       var knownEmpty = svg.querySelectorAll('path.tree-edge.known').length;
       var mysteryEmpty = svg.querySelectorAll('path.tree-edge.mystery').length;
 
-      // Discover exactly one recipe's result (red+white -> pink). Its own
-      // two edges (red->pink, white->pink) should flip to .known; nothing
-      // else should change count or flip style.
-      var k = crossKey('red', 'white');
-      state.crosses[k] = { pink: 1 };
+      // Discover exactly one recipe's result (red+white -> pink) ON
+      // sunflower specifically - state.inventory, the real per-species
+      // discovery ground truth (see crossResultDiscovered), not
+      // state.crosses. Its own two edges (red->pink, white->pink) should
+      // flip to .known; nothing else should change count or flip style.
+      state.inventory['sunflower:pink'] = { count: 1, firstAt: Date.now() };
       renderCrossTree('sunflower');
       drawTreeEdges();
       // renderCrossTree replaces #notes-body's innerHTML wholesale, so the
@@ -742,6 +747,55 @@ const h = require('./harness');
     r.check('an undiscovered color a line reaches still renders blank/"?"', out.greenIsBlank === true, out);
     r.check('orderedTierColors keeps the exact same set of colors', out.sameSet === true, out);
     r.check('...just reorders them to reduce crossing lines', out.reordered === true, out);
+
+    // ---- discovery is per-species, not global (a real reported bug) ------
+    // Finding a color on one species used to mark it "found" on every OTHER
+    // species' page too, because the tree read state.crosses (keyed only by
+    // the two parent color ids, no species at all) instead of
+    // state.inventory (which IS species+color specific, same source the
+    // journal already trusted). Reproduced here with a state.crosses entry
+    // that looks exactly like the old bug's trigger, to prove the tree no
+    // longer reads it for discovery at all.
+    out = await page.evaluate(() => {
+      state.inventory = {};
+      state.crosses = {};
+      state.inventory['tulip:pink'] = { count: 3, firstAt: Date.now() };
+      state.crosses[crossKey('red', 'white')] = { pink: 50 }; // the old, wrong source of truth
+
+      renderCrossTree('tulip');
+      var tulipNode = document.querySelector('[data-color="pink"]');
+      var tulipDiscovered = !!tulipNode && !tulipNode.classList.contains('blank');
+      drawTreeEdges();
+      var tulipKnown = document.querySelectorAll('#tree-svg path.tree-edge.known').length;
+
+      renderCrossTree('sunflower');
+      var sunflowerNode = document.querySelector('[data-color="pink"]');
+      var sunflowerDiscovered = !!sunflowerNode && !sunflowerNode.classList.contains('blank');
+      drawTreeEdges();
+      var sunflowerKnown = document.querySelectorAll('#tree-svg path.tree-edge.known').length;
+
+      var sunflowerCaption = document.querySelector('.tree-caption').textContent;
+      renderCrossTree('tulip');
+      var tulipCaption = document.querySelector('.tree-caption').textContent;
+
+      // Standards still need no discovery at all, on any tab.
+      var daisyBlue = (renderCrossTree('daisy'), document.querySelector('[data-color="blue"]'));
+
+      return {
+        tulipDiscovered: tulipDiscovered, sunflowerDiscovered: sunflowerDiscovered,
+        tulipKnown: tulipKnown, sunflowerKnown: sunflowerKnown,
+        tulipCaption: tulipCaption, sunflowerCaption: sunflowerCaption,
+        daisyBlueDiscovered: !!daisyBlue && !daisyBlue.classList.contains('blank')
+      };
+    });
+    r.check('a color grown on one species shows as found on that species\' own tab', out.tulipDiscovered === true, out);
+    r.check('...but NOT on a different species\' tab, despite a global crosses record', out.sunflowerDiscovered === false, out);
+    r.check('its recipe edge renders .known on the species that found it', out.tulipKnown === 2, out);
+    r.check('...and .mystery (not known) on a species that has not', out.sunflowerKnown === 0, out);
+    r.check('the "X of Y colors found" caption is scoped to this species, not all 30',
+      out.tulipCaption.indexOf('16') !== -1 && out.sunflowerCaption.indexOf('16') !== -1 &&
+      out.tulipCaption !== out.sunflowerCaption, out);
+    r.check('a standard color still needs no discovery on any tab', out.daisyBlueDiscovered === true, out);
   }
 
   // ---- seed pouch: tapping a species row doesn't replay the whole column --

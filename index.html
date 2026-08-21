@@ -1117,8 +1117,11 @@
        page itself is a breeding family tree instead of a stamp album: the
        four standard colors at the top, lines down to every recipe that
        exists. Unlike a node (still a genuine spoiler - see
-       crossResultDiscovered/crossNodeCard, gated on having actually seen
-       that color come out of a cross), a LINE is structural, not a result -
+       crossResultDiscovered/crossNodeCard, gated on having actually grown,
+       harvested, or found that EXACT species+color on THIS tab - the same
+       per-species truth the journal's own discoveredColorsOf reads, not
+       just having seen the color at all on some other species), a LINE is
+       structural, not a result -
        every edge in computeRecipeEdges comes straight from BREED_TABLE/
        SIGNATURE_TABLE and is always drawn, so "these two are worth trying"
        is visible from the start and "no line between them" reliably means
@@ -1504,7 +1507,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.42.3</span>
+      <span id="game-version">v2.42.4</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1894,6 +1897,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.42.4', changes: [
+        "Fixed Crossing Notes marking a color as found on every species " +
+          "the moment you found it on just one - each species' page now " +
+          "only shows what you've actually grown, harvested, or picked " +
+          "wild on that exact species, same as the Flower Journal already " +
+          "did."
+      ] },
       { version: 'v2.42.3', changes: [
         "Sprinklers got a proper redraw - a glossy metal body, a soft " +
           "mist glow, and a fading, droplet-tipped spray instead of flat " +
@@ -10931,7 +10941,7 @@
     //  instead of a list. Two different things are gated on two different
     //  conditions here, deliberately: a NODE's own art is still a genuine
     //  spoiler, shown only once the player has actually seen that color
-    //  come out of a cross (crossResultDiscovered, unchanged); an EDGE is
+    //  come out of a cross ON THIS SPECIES (crossResultDiscovered); an EDGE is
     //  structural, not a result - it just says "these two combine into
     //  something," which is straight off BREED_TABLE/SIGNATURE_TABLE and
     //  true whether or not the player has ever tried it. computeRecipeEdges
@@ -10945,26 +10955,34 @@
     // ---------------------------------------------------------------------
     var notesSpecies = null; // which species tab is open, for the signature row
 
-    // A color counts as "discovered" for the tree once it has actually come
-    // out of a cross as something other than the pair fed in - the same
-    // event the old list screen recorded, just read back out per-color
-    // instead of per-pair. Standards are always discovered; nothing crosses
-    // INTO them, they're just what you start with.
-    function crossResultDiscovered(colorId) {
-      return STANDARD_COLORS.indexOf(colorId) >= 0 || crossResultCount(colorId) > 0;
+    // A color counts as "discovered" ON speciesKey once state.inventory
+    // actually holds that exact species+color variant - the same per-
+    // species truth the journal's own discoveredColorsOf/grownCountOf
+    // already read (see renderJournalPage's own comment: colors are
+    // "tracked per species (not globally) - finding White on a Sunflower
+    // used to reveal the name 'White' on every other species' still-empty
+    // spot too"). The tree used to get this wrong in exactly that way,
+    // because it checked state.crosses instead - and a cross's own key is
+    // just the two PARENT COLOR ids (crossKey(a,b)), with no species
+    // dimension at all, so any species' cross counted toward every other
+    // species' copy of that color. colorFor(colorId).species, when set,
+    // always wins over speciesKey - a signature color belongs to one
+    // species regardless of which tab happens to be open (matches
+    // crossNodeCard's own `on` resolution below). Standards are always
+    // discovered on every species; nothing crosses INTO them, they're just
+    // what you start with.
+    function crossResultDiscovered(colorId, speciesKey) {
+      if (STANDARD_COLORS.indexOf(colorId) >= 0) return true;
+      return !!state.inventory[variantKey(colorFor(colorId).species || speciesKey, colorId)];
     }
-    // Lifetime count of a color as a genuine cross result. Pairs that fall
-    // back to one of their own parents (a tier-2+ attempt that "failed")
-    // are excluded by the parts[0]/parts[1] check - that's not a discovery
-    // of anything, so it shouldn't inflate the count or light up a node.
-    function crossResultCount(colorId) {
-      var total = 0;
-      Object.keys(state.crosses).forEach(function (k) {
-        var parts = k.split('+');
-        if (parts[0] === colorId || parts[1] === colorId) return;
-        total += state.crosses[k][colorId] || 0;
-      });
-      return total;
+    // Lifetime count of this exact species+color variant actually grown,
+    // harvested, or found wild (state.inventory again, same source
+    // grownCountOf already reads) - "how many times have I actually HAD
+    // this flower," not "how many times has this pairing rolled this
+    // outcome, on any species, ever," which is all state.crosses could
+    // ever answer.
+    function crossResultNodeCount(colorId, speciesKey) {
+      return grownCountOf(variantKey(colorFor(colorId).species || speciesKey, colorId));
     }
     // Every valid recipe as a structural { a, b, child } triple, straight
     // from BREED_TABLE/SIGNATURE_TABLE - the tree's edges, always drawn in
@@ -11053,15 +11071,15 @@
     // outright, so a long-press/hover still gives the detail back.
     function crossNodeCard(colorId, speciesKey, showCount) {
       var c = colorFor(colorId);
-      var discovered = crossResultDiscovered(colorId);
+      var discovered = crossResultDiscovered(colorId, speciesKey);
       // Drawn on a real flower rather than an abstract dot. A signature
       // color must use the one species that can wear it; a shared color
       // just borrows whichever species' page is open, so switching tabs
       // reflavors the whole tree instead of only its bottom row.
       var on = speciesFor(c.species || speciesKey);
-      var n = showCount ? crossResultCount(colorId) : 0;
+      var n = showCount ? crossResultNodeCount(colorId, speciesKey) : 0;
       var title = discovered ?
-        (c.name + (showCount ? ' - crossed ' + n + ' time' + (n === 1 ? '' : 's') : '')) :
+        (c.name + (showCount ? ' - grown ' + n + ' time' + (n === 1 ? '' : 's') : '')) :
         'Not found yet';
       var cls = 'color-cell slot' + (discovered ? '' : ' blank');
       return '<div class="' + cls + '" data-color="' + colorId + '" title="' + title + '">' +
@@ -11074,13 +11092,18 @@
     function renderCrossTree(speciesKey) {
       notesSpecies = speciesKey;
 
-      // Global, not per-species - the shared rows (standards through Gold)
-      // are identical on every tab, so "how much of the whole tree have I
-      // found" only makes sense counted once, not per page.
-      var nFound = COLORS.filter(function (c) { return crossResultDiscovered(c.id); }).length;
+      // Per-species, matching the journal's own "X of Y [Species] colors"
+      // caption exactly (colorsForSpecies - 14 shared plus this species'
+      // own 2 signatures) - now that discovery itself is per-species (see
+      // crossResultDiscovered), a global "X of 30" would both overstate
+      // what THIS species has actually found (crediting another species'
+      // discoveries) and count 14 signature colors this species could
+      // never reach in the first place.
+      var palette = colorsForSpecies(speciesKey);
+      var nFound = palette.filter(function (c) { return crossResultDiscovered(c.id, speciesKey); }).length;
       var html = notesTabsHtml(speciesKey) +
-        '<p class="tree-caption"><b>' + nFound + ' of ' + COLORS.length + '</b> colors found &bull; <b>' +
-        state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made</p>' +
+        '<p class="tree-caption"><b>' + nFound + ' of ' + palette.length + '</b> ' + speciesFor(speciesKey).name +
+        ' colors found &bull; <b>' + state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made</p>' +
         // Always shown, not gated on state.crosses - the whole point of the
         // legend is telling a player who hasn't crossed anything yet which
         // lines are worth chasing, same reasoning as the how-to hint below.
@@ -11167,7 +11190,7 @@
         // matching child node this render - skip it rather than draw to
         // nothing.
         if (!elA || !elB || !elC) return '';
-        var known = crossResultDiscovered(e.child);
+        var known = crossResultDiscovered(e.child, notesSpecies);
         var cls = known ? 'known' : 'mystery';
         var stroke = known ? mixHex(colorFor(e.child).petal, '#5a3d22', 0.55) : null;
         var pc = treeNodeCenter(elC, wr);

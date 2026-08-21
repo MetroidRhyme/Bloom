@@ -1459,7 +1459,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.39.12</span>
+      <span id="game-version">v2.40.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1719,10 +1719,16 @@
     // section.
     var RUNE_ACTIVE_MS = 24 * HOUR;
 
-    // Basic elemental magic, step two: the GROW SPELL. Four flowers of one
-    // exact species+color, all one breeding tier above the four base colors
-    // (GROW_TIER), planted in a 2x2 block. The instant all four reach a full
-    // cluster, the block is consumed on the spot - gone, no seeds or Petals
+    // Basic elemental magic, step two: the GROW SPELL. Four DIFFERENT
+    // species, all the exact SAME color, that color one breeding tier above
+    // the four base colors (GROW_TIER), planted in a 2x2 block - no
+    // repeated species, the same "no repeats" convention the rain ring's
+    // own eight spokes use, just scaled down to four. Deliberately not a
+    // monoculture recipe: four of one identical species+color (planting a
+    // big square of the same flower) does NOT complete this, or any other
+    // spell - see the LOKI'S CONTROL/SCRY comment below for its own
+    // matching diversity rule. The instant all four reach a full cluster,
+    // the block is consumed on the spot - gone, no seeds or Petals
     // back, same as the RAIN RING's rune costs nothing to place but this
     // costs the four flowers themselves - and leaves a growth rune behind
     // at that same 2x2 spot instead of an instant one-shot effect: for
@@ -1752,8 +1758,8 @@
 
     // Basic elemental magic, steps three and four: LOKI'S CONTROL and SCRY,
     // a matched pair sharing one shape - four 2x2 corner blocks (all one
-    // exact tier, not required to match each other or even within a single
-    // block, unlike the grow spell's exact recipe) planted at the corners
+    // exact tier, and never monochrome - see isCornerBlockOfTier's own
+    // "at least two different colors" rule below) planted at the corners
     // of a rectangle between ZONE_MIN_SPAN and ZONE_MAX_SPAN tiles on a
     // side. See the CORNER ZONES section (below the GROW SPELL section)
     // for the shared detection logic both spells are built on.
@@ -1776,14 +1782,14 @@
     //
     // Both: a single wilted corner flower drops the effect immediately -
     // the interior falls straight back to the normal rule until every
-    // corner is rewatered. And a corner block whose four flowers all
-    // happen to match (same species+color) is also a valid GROW SPELL
-    // recipe if it's tier-1 (LOKI_TIER, never SCRY_TIER) - the grow spell
-    // fires unconditionally the moment such a block completes, consuming
-    // it before a Loki zone referencing it can do anything. A deliberately
-    // mixed Loki corner (any one of the four differing in species or
-    // color) is immune to this and is the reliable way to build a lasting
-    // zone; Scry's own corners, one tier up, are never at risk of it.
+    // corner is rewatered. A corner block's own diversity rule (at least
+    // two colors per block) and the grow spell's own recipe (exactly one
+    // color, four different species) are mutually exclusive by
+    // construction - a block can never satisfy both at once, so a
+    // completed LOKI'S CONTROL corner (tier-1, same as GROW_TIER) can never
+    // be eaten out from under it by the grow spell the way a plain matching
+    // block could before this rule existed. Scry's own corners, one tier
+    // up, were never at risk of that overlap either way.
     var ZONE_MIN_SPAN = 4;   // shortest legal side (tiles) - below this the two corner blocks on a side would overlap
     var ZONE_MAX_SPAN = 20;  // longest legal side (tiles) - keeps the candidate search and boundary overlay bounded
     var LOKI_TIER = 1;
@@ -1838,6 +1844,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.40.0', changes: [
+        "The Grow Spell now needs four different species (all the same " +
+          "color) instead of four matching flowers, and Loki's Control/" +
+          "Scry corners now need at least two different colors each - so " +
+          "planting one big square of the same flower can no longer " +
+          "accidentally trigger a spell."
+      ] },
       { version: 'v2.39.12', changes: [
         "The whole map (grass included) no longer creeps a little every " +
           "time you zoom in or out - it stays locked on your real " +
@@ -4748,9 +4761,13 @@
     // ---------------------------------------------------------------------
     // The four tiles of the block anchored with (q, r) as its top-left
     // corner: (q,r), (q+1,r), (q,r+1), (q+1,r+1). Complete iff all four are
-    // planted, every one already at MAX_STAGE, all the exact same
-    // species+color (the "recipe"), and that color is GROW_TIER. Returns
-    // the four plant objects, or null.
+    // planted, every one already at MAX_STAGE, all the exact same color
+    // (the "recipe"), that color is GROW_TIER, and all four are DIFFERENT
+    // species - no repeats, same convention isRainRingComplete's own
+    // seenSpecies check uses for the rain ring's eight spokes. Deliberately
+    // NOT a monoculture match any more (see the GROW_TIER comment above for
+    // why) - four of the identical species+color no longer completes this.
+    // Returns the four plant objects, or null.
     function growBlockAt(q, r) {
       var cells = [
         state.plants[cellKey(q, r)], state.plants[cellKey(q + 1, r)],
@@ -4759,10 +4776,13 @@
       for (var i = 0; i < 4; i++) {
         if (!cells[i] || cells[i].stage < MAX_STAGE) return null;
       }
-      var species = cells[0].species, color = colorOfPlant(cells[0]);
+      var color = colorOfPlant(cells[0]);
       if (colorFor(color).tier !== GROW_TIER) return null;
-      for (var j = 1; j < 4; j++) {
-        if (cells[j].species !== species || colorOfPlant(cells[j]) !== color) return null;
+      var seenSpecies = {};
+      for (var j = 0; j < 4; j++) {
+        if (colorOfPlant(cells[j]) !== color) return null;
+        if (seenSpecies[cells[j].species]) return null; // two corners of the same species
+        seenSpecies[cells[j].species] = true;
       }
       return cells;
     }
@@ -4800,9 +4820,14 @@
         // spoke or it was blocking a candidate center (see RAIN RINGS).
         refreshRainRingCandidates(candidateRingCentersAround(c[0], c[1]));
         // A grow-spell block is always tier-1 (GROW_TIER === LOKI_TIER), so
-        // any of its four corners could also have been part of a LOKI'S
-        // CONTROL corner block - see that section's own note about a
-        // matching corner being eaten by this spell before Loki can use it.
+        // one of its four corner tiles could still be a member of a
+        // DIFFERENT anchor's LOKI'S CONTROL corner block - a single tile
+        // can belong to up to four different 2x2 blocks (see
+        // growAnchorsAround). The exact block that just resolved here could
+        // never itself have doubled as a valid Loki corner (isCornerBlockOfTier's
+        // "at least two colors" rule and this recipe's "exactly one color"
+        // are mutually exclusive), but a neighboring corner block sharing
+        // one of these tiles still needs the recheck.
         refreshLokiZoneCandidates(c[0], c[1]);
       });
 
@@ -5223,17 +5248,26 @@
 
     // A 2x2 block anchored at (q, r) - (q,r), (q+1,r), (q,r+1), (q+1,r+1) -
     // counts as a corner of the given tier iff all four tiles are planted,
-    // every one already at MAX_STAGE, and every one is that exact tier.
-    // Unlike a grow block, the four don't need to match each other at all -
-    // see the CORNER ZONES banner comment's note on why a matching Loki
-    // corner is actually the one to avoid.
+    // every one already at MAX_STAGE, every one is that exact tier, AND the
+    // four are not monochrome - at least two different colors have to be
+    // present among them. Species don't need to match or differ at all;
+    // only color diversity is required here. This is what keeps a big
+    // planted square of one identical flower from ever completing a corner
+    // by accident, and - since the grow spell's own recipe one tier below
+    // (see growBlockAt) requires the opposite, exactly one shared color
+    // across four different species - it's also what makes a valid corner
+    // block and a valid grow-spell block mutually exclusive (see the
+    // CORNER ZONES banner comment above).
     function isCornerBlockOfTier(q, r, tier) {
       var a = state.plants[cellKey(q, r)], b = state.plants[cellKey(q + 1, r)],
           c = state.plants[cellKey(q, r + 1)], d = state.plants[cellKey(q + 1, r + 1)];
       if (!a || !b || !c || !d) return false;
       if (a.stage < MAX_STAGE || b.stage < MAX_STAGE || c.stage < MAX_STAGE || d.stage < MAX_STAGE) return false;
-      return colorFor(colorOfPlant(a)).tier === tier && colorFor(colorOfPlant(b)).tier === tier &&
-        colorFor(colorOfPlant(c)).tier === tier && colorFor(colorOfPlant(d)).tier === tier;
+      if (colorFor(colorOfPlant(a)).tier !== tier || colorFor(colorOfPlant(b)).tier !== tier ||
+          colorFor(colorOfPlant(c)).tier !== tier || colorFor(colorOfPlant(d)).tier !== tier) return false;
+      var colors = {};
+      [a, b, c, d].forEach(function (p) { colors[colorOfPlant(p)] = true; });
+      return Object.keys(colors).length >= 2;
     }
 
     // A rectangle is a valid zone of the given tier iff both sides are
@@ -10159,35 +10193,44 @@
       '</div>';
     }
 
-    // A 2x2 block of one exact species+color - any tier-1 color works, this
-    // just shows one example (the first in tierColors(GROW_TIER)).
+    // Four different species, all the exact same color - any tier-1 color
+    // works, this just shows one example (the first in tierColors(GROW_TIER)).
+    // No repeated species, matching growBlockAt's own rule.
     function growSpellDiagram() {
       var color = tierColors(GROW_TIER)[0].id;
+      var sp = SPECIES.slice(0, 4).map(function (s) { return s.key; });
       return '<div class="spell-diagram">' +
-        spellRow([spellCell('tulip', color, 0, 0), spellCell('tulip', color, 1, 0)]) +
-        spellRow([spellCell('tulip', color, 0, 1), spellCell('tulip', color, 1, 1)]) +
+        spellRow([spellCell(sp[0], color, 0, 0), spellCell(sp[1], color, 1, 0)]) +
+        spellRow([spellCell(sp[2], color, 0, 1), spellCell(sp[3], color, 1, 1)]) +
       '</div>';
     }
 
     // Shared by Loki's Control and Scry - four 2x2 corner blocks of one
-    // tier. Deliberately drawn with a different color per corner AND all
-    // four species mixed within each corner, so the picture never implies a
-    // match requirement that isn't actually there (see the CORNER ZONES
-    // comment: corners don't have to match each other, or even match within
-    // one block - only the grow spell's exact recipe does that). Compressed
-    // to one empty row/column of "gap" between the corners rather than
-    // drawn to real ZONE_MIN_SPAN/ZONE_MAX_SPAN scale, which would either be
-    // too cramped (4) or too wide to read as a small diagram (20) - the
-    // card's own text gives the real range. The boundary color comes in as
-    // a literal hex string from LOKI_ZONE_ACTIVE_COLOR/SCRY_ZONE_ACTIVE_COLOR
+    // tier, each checkerboarded between two of the tier's colors rather
+    // than drawn as a single flat color, so the picture actually shows
+    // isCornerBlockOfTier's own "at least two different colors per block"
+    // rule instead of implying a monochrome corner is enough. `colorIds` is
+    // the tier's full color list (cycled two at a time per corner via
+    // pairFor, so it still works when a tier has as few as SCRY_TIER's
+    // three colors); species are left mixed/free within a block, since
+    // species were never part of the corner requirement. Compressed to one
+    // empty row/column of "gap" between the corners rather than drawn to
+    // real ZONE_MIN_SPAN/ZONE_MAX_SPAN scale, which would either be too
+    // cramped (4) or too wide to read as a small diagram (20) - the card's
+    // own text gives the real range. The boundary color comes in as a
+    // literal hex string from LOKI_ZONE_ACTIVE_COLOR/SCRY_ZONE_ACTIVE_COLOR
     // so this can never drift from what the real zone boundary renders in.
     function zoneDiagram(colorIds, boundaryColor) {
       var species = SPECIES.slice(0, 4).map(function (s) { return s.key; });
-      function block(colorId, rowSeed) {
-        return [spellCell(species[0], colorId, 0, rowSeed), spellCell(species[1], colorId, 1, rowSeed),
-                spellCell(species[2], colorId, 2, rowSeed), spellCell(species[3], colorId, 3, rowSeed)];
+      function pairFor(i) {
+        var n = colorIds.length;
+        return [colorIds[i % n], colorIds[(i + 1) % n]];
       }
-      var tl = block(colorIds[0], 0), tr = block(colorIds[1], 1), bl = block(colorIds[2], 2), br = block(colorIds[3], 3);
+      function block(pair, rowSeed) {
+        return [spellCell(species[0], pair[0], 0, rowSeed), spellCell(species[1], pair[1], 1, rowSeed),
+                spellCell(species[2], pair[1], 2, rowSeed), spellCell(species[3], pair[0], 3, rowSeed)];
+      }
+      var tl = block(pairFor(0), 0), tr = block(pairFor(1), 1), bl = block(pairFor(2), 2), br = block(pairFor(3), 3);
       var gap = spellCell(null);
       return '<div class="spell-diagram zone" style="border-color:' + boundaryColor + '">' +
         spellRow([tl[0], tl[1], gap, gap, tr[0], tr[1]]) +
@@ -10199,12 +10242,11 @@
     }
     function lokiDiagram() {
       var c = tierColors(LOKI_TIER).map(function (col) { return col.id; });
-      return zoneDiagram([c[0], c[1], c[2], c[3]], LOKI_ZONE_ACTIVE_COLOR);
+      return zoneDiagram(c, LOKI_ZONE_ACTIVE_COLOR);
     }
     function scryDiagram() {
       var c = tierColors(SCRY_TIER).map(function (col) { return col.id; });
-      while (c.length < 4) c.push(c[0]); // only 3 tier-2 colors exist - repeat one to fill the 4th corner
-      return zoneDiagram([c[0], c[1], c[2], c[3]], SCRY_ZONE_ACTIVE_COLOR);
+      return zoneDiagram(c, SCRY_ZONE_ACTIVE_COLOR);
     }
 
     function spellCard(icon, title, diagramHtml, bodyHtml) {
@@ -10234,8 +10276,8 @@
           'window back up; letting it run out just leaves it dormant until the next watering, nothing is lost.</p>') +
 
         spellCard('\u{1F300}', 'Grow Spell', growSpellDiagram(),
-          '<p>A 2x2 block of one exact species and color, all four matching, as long as that color is one tier ' +
-          'up from the four standards (' + growColors + '). The instant all four reach a full cluster, the ' +
+          '<p>A 2x2 block of four different species, all the exact same color - no repeats - as long as that ' +
+          'color is one tier up from the four standards (' + growColors + '). The instant all four reach a full cluster, the ' +
           'block is consumed on the spot - gone for good, no seeds or Petals back - and leaves a rune behind ' +
           'at that spot: for the next ' + (GROW_RUNE_MS / HOUR) + ' hours, every flower within ' +
           GROW_PULSE_RADIUS + ' tiles grows ' + GROW_RUNE_MULTIPLIER + 'x faster. A pure timing perk, not a ' +
@@ -10243,9 +10285,10 @@
           'chaining casts always costs more than it returns.</p>') +
 
         spellCard('\u{1F451}', 'Loki\'s Control', lokiDiagram(),
-          '<p>A 2x2 block of any ' + lokiColors + ' flowers - they don\'t have to match each other, or even ' +
-          'match within a block - at each of the four corners of a square or rectangle between ' + ZONE_MIN_SPAN +
-          ' and ' + ZONE_MAX_SPAN + ' tiles on a side. Once all sixteen corner flowers are grown, everywhere ' +
+          '<p>A 2x2 block of any ' + lokiColors + ' flowers at each of the four corners of a square or ' +
+          'rectangle between ' + ZONE_MIN_SPAN + ' and ' + ZONE_MAX_SPAN + ' tiles on a side - species can ' +
+          'repeat freely, but each corner block needs at least two different colors in it, never a single ' +
+          'flat color. Once all sixteen corner flowers are grown, everywhere ' +
           'inside holds your access for up to ' + (LOKI_CONTROL_MS / HOUR / 24) + ' days instead of expiring at ' +
           'midnight, as long as every corner stays flourishing. Let even one corner wilt and the extension ' +
           'lapses until every corner is rewatered - it only ever stretches access already earned by walking ' +

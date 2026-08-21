@@ -529,6 +529,96 @@ const h = require('./harness');
   r.check('tickSprinklers flags the broken one', out.brokenFlagged === true, out);
   r.check('tickSprinklers leaves the working one unflagged', out.workingFlagged === true, out);
 
+  // ---- Rain Ring: center tile must be COMPLETELY empty to complete -------
+  // A sprinkler (or a wild flower) parked on a would-be ring's center tile
+  // before its 8 spokes finished growing used to let the ring complete
+  // right on top of it - which then made that tile un-tappable (runeAt
+  // outranks a sprinkler in the map's own tap-priority order) and flagged
+  // the sprinkler broken with no way to ever reclaim it. isRainRingComplete
+  // now also checks state.wild/state.sprinklers, not just state.plants, and
+  // every path that can empty a tile (pickUpSprinkler, pickWild, a wild
+  // flower vanishing on its own in tickPlants) re-checks ring candidates.
+  r.section('Rain Ring center tile occupancy');
+  out = await page.evaluate(() => {
+    closeModal(); // the earlier "What's New popup" section leaves one open
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    // Right on the player's own tile, not offset - picking up a sprinkler
+    // needs to be in walking range (PLANT_RANGE, just 2 tiles), and each
+    // scenario below wipes state.plants/wild/sprinklers wholesale first, so
+    // there's no leftover-fixture collision to dodge by moving away either.
+    var cq = here.q, cr = here.r;
+    var ringKey = cellKey(cq, cr);
+    var now = Date.now();
+    var sp = SPECIES.map(function (s) { return s.key; });
+    function growSpokes() {
+      CELL_NEIGHBORS.forEach(function (d, i) {
+        var q = cq + d[0], r = cr + d[1], c = cellCenter(q, r);
+        state.plants[cellKey(q, r)] = {
+          q: q, r: r, lat: c.lat, lng: c.lng, species: sp[i], color: 'blue',
+          stage: MAX_STAGE, plantedAt: now, lastWateredAt: now, readyAt: now + 1e9
+        };
+      });
+    }
+    function reset() { state.plants = {}; state.wild = {}; state.sprinklers = {}; rainRings = {}; }
+
+    // Sprinkler placed on the center FIRST, then the ring grown around it -
+    // the exact scenario reported. A bare tap should still reach the
+    // sprinkler (never a rune panel), and picking it up should complete
+    // the ring on the spot.
+    reset();
+    state.sprinklerInventory = 5;
+    placeSprinklerAt(cq, cr);
+    var sprinklerPlaced = !!state.sprinklers[ringKey];
+    growSpokes();
+    recomputeRainRingsFull();
+    var notCompleteWithSprinkler = !rainRings[ringKey];
+    var c = cellCenter(cq, cr);
+    map.fire('click', { latlng: L.latLng(c.lat, c.lng) });
+    var tapPickedUpSprinkler = !state.sprinklers[ringKey] && state.sprinklerInventory === 5;
+    var modalOpenedInstead = document.getElementById('modal-overlay').classList.contains('open');
+    var completeAfterTapPickup = !!rainRings[ringKey];
+    closeModal();
+
+    // Same shape, a wild flower instead - picked deliberately.
+    reset();
+    state.wild[ringKey] = { q: cq, r: cr, lat: c.lat, lng: c.lng, species: 'tulip', color: 'red', stage: 2, spawnedAt: now };
+    growSpokes();
+    recomputeRainRingsFull();
+    var notCompleteWithWild = !rainRings[ringKey];
+    pickWild(ringKey, 'extract');
+    var completeAfterWildPick = !!rainRings[ringKey];
+
+    // A wild flower that just vanishes on its own (tickPlants) should have
+    // the exact same effect - nothing deliberate has to happen to it.
+    reset();
+    state.wild[ringKey] = {
+      q: cq, r: cr, lat: c.lat, lng: c.lng, species: 'tulip', color: 'red', stage: 2,
+      spawnedAt: now - (19 * 60 * 60 * 1000) // older than WILD_GONE_MS (18h)
+    };
+    growSpokes();
+    recomputeRainRingsFull();
+    var notCompleteWithStaleWild = !rainRings[ringKey];
+    tickPlants();
+    var completeAfterVanish = !!rainRings[ringKey];
+
+    return {
+      sprinklerPlaced: sprinklerPlaced, notCompleteWithSprinkler: notCompleteWithSprinkler,
+      tapPickedUpSprinkler: tapPickedUpSprinkler, modalOpenedInstead: modalOpenedInstead,
+      completeAfterTapPickup: completeAfterTapPickup,
+      notCompleteWithWild: notCompleteWithWild, completeAfterWildPick: completeAfterWildPick,
+      notCompleteWithStaleWild: notCompleteWithStaleWild, completeAfterVanish: completeAfterVanish
+    };
+  });
+  r.check('a sprinkler can be placed on the tile before the ring exists', out.sprinklerPlaced === true, out);
+  r.check('the ring does NOT complete while the sprinkler sits on its center', out.notCompleteWithSprinkler === true, out);
+  r.check('a bare tap still picks up the sprinkler (not a rune panel)',
+    out.tapPickedUpSprinkler === true && out.modalOpenedInstead === false, out);
+  r.check('picking it up completes the ring immediately', out.completeAfterTapPickup === true, out);
+  r.check('same story for a wild flower on the center tile', out.notCompleteWithWild === true, out);
+  r.check('picking the wild flower completes the ring', out.completeAfterWildPick === true, out);
+  r.check('a stale wild flower on the center also blocks the ring', out.notCompleteWithStaleWild === true, out);
+  r.check('...and it vanishing on its own (tickPlants) completes the ring too', out.completeAfterVanish === true, out);
+
   // ---- Spell Book progressive unlock --------------------------------------
   const hasSpellbookUnlock = await page.evaluate(() => typeof isRainRingUnlocked === 'function');
   r.section('Spell Book progressive unlock', hasSpellbookUnlock ? '' : '(SKIPPED - not in this build)');

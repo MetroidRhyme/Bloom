@@ -1504,7 +1504,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.42.1</span>
+      <span id="game-version">v2.42.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1894,6 +1894,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.42.2', changes: [
+        "Fixed a Rain Ring being able to form around a sprinkler (or a " +
+          "wild flower) sitting on its own center tile, which used to " +
+          "trap it there for good with no way to pick it back up. Now the " +
+          "ring simply waits until that tile is completely empty - clear " +
+          "whatever's sitting there and it completes right away."
+      ] },
       { version: 'v2.42.1', changes: [
         "Fixed the seed pouch: tapping a species to see its colors no " +
           "longer replays the whole species list flying open again - only " +
@@ -3952,7 +3959,15 @@
       // game that can be lost by leaving it - 12h to wilt, 18h to vanish.
       var vanished = 0;
       Object.keys(state.wild).forEach(function (key) {
-        if (wildDerived(state.wild[key], now).gone) { delete state.wild[key]; vanished++; }
+        var w = state.wild[key];
+        if (wildDerived(w, now).gone) {
+          delete state.wild[key];
+          vanished++;
+          // Same reasoning as pickUpSprinkler/pickWild - a wild flower
+          // vanishing on its own can just as easily free up a ring's own
+          // center tile as picking it deliberately does.
+          refreshRainRingCandidates(candidateRingCentersAround(w.q, w.r));
+        }
       });
       if (vanished > 0) saveState();
 
@@ -4208,12 +4223,30 @@
     //  wiring at each of those call sites.
     var rainRings = {}; // centerKey ("q,r") -> { q, r, lat, lng }
 
-    // A ring is valid at (cq, cr) iff that tile itself is empty AND all 8
-    // neighbors are blue flowers already grown to a full cluster AND every
-    // one of them is a different species - with exactly 8 species and 8
-    // spokes, that means all 8 species have to be represented, one each.
+    // A ring is valid at (cq, cr) iff that tile itself is COMPLETELY empty -
+    // no plant, no wild flower, no sprinkler, the same three-way "is
+    // anything here" check placeSprinklerAt and the seed-planting range
+    // check both already use - AND all 8 neighbors are blue flowers already
+    // grown to a full cluster AND every one of them is a different species -
+    // with exactly 8 species and 8 spokes, that means all 8 species have to
+    // be represented, one each.
+    //
+    // Deliberately not just state.plants: a sprinkler (or a wild flower)
+    // parked on the center tile before the ring's own 8 spokes finish
+    // growing used to let the ring complete right on top of it anyway,
+    // which then made that tile un-tappable - runeAt/openRunePanel outrank
+    // a sprinkler in the map's own tap-priority order (see map.on('click')),
+    // so a bare tap opened the rune's panel instead of ever reaching
+    // pickUpSprinkler, and the sprinkler itself got flagged broken by
+    // sprinklerNearMagic for good measure - stuck there with no way to
+    // reclaim it. Now the ring simply doesn't form until that tile is
+    // genuinely empty; picking up the sprinkler (or the wild flower being
+    // picked or vanishing - see pickUpSprinkler/pickWild/tickPlants, each
+    // of which now re-checks ring candidates the moment they empty a tile)
+    // is what lets it complete, same as clearing a plant off it always did.
     function isRainRingComplete(cq, cr) {
-      if (state.plants[cellKey(cq, cr)]) return false; // center tile must stay empty
+      var ck = cellKey(cq, cr);
+      if (state.plants[ck] || state.wild[ck] || state.sprinklers[ck]) return false; // center tile must be completely empty
       var seenSpecies = {};
       for (var i = 0; i < CELL_NEIGHBORS.length; i++) {
         var d = CELL_NEIGHBORS[i];
@@ -8943,6 +8976,10 @@
       if (!s) return;
       delete state.sprinklers[key];
       state.sprinklerInventory++;
+      // This tile just went empty - it may have been sitting on a
+      // structurally-complete-except-for-this ring's own center, blocking
+      // it from ever forming (see isRainRingComplete's own comment).
+      refreshRainRingCandidates(candidateRingCentersAround(s.q, s.r));
       saveState();
       renderSprinklers();
       equipSprinkler(); // also vibrates - the one buzz covers both "picked up" and "equipped"
@@ -9518,6 +9555,10 @@
       if (!w) return;
       var vk = variantKey(w.species, w.color || baseColorOf(w.species));
       delete state.wild[key];
+      // Same reasoning as pickUpSprinkler: this tile just went empty, which
+      // may be exactly what a nearby ring's own center was waiting on (see
+      // isRainRingComplete's own comment).
+      refreshRainRingCandidates(candidateRingCentersAround(w.q, w.r));
       recordGrown(vk);
 
       if (mode === 'sell') {

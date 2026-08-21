@@ -585,6 +585,75 @@ const h = require('./harness');
     r.check('every locked card still shows its own hint text', out.lockedCardsMentionHint === true, out);
   }
 
+  // ---- Crossing Notes: structural recipe lines shown before discovery ----
+  const hasRecipeEdges = await page.evaluate(() => typeof computeRecipeEdges === 'function');
+  r.section('Crossing Notes recipe lines', hasRecipeEdges ? '' : '(SKIPPED - not in this build)');
+  if (hasRecipeEdges) {
+    out = await page.evaluate(() => {
+      // Nothing crossed at all - every valid recipe should still produce an
+      // edge (structural, not a result), and every edge should render as
+      // .mystery (dashed) since nothing is discovered yet.
+      state.crosses = {};
+      var edgesEmpty = computeRecipeEdges('sunflower');
+      var expectedCount = Object.keys(BREED_TABLE).length + Object.keys(SIGNATURE_TABLE).length;
+      var allDifferFromParents = edgesEmpty.every(function (e) { return e.child !== e.a && e.child !== e.b; });
+
+      // openCrossNotes/renderCrossTree schedule the actual edge drawing via
+      // requestAnimationFrame (see drawTreeEdges's own comment - it needs a
+      // layout pass before getBoundingClientRect is trustworthy), so call
+      // it directly here rather than waiting a real frame in the test.
+      openCrossNotes();
+      drawTreeEdges();
+      var svg = document.getElementById('tree-svg');
+      var pathsEmpty = svg.querySelectorAll('path.tree-edge').length;
+      var knownEmpty = svg.querySelectorAll('path.tree-edge.known').length;
+      var mysteryEmpty = svg.querySelectorAll('path.tree-edge.mystery').length;
+
+      // Discover exactly one recipe's result (red+white -> pink). Its own
+      // two edges (red->pink, white->pink) should flip to .known; nothing
+      // else should change count or flip style.
+      var k = crossKey('red', 'white');
+      state.crosses[k] = { pink: 1 };
+      renderCrossTree('sunflower');
+      drawTreeEdges();
+      // renderCrossTree replaces #notes-body's innerHTML wholesale, so the
+      // old `svg` reference is now a detached element - re-fetch it.
+      svg = document.getElementById('tree-svg');
+      var pathsAfter = svg.querySelectorAll('path.tree-edge').length;
+      var knownAfter = svg.querySelectorAll('path.tree-edge.known').length;
+      var pinkNode = document.querySelector('[data-color="pink"]');
+      var greenNode = document.querySelector('[data-color="green"]'); // still undiscovered
+
+      // Reordering (orderedTierColors) should never drop or duplicate a
+      // color - just reorder tierColors(1)'s own 6 entries.
+      var edges = computeRecipeEdges('sunflower');
+      var t0 = tierColors(0).map(function (c) { return c.id; });
+      var t1 = orderedTierColors(1, edges, t0);
+      var t1Plain = tierColors(1).map(function (c) { return c.id; });
+      var sameSet = t1.map(function (c) { return c.id; }).sort().join(',') === t1Plain.slice().sort().join(',');
+
+      return {
+        edgeCount: edgesEmpty.length, expectedCount: expectedCount, allDifferFromParents: allDifferFromParents,
+        pathsEmpty: pathsEmpty, knownEmpty: knownEmpty, mysteryEmpty: mysteryEmpty,
+        pathsAfter: pathsAfter, knownAfter: knownAfter,
+        pinkIsSlot: pinkNode ? pinkNode.classList.contains('slot') && !pinkNode.classList.contains('blank') : false,
+        greenIsBlank: greenNode ? greenNode.classList.contains('blank') : false,
+        sameSet: sameSet, reordered: t1.map(function (c) { return c.id; }).join(',') !== t1Plain.join(',')
+      };
+    });
+    r.check('every BREED_TABLE/SIGNATURE_TABLE recipe produces an edge, with nothing crossed yet',
+      out.edgeCount === out.expectedCount, out);
+    r.check("every edge's child differs from both its parents", out.allDifferFromParents === true, out);
+    r.check('with nothing discovered, every edge renders but none are .known',
+      out.pathsEmpty === out.expectedCount * 2 && out.knownEmpty === 0 && out.mysteryEmpty === out.pathsEmpty, out);
+    r.check('discovering one recipe does not add or remove any line', out.pathsAfter === out.pathsEmpty, out);
+    r.check('...it only flips that recipe\'s own 2 edges to .known', out.knownAfter === 2, out);
+    r.check('the discovered color renders as a real slot, not blank', out.pinkIsSlot === true, out);
+    r.check('an undiscovered color a line reaches still renders blank/"?"', out.greenIsBlank === true, out);
+    r.check('orderedTierColors keeps the exact same set of colors', out.sameSet === true, out);
+    r.check('...just reorders them to reduce crossing lines', out.reordered === true, out);
+  }
+
   // ---- range shape grass texture (issue #20, grass-clutter fix) ----------
   r.section('range shape grass texture');
   out = await page.evaluate(() => ({

@@ -1115,11 +1115,16 @@
     /* Full-screen and paper-textured exactly like the journal (same ruled
        lines, aged blotches, left spine gradient, top species tabs), but the
        page itself is a breeding family tree instead of a stamp album: the
-       four standard colors at the top, lines down to whatever they've
-       actually been crossed into. Every node and every line is driven by
-       state.crosses - nothing here comes from BREED_TABLE/SIGNATURE_TABLE
-       directly, so nothing is shown before the player has genuinely seen it
-       happen (see crossResultDiscovered/computeCrossEdges). */
+       four standard colors at the top, lines down to every recipe that
+       exists. Unlike a node (still a genuine spoiler - see
+       crossResultDiscovered/crossNodeCard, gated on having actually seen
+       that color come out of a cross), a LINE is structural, not a result -
+       every edge in computeRecipeEdges comes straight from BREED_TABLE/
+       SIGNATURE_TABLE and is always drawn, so "these two are worth trying"
+       is visible from the start and "no line between them" reliably means
+       "does nothing." .tree-edge.known (solid, tinted toward the child's
+       own color) vs .tree-edge.mystery (dashed, muted) is what tells those
+       two states apart at a glance - see drawTreeEdges. */
     #notes-panel {
       position: fixed; inset: 0; z-index: 1100;
       background:
@@ -1151,6 +1156,14 @@
       padding: 4px 22px 18px 30px;
     }
     .tree-caption { font-size: 11.5px; font-weight: 700; color: var(--text-dim); text-align: center; margin: 0 0 6px; }
+    /* Mirrors the two .tree-edge styles exactly (see the script's
+       CROSSING NOTES banner for what each means) so the key on the page
+       can never drift from what the lines actually look like. */
+    .tree-legend { font-size: 11px; color: var(--text-dim); text-align: center; margin: 0 0 10px; }
+    .legend-swatch { display: inline-block; width: 18px; height: 0; margin: 0 3px -2px 8px; vertical-align: middle; }
+    .legend-swatch:first-of-type { margin-left: 0; }
+    .legend-swatch.known { border-top: 2px solid rgba(90,61,34,0.75); }
+    .legend-swatch.mystery { border-top: 1.5px dashed rgba(90,61,34,0.4); }
     .tree-hint { font-size: 12px; color: var(--text-dim); text-align: center; margin: 0 0 6px; }
     /* The tree canvas has its own horizontal scroll, independent of the
        page's vertical one, as a fallback for the six-wide middle row on
@@ -1169,7 +1182,22 @@
        to pan the tree. */
     #tree-wrap { position: relative; min-width: 310px; }
     .tree-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-    .tree-edge { stroke: rgba(90,61,34,0.55); stroke-width: 2; fill: none; stroke-linecap: round; }
+    /* .known: the child has actually been discovered - a solid line, its
+       own stroke color set inline per-edge (see drawTreeEdges) to a muted
+       tint of that child's real petal color, so the tree reads a little
+       like a watercolor genealogy instead of every branch being identical.
+       .mystery: a valid recipe whose result the player hasn't found yet -
+       thinner, dashed, and a flat neutral ink rather than a color that
+       would itself be a spoiler. Both sit under the cards (.tree-row has
+       its own z-index) and are intentionally thin/translucent so even a
+       node with several lines through it stays legible - see the
+       CROSSING NOTES banner comment in the script for why a line is
+       drawn unconditionally while a node's own art is not. */
+    .tree-edge.known { stroke-width: 2; fill: none; stroke-linecap: round; opacity: 0.75; }
+    .tree-edge.mystery {
+      stroke: rgba(90,61,34,0.32); stroke-width: 1.5; stroke-dasharray: 1 4.5;
+      fill: none; stroke-linecap: round;
+    }
     /* Smaller row gap than a first pass needed - picture-only cards (see
        below) are shorter AND wear smaller tape, so there is less to clear
        between one row's cards and the tape poking above the row below it. */
@@ -1476,7 +1504,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.41.0</span>
+      <span id="game-version">v2.42.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1866,6 +1894,14 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.42.0', changes: [
+        "Crossing Notes now shows every possible recipe's lines from the " +
+          "start - a dashed line means two colors are worth trying even " +
+          "though you don't know the result yet, a solid one means you've " +
+          "already found it, and no line at all means combining those two " +
+          "won't do anything. Also cleaned up how the lines are routed so " +
+          "they cross each other a lot less."
+      ] },
       { version: 'v2.41.0', changes: [
         "The Spell Book is no longer Cheat Mode only - it now shows up in " +
           "the menu for everyone the moment you've discovered the flowers " +
@@ -10756,11 +10792,20 @@
     // ---------------------------------------------------------------------
     //  CROSSING NOTES (BREEDING TREE)
     //  The player's own notebook of crossings, drawn as a family tree
-    //  instead of a list. It deliberately shows only what has actually
-    //  been seen, never BREED_TABLE/SIGNATURE_TABLE themselves - every
-    //  node and every line comes from state.crosses (see
-    //  crossResultDiscovered/computeCrossEdges below), so nothing here
-    //  spoils a pairing the player hasn't actually tried.
+    //  instead of a list. Two different things are gated on two different
+    //  conditions here, deliberately: a NODE's own art is still a genuine
+    //  spoiler, shown only once the player has actually seen that color
+    //  come out of a cross (crossResultDiscovered, unchanged); an EDGE is
+    //  structural, not a result - it just says "these two combine into
+    //  something," which is straight off BREED_TABLE/SIGNATURE_TABLE and
+    //  true whether or not the player has ever tried it. computeRecipeEdges
+    //  draws every one of those edges unconditionally, styled .known
+    //  (solid, tinted to the child's real color) once the child itself is
+    //  discovered, .mystery (dashed, neutral ink) until then - so "should I
+    //  try these two together" is answered by whether a line exists at all,
+    //  independent of whether the answer is still a "?" node. Two colors
+    //  with no line between them reliably means combining them does
+    //  nothing (see crossColor's own default-coin-flip comment).
     // ---------------------------------------------------------------------
     var notesSpecies = null; // which species tab is open, for the signature row
 
@@ -10785,17 +10830,29 @@
       });
       return total;
     }
-    // Every recorded pairing that produced a genuinely new color, as
-    // { a, b, child } triples - the tree's edges, one per discovery. Same
-    // exclusion as crossResultCount, for the same reason.
-    function computeCrossEdges() {
+    // Every valid recipe as a structural { a, b, child } triple, straight
+    // from BREED_TABLE/SIGNATURE_TABLE - the tree's edges, always drawn in
+    // full regardless of what the player has actually tried (see the
+    // banner comment above). A weighted recipe's other outcomes just roll
+    // back to one of the two parents (crossColor's "attempt failed" case),
+    // so the "real" child is always the single entry that differs from
+    // both - every recipe here has exactly one. Signature recipes resolve
+    // sig0/sig1 against whichever species tab is open, same as
+    // crossNodeCard does for the node art itself; a species with no
+    // signature at that slot contributes no edge rather than a broken one.
+    function computeRecipeEdges(speciesKey) {
       var edges = [];
-      Object.keys(state.crosses).forEach(function (k) {
-        var parts = k.split('+'), got = state.crosses[k];
-        Object.keys(got).forEach(function (id) {
-          if (got[id] > 0 && id !== parts[0] && id !== parts[1]) {
-            edges.push({ a: parts[0], b: parts[1], child: id });
-          }
+      Object.keys(BREED_TABLE).forEach(function (k) {
+        var parts = k.split('+');
+        var real = BREED_TABLE[k].filter(function (o) { return o[0] !== parts[0] && o[0] !== parts[1]; })[0];
+        if (real) edges.push({ a: parts[0], b: parts[1], child: real[0] });
+      });
+      var own = signatureColorsOf(speciesKey);
+      Object.keys(SIGNATURE_TABLE).forEach(function (k) {
+        var parts = k.split('+');
+        SIGNATURE_TABLE[k].forEach(function (o) {
+          var slot = o[0] === 'sig0' ? own[0] : o[0] === 'sig1' ? own[1] : null;
+          if (slot) edges.push({ a: parts[0], b: parts[1], child: slot.id });
         });
       });
       return edges;
@@ -10805,6 +10862,36 @@
     // same "the gap is the point" logic as the journal's palette grid.
     function tierColors(tier) {
       return COLORS.filter(function (c) { return c.tier === tier && !c.species; });
+    }
+    // Reorders one tier's colors to minimize how much their edges cross
+    // the row above - a standard barycenter layered-graph heuristic: each
+    // color sorts by the average position its own parent(s) already
+    // landed at in `prevOrder` (a plain array of color ids), ties broken
+    // by the original COLORS-array order so the result is deterministic.
+    // A color with no edge into it this tier (shouldn't happen for tiers
+    // 1-3, every one of which is entirely recipe-born) just keeps its
+    // original slot. Called once per tier, chaining forward - tier 1
+    // sorts against tier 0's fixed order, tier 2 against tier 1's freshly
+    // sorted order, and so on - which is what lets a whole multi-row tree
+    // straighten out instead of only the one row directly below the roots.
+    // This is the fix for the crossed/tangled lines a fixed COLORS-array
+    // order used to produce between rows whose parent/child pairing didn't
+    // happen to already run left-to-right.
+    function orderedTierColors(tier, edges, prevOrder) {
+      var base = tierColors(tier);
+      var prevIndex = {};
+      prevOrder.forEach(function (id, i) { prevIndex[id] = i; });
+      var scored = base.map(function (c, i) {
+        var xs = [];
+        edges.forEach(function (e) {
+          if (e.child !== c.id) return;
+          if (prevIndex[e.a] !== undefined) xs.push(prevIndex[e.a]);
+          if (prevIndex[e.b] !== undefined) xs.push(prevIndex[e.b]);
+        });
+        return { c: c, i: i, avg: xs.length ? xs.reduce(function (s, v) { return s + v; }, 0) / xs.length : i };
+      });
+      scored.sort(function (a, b) { return a.avg - b.avg || a.i - b.i; });
+      return scored.map(function (s) { return s.c; });
     }
 
     // One card per tab, mirroring journalTabsHtml but pointed at the tree
@@ -10857,7 +10944,12 @@
       var nFound = COLORS.filter(function (c) { return crossResultDiscovered(c.id); }).length;
       var html = notesTabsHtml(speciesKey) +
         '<p class="tree-caption"><b>' + nFound + ' of ' + COLORS.length + '</b> colors found &bull; <b>' +
-        state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made</p>';
+        state.stats.bred + '</b> crossing' + (state.stats.bred === 1 ? '' : 's') + ' made</p>' +
+        // Always shown, not gated on state.crosses - the whole point of the
+        // legend is telling a player who hasn't crossed anything yet which
+        // lines are worth chasing, same reasoning as the how-to hint below.
+        '<p class="tree-legend"><span class="legend-swatch known"></span> known &nbsp; ' +
+        '<span class="legend-swatch mystery"></span> worth trying &nbsp; no line = does nothing</p>';
 
       if (!Object.keys(state.crosses).length) {
         html += '<p class="tree-hint">Grow two flowers to <b>flourishing</b> on neighbouring tiles and buy ' +
@@ -10867,11 +10959,21 @@
           'part of the plan. That starts filling this in.</p>';
       }
 
+      // See orderedTierColors - each row is sorted against the row above's
+      // OWN just-computed order (not the raw COLORS-array order), which is
+      // what lets the whole tree straighten out top to bottom instead of
+      // just its first row. Root row (tier 0) has no parents to sort
+      // against, so it keeps its plain COLORS order.
+      var edges = computeRecipeEdges(speciesKey);
+      var t0 = tierColors(0);
+      var t1 = orderedTierColors(1, edges, t0.map(function (c) { return c.id; }));
+      var t2 = orderedTierColors(2, edges, t1.map(function (c) { return c.id; }));
+      var t3 = orderedTierColors(3, edges, t2.map(function (c) { return c.id; }));
       var rows = [
-        { colors: tierColors(0), showCount: false },
-        { colors: tierColors(1), showCount: true },
-        { colors: tierColors(2), showCount: true },
-        { colors: tierColors(3), showCount: true },
+        { colors: t0, showCount: false },
+        { colors: t1, showCount: true },
+        { colors: t2, showCount: true },
+        { colors: t3, showCount: true },
         { colors: signatureColorsOf(speciesKey), showCount: true }
       ];
       html += '<div id="tree-scroll"><div id="tree-wrap"><svg id="tree-svg" class="tree-svg"></svg>' +
@@ -10890,10 +10992,15 @@
 
     // A gentle S-curve rather than a straight line - two of these, mirrored,
     // converging on the same child is what actually reads as a family tree
-    // branch rather than a wiring diagram.
-    function treeEdgePath(p1, p2) {
+    // branch rather than a wiring diagram. `cls` is 'known' or 'mystery'
+    // (see the .tree-edge CSS); `stroke`, only set for a known edge, is a
+    // muted tint of the child's own petal color (see drawTreeEdges) so a
+    // discovered line reads a little like a watercolor genealogy instead
+    // of every branch being identical ink.
+    function treeEdgePath(p1, p2, cls, stroke) {
       var midY = (p1.y + p2.y) / 2;
-      return '<path class="tree-edge" d="M' + p1.x.toFixed(1) + ' ' + p1.y.toFixed(1) +
+      var style = stroke ? ' style="stroke:' + stroke + '"' : '';
+      return '<path class="tree-edge ' + cls + '"' + style + ' d="M' + p1.x.toFixed(1) + ' ' + p1.y.toFixed(1) +
         ' C ' + p1.x.toFixed(1) + ' ' + midY.toFixed(1) + ', ' +
         p2.x.toFixed(1) + ' ' + midY.toFixed(1) + ', ' +
         p2.x.toFixed(1) + ' ' + p2.y.toFixed(1) + '"/>';
@@ -10902,10 +11009,13 @@
       var r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2 - wrapRect.left, y: r.top + r.height / 2 - wrapRect.top };
     }
-    // Measures the actually-rendered card positions and draws a line from
-    // each parent to each discovered child - deliberately not a fixed
-    // coordinate table, so the tree stays correct however a row happens to
-    // wrap or space out on a given phone width.
+    // Measures the actually-rendered card positions and draws a line for
+    // every valid recipe (see computeRecipeEdges) - deliberately not a
+    // fixed coordinate table, so the tree stays correct however a row
+    // happens to wrap or space out on a given phone width. A recipe whose
+    // child is still undiscovered draws just as reliably as one that
+    // isn't - only the STYLE depends on that (see treeEdgePath), never
+    // whether the line is drawn at all.
     function drawTreeEdges() {
       var svg = document.getElementById('tree-svg');
       var wrap = document.getElementById('tree-wrap');
@@ -10913,7 +11023,7 @@
       var wr = wrap.getBoundingClientRect();
       svg.setAttribute('width', wr.width);
       svg.setAttribute('height', wr.height);
-      svg.innerHTML = computeCrossEdges().map(function (e) {
+      svg.innerHTML = computeRecipeEdges(notesSpecies).map(function (e) {
         var elA = wrap.querySelector('[data-color="' + e.a + '"]');
         var elB = wrap.querySelector('[data-color="' + e.b + '"]');
         var elC = wrap.querySelector('[data-color="' + e.child + '"]');
@@ -10921,8 +11031,12 @@
         // matching child node this render - skip it rather than draw to
         // nothing.
         if (!elA || !elB || !elC) return '';
+        var known = crossResultDiscovered(e.child);
+        var cls = known ? 'known' : 'mystery';
+        var stroke = known ? mixHex(colorFor(e.child).petal, '#5a3d22', 0.55) : null;
         var pc = treeNodeCenter(elC, wr);
-        return treeEdgePath(treeNodeCenter(elA, wr), pc) + treeEdgePath(treeNodeCenter(elB, wr), pc);
+        return treeEdgePath(treeNodeCenter(elA, wr), pc, cls, stroke) +
+          treeEdgePath(treeNodeCenter(elB, wr), pc, cls, stroke);
       }).join('');
     }
     // Line positions are measured pixels, not something CSS keeps in sync

@@ -755,7 +755,11 @@ const h = require('./harness');
     // state.inventory (which IS species+color specific, same source the
     // journal already trusted). Reproduced here with a state.crosses entry
     // that looks exactly like the old bug's trigger, to prove the tree no
-    // longer reads it for discovery at all.
+    // longer reads it for discovery at all. Also covers the follow-up: a
+    // color known on some OTHER species (not a true mystery to the player
+    // any more) shows dimmed-but-revealed (.notgrown) rather than a fresh
+    // "?" - only a color nobody has ever found, on ANY species, stays a
+    // real mystery pocket.
     out = await page.evaluate(() => {
       state.inventory = {};
       state.crosses = {};
@@ -764,13 +768,17 @@ const h = require('./harness');
 
       renderCrossTree('tulip');
       var tulipNode = document.querySelector('[data-color="pink"]');
-      var tulipDiscovered = !!tulipNode && !tulipNode.classList.contains('blank');
+      var tulipGrownHere = !!tulipNode && !tulipNode.classList.contains('blank') && !tulipNode.classList.contains('notgrown');
       drawTreeEdges();
       var tulipKnown = document.querySelectorAll('#tree-svg path.tree-edge.known').length;
 
       renderCrossTree('sunflower');
-      var sunflowerNode = document.querySelector('[data-color="pink"]');
-      var sunflowerDiscovered = !!sunflowerNode && !sunflowerNode.classList.contains('blank');
+      var sunflowerPink = document.querySelector('[data-color="pink"]');
+      var sunflowerPinkGrownHere = !sunflowerPink.classList.contains('blank') && !sunflowerPink.classList.contains('notgrown');
+      var sunflowerPinkDimmed = sunflowerPink.classList.contains('notgrown') && !sunflowerPink.classList.contains('blank');
+      var sunflowerPinkShowsArt = !sunflowerPink.querySelector('.slot-unknown');
+      var sunflowerGreen = document.querySelector('[data-color="green"]'); // nobody has ever found this one
+      var sunflowerGreenStillMystery = sunflowerGreen.classList.contains('blank') && !!sunflowerGreen.querySelector('.slot-unknown');
       drawTreeEdges();
       var sunflowerKnown = document.querySelectorAll('#tree-svg path.tree-edge.known').length;
 
@@ -782,16 +790,23 @@ const h = require('./harness');
       var daisyBlue = (renderCrossTree('daisy'), document.querySelector('[data-color="blue"]'));
 
       return {
-        tulipDiscovered: tulipDiscovered, sunflowerDiscovered: sunflowerDiscovered,
-        tulipKnown: tulipKnown, sunflowerKnown: sunflowerKnown,
+        tulipGrownHere: tulipGrownHere, tulipKnown: tulipKnown,
+        sunflowerPinkGrownHere: sunflowerPinkGrownHere, sunflowerPinkDimmed: sunflowerPinkDimmed,
+        sunflowerPinkShowsArt: sunflowerPinkShowsArt, sunflowerGreenStillMystery: sunflowerGreenStillMystery,
+        sunflowerKnown: sunflowerKnown,
         tulipCaption: tulipCaption, sunflowerCaption: sunflowerCaption,
         daisyBlueDiscovered: !!daisyBlue && !daisyBlue.classList.contains('blank')
       };
     });
-    r.check('a color grown on one species shows as found on that species\' own tab', out.tulipDiscovered === true, out);
-    r.check('...but NOT on a different species\' tab, despite a global crosses record', out.sunflowerDiscovered === false, out);
+    r.check('a color grown on one species shows as fully found on that species\' own tab', out.tulipGrownHere === true, out);
     r.check('its recipe edge renders .known on the species that found it', out.tulipKnown === 2, out);
-    r.check('...and .mystery (not known) on a species that has not', out.sunflowerKnown === 0, out);
+    r.check('...but NOT fully found on a different species\' tab, despite a global crosses record',
+      out.sunflowerPinkGrownHere === false, out);
+    r.check('...it shows dimmed (.notgrown) there instead of a fresh "?"',
+      out.sunflowerPinkDimmed === true && out.sunflowerPinkShowsArt === true, out);
+    r.check('...and its edge is NOT .known there either (not grown on this species yet)', out.sunflowerKnown === 0, out);
+    r.check('a color nobody has ever found on any species stays a real "?" mystery',
+      out.sunflowerGreenStillMystery === true, out);
     r.check('the "X of Y colors found" caption is scoped to this species, not all 30',
       out.tulipCaption.indexOf('16') !== -1 && out.sunflowerCaption.indexOf('16') !== -1 &&
       out.tulipCaption !== out.sunflowerCaption, out);

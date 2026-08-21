@@ -1507,7 +1507,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.42.4</span>
+      <span id="game-version">v2.42.5</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1897,6 +1897,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.42.5', changes: [
+        "Crossing Notes: a color you've already found on a different " +
+          "species now shows up dimmed instead of a fresh '?' - you " +
+          "already know what it looks like, so there's no reason to hide " +
+          "it again. A true mystery (a color nobody's found on any " +
+          "species yet) still stays hidden."
+      ] },
       { version: 'v2.42.4', changes: [
         "Fixed Crossing Notes marking a color as found on every species " +
           "the moment you found it on just one - each species' page now " +
@@ -10984,6 +10991,21 @@
     function crossResultNodeCount(colorId, speciesKey) {
       return grownCountOf(variantKey(colorFor(colorId).species || speciesKey, colorId));
     }
+    // Whether this color has been discovered on ANY species at all, not
+    // just speciesKey - the player already knows its name and what it
+    // looks like, even if they haven't grown it on the tab that's open
+    // right now. For a signature color this collapses to exactly
+    // crossResultDiscovered's own answer, since only that one species
+    // could ever produce it - nothing extra to check. Used to tell a
+    // GENUINE mystery (nobody has ever found this color, on any species -
+    // stays a "?") from a color that's merely new to THIS species (see
+    // crossNodeCard's own .notgrown treatment, below - same "known but not
+    // grown here" idea the journal's own starter-color dimming already
+    // uses, generalized past just the four standards).
+    function crossColorKnownAnywhere(colorId) {
+      if (STANDARD_COLORS.indexOf(colorId) >= 0) return true;
+      return Object.keys(state.inventory).some(function (vk) { return parseVariant(vk).color === colorId; });
+    }
     // Every valid recipe as a structural { a, b, child } triple, straight
     // from BREED_TABLE/SIGNATURE_TABLE - the tree's edges, always drawn in
     // full regardless of what the player has actually tried (see the
@@ -11069,21 +11091,34 @@
     // the journal's cards, which show both). The name and how many times
     // it's been bred move into the title tooltip instead of disappearing
     // outright, so a long-press/hover still gives the detail back.
+    //
+    // Three states, not two: grownHere (the real thing - full color, this
+    // species' own count) is unchanged; a total mystery (nobody has ever
+    // found this color on any species) is still the dashed "?" pocket. In
+    // between - known on some OTHER species, just not grown on this one
+    // yet - now shows the real art too, dimmed via .notgrown (the exact
+    // same "known but not grown here" treatment the journal already gives
+    // an unfound starter color - see its own comment). Re-hiding a color
+    // the player has already seen elsewhere as a fresh "?" here would just
+    // be re-spoiling something they already know, not protecting a real
+    // surprise - the genuine mystery is "has ANYONE found this yet."
     function crossNodeCard(colorId, speciesKey, showCount) {
       var c = colorFor(colorId);
-      var discovered = crossResultDiscovered(colorId, speciesKey);
+      var grownHere = crossResultDiscovered(colorId, speciesKey);
+      var knownAnywhere = grownHere || crossColorKnownAnywhere(colorId);
       // Drawn on a real flower rather than an abstract dot. A signature
       // color must use the one species that can wear it; a shared color
       // just borrows whichever species' page is open, so switching tabs
       // reflavors the whole tree instead of only its bottom row.
       var on = speciesFor(c.species || speciesKey);
       var n = showCount ? crossResultNodeCount(colorId, speciesKey) : 0;
-      var title = discovered ?
+      var title = grownHere ?
         (c.name + (showCount ? ' - grown ' + n + ' time' + (n === 1 ? '' : 's') : '')) :
+        knownAnywhere ? (c.name + ' - not yet grown on ' + on.name) :
         'Not found yet';
-      var cls = 'color-cell slot' + (discovered ? '' : ' blank');
+      var cls = 'color-cell slot' + (knownAnywhere ? '' : ' blank') + (knownAnywhere && !grownHere ? ' notgrown' : '');
       return '<div class="' + cls + '" data-color="' + colorId + '" title="' + title + '">' +
-        (discovered ? speciesChip(on, colorId, 28) : '<span class="slot-unknown">?</span>') +
+        (knownAnywhere ? speciesChip(on, colorId, 28) : '<span class="slot-unknown">?</span>') +
         '</div>';
     }
 

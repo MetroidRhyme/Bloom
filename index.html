@@ -1504,7 +1504,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.42.2</span>
+      <span id="game-version">v2.42.3</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1894,6 +1894,13 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.42.3', changes: [
+        "Sprinklers got a proper redraw - a glossy metal body, a soft " +
+          "mist glow, and a fading, droplet-tipped spray instead of flat " +
+          "shapes, matching the quality of the flowers and runes. A " +
+          "broken one (near a spell) now reads clearly dulled instead of " +
+          "just flat grey."
+      ] },
       { version: 'v2.42.2', changes: [
         "Fixed a Rain Ring being able to form around a sprinkler (or a " +
           "wild flower) sitting on its own center tile, which used to " +
@@ -8867,20 +8874,74 @@
     // head instead - no water leaving it, and a clear "this one's not doing
     // anything" read at a glance. Defaults to working so every other caller
     // (the toggle button, the shop stand, via sprinklerIconSVG) is unaffected.
+    //
+    // Same rendering language as a flower head (see fancyDefs/headGroup
+    // above): gradient fills rather than flat ones for a metal/plastic body
+    // instead of a paper cutout, a small specular highlight on the head
+    // (the same "sheen" idea as HEAD_FX_DEFS's headSheen), a soft glow
+    // behind the head (bloom-halo's own trick, tinted toward the spray's
+    // own cyan instead of a signature color's glow), and the spray itself
+    // fading out along each arc (a userSpaceOnUse linearGradient stroke,
+    // solid at the head and transparent at the tip) with a small droplet
+    // at each tip echoing the Rain Rune's own droplet palette - so a
+    // sprinkler visibly belongs to the same water-magic family as that
+    // rune instead of reading as a flat placeholder icon next to it. The
+    // gradient/glow ids are fixed literals, not per-instance - safe by the
+    // same reasoning fancyDefs's own comment gives for a flower's `pg-`
+    // ids: every sprinkler of the same broken/working state renders
+    // byte-identical defs, and each marker is its own <svg> carrying its
+    // own copy, so an id can never resolve to the wrong thing.
     function sprinklerGlyphMarkup(broken) {
       if (broken) {
-        return '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#b7bcc2"/>' +
-          '<circle cx="16" cy="15" r="4.5" fill="#8a939c"/>' +
+        return '<defs>' +
+          '<linearGradient id="sprBodyBroken" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0" stop-color="#d5d9dd"/>' +
+          '<stop offset="0.55" stop-color="#a3a9b0"/>' +
+          '<stop offset="1" stop-color="#7d838b"/></linearGradient>' +
+          '<radialGradient id="sprHeadBroken" cx="32%" cy="26%" r="75%">' +
+          '<stop offset="0" stop-color="#c3c8cd"/>' +
+          '<stop offset="0.6" stop-color="#8f959c"/>' +
+          '<stop offset="1" stop-color="#666c73"/></radialGradient>' +
+          '</defs>' +
+          '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="url(#sprBodyBroken)" stroke="#5c6167" stroke-width="0.6"/>' +
+          '<circle cx="16" cy="15" r="4.5" fill="url(#sprHeadBroken)" stroke="#4a4f55" stroke-width="0.6"/>' +
           '<g stroke="#c0392b" stroke-width="1.6" stroke-linecap="round">' +
           '<path d="M13 12 L19 18"/><path d="M19 12 L13 18"/>' +
           '</g>';
       }
-      return '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="#8a8f98"/>' +
-        '<circle cx="16" cy="15" r="4.5" fill="#5b6b7a"/>' +
-        '<g fill="none" stroke="#6ec6ff" stroke-width="2.2" stroke-linecap="round">' +
-        '<path d="M16 11 C10 5 6 5 3 8"/>' +
-        '<path d="M16 10 C16 3 16 3 16 2"/>' +
-        '<path d="M16 11 C22 5 26 5 29 8"/>' +
+      return '<defs>' +
+        '<linearGradient id="sprBody" x1="0" y1="0" x2="1" y2="1">' +
+        '<stop offset="0" stop-color="#e9edf1"/>' +
+        '<stop offset="0.5" stop-color="#9aa6b3"/>' +
+        '<stop offset="1" stop-color="#6b7784"/></linearGradient>' +
+        '<radialGradient id="sprHead" cx="32%" cy="24%" r="80%">' +
+        '<stop offset="0" stop-color="#b7d6e8"/>' +
+        '<stop offset="0.55" stop-color="#587691"/>' +
+        '<stop offset="1" stop-color="#37485a"/></radialGradient>' +
+        '<radialGradient id="sprMist" cx="50%" cy="50%" r="50%">' +
+        '<stop offset="0" stop-color="#bfeaff" stop-opacity="0.5"/>' +
+        '<stop offset="100%" stop-color="#bfeaff" stop-opacity="0"/></radialGradient>' +
+        '<linearGradient id="sprSprayL" x1="16" y1="11" x2="3" y2="8" gradientUnits="userSpaceOnUse">' +
+        '<stop offset="0" stop-color="#8ed6ff"/><stop offset="1" stop-color="#8ed6ff" stop-opacity="0"/></linearGradient>' +
+        '<linearGradient id="sprSprayC" x1="16" y1="10" x2="16" y2="2" gradientUnits="userSpaceOnUse">' +
+        '<stop offset="0" stop-color="#8ed6ff"/><stop offset="1" stop-color="#8ed6ff" stop-opacity="0"/></linearGradient>' +
+        '<linearGradient id="sprSprayR" x1="16" y1="11" x2="29" y2="8" gradientUnits="userSpaceOnUse">' +
+        '<stop offset="0" stop-color="#8ed6ff"/><stop offset="1" stop-color="#8ed6ff" stop-opacity="0"/></linearGradient>' +
+        '</defs>' +
+        '<circle cx="16" cy="12" r="11" fill="url(#sprMist)"/>' +
+        '<rect x="13.5" y="17" width="5" height="12" rx="1.5" fill="url(#sprBody)" stroke="#525b66" stroke-width="0.6"/>' +
+        '<rect x="14.4" y="18.2" width="0.9" height="9.6" rx="0.45" fill="#ffffff" opacity="0.4"/>' +
+        '<circle cx="16" cy="15" r="4.5" fill="url(#sprHead)" stroke="#2c3c4a" stroke-width="0.6"/>' +
+        '<circle cx="14.4" cy="13.1" r="1.3" fill="#ffffff" opacity="0.6"/>' +
+        '<g fill="none" stroke-width="2.2" stroke-linecap="round">' +
+        '<path d="M16 11 C10 5 6 5 3 8" stroke="url(#sprSprayL)"/>' +
+        '<path d="M16 10 C16 3 16 3 16 2" stroke="url(#sprSprayC)"/>' +
+        '<path d="M16 11 C22 5 26 5 29 8" stroke="url(#sprSprayR)"/>' +
+        '</g>' +
+        '<g fill="#bfeaff">' +
+        '<circle cx="3" cy="8" r="1" opacity="0.9"/>' +
+        '<circle cx="16" cy="2" r="1" opacity="0.9"/>' +
+        '<circle cx="29" cy="8" r="1" opacity="0.9"/>' +
         '</g>';
     }
 

@@ -682,6 +682,63 @@ const h = require('./harness');
     r.check('running low -> stage 1, thinnest of all', out.stage1 === 1 && out.stage1Drops === 3, out);
     r.check('the three stages actually reduce in order', out.stage3Drops > out.stage2Drops && out.stage2Drops > out.stage1Drops, out);
     r.check('expired -> back to stage 0, rain layer torn down', out.stage0 === 0 && out.expiredHasRain === false, out);
+
+    // Spread, not just count: independent uniform-random placement clumps
+    // far more than intuition suggests at these small counts (reported by
+    // a player as "the rain seems clumped up") - buildRainEffectSVG now
+    // places one drop per cell of a roughly sqrt(n)-by-sqrt(n) grid instead
+    // of n fully independent random points. Checked two ways, sampled
+    // across many seeds (not just one, since a spread bug could easily
+    // pass on a lucky seed and fail on the next player's actual rune):
+    // no two drops ever land right on top of each other (min pairwise
+    // distance), and the drops actually span most of the drawable area
+    // rather than huddling in a corner (bounding-box width/height) - a
+    // fixed quadrant-grid check was tried first and dropped for being a
+    // false positive generator: its own arbitrary x=60/y=60 split doesn't
+    // line up with buildRainEffectSVG's own cell boundaries (those move
+    // with n - ceil(sqrt(n)) columns - so they only coincidentally land on
+    // 60 for some stages), so it flagged a handful of seeds as "clumped"
+    // that were actually a perfectly even grid, just split differently
+    // than the test assumed. Bounding-box span has no such assumption
+    // baked in. Thresholds are set well under the worst case actually
+    // observed across 300 seeds per stage, so this fails on a real
+    // regression, not the ordinary spread of an evenly-placed grid.
+    out = await page.evaluate(() => {
+      function analyze(stage, seed) {
+        var svg = buildRainEffectSVG(240, stage, seed);
+        var coords = [];
+        var re = /cx="([\d.]+)" cy="([\d.]+)"/g, m;
+        while ((m = re.exec(svg))) coords.push([parseFloat(m[1]), parseFloat(m[2])]);
+        var minDist = Infinity;
+        for (var i = 0; i < coords.length; i++) {
+          for (var j = i + 1; j < coords.length; j++) {
+            var dx = coords[i][0] - coords[j][0], dy = coords[i][1] - coords[j][1];
+            var d = Math.sqrt(dx * dx + dy * dy);
+            if (d < minDist) minDist = d;
+          }
+        }
+        var xs = coords.map(function (c) { return c[0]; }), ys = coords.map(function (c) { return c[1]; });
+        return {
+          minDist: minDist,
+          xSpan: Math.max.apply(null, xs) - Math.min.apply(null, xs),
+          ySpan: Math.max.apply(null, ys) - Math.min.apply(null, ys)
+        };
+      }
+      var worstMinDist = Infinity, worstXSpan = Infinity, worstYSpan = Infinity;
+      for (var seed = 0; seed < 30; seed++) {
+        [1, 2, 3].forEach(function (stage) {
+          var a = analyze(stage, seed);
+          if (a.minDist < worstMinDist) worstMinDist = a.minDist;
+          if (a.xSpan < worstXSpan) worstXSpan = a.xSpan;
+          if (a.ySpan < worstYSpan) worstYSpan = a.ySpan;
+        });
+      }
+      return { worstMinDist: worstMinDist, worstXSpan: worstXSpan, worstYSpan: worstYSpan };
+    });
+    r.check('no two drops ever land within 10 units of each other (of a 120-unit box), across 30 seeds x 3 stages',
+      out.worstMinDist >= 10, out);
+    r.check('drops always span at least 15 of the 120-unit box in both directions, even at the thinnest stage',
+      out.worstXSpan >= 15 && out.worstYSpan >= 15, out);
   }
 
   // ---- Spell Book progressive unlock --------------------------------------

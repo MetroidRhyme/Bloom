@@ -1526,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.43.0</span>
+      <span id="game-version">v2.43.1</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1921,6 +1921,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.43.1', changes: [
+        "Fixed the Rain Ring's rain effect looking clumped in one spot - " +
+          "the droplets are now spread evenly across the whole block " +
+          "instead of landing wherever chance happened to put them."
+      ] },
       { version: 'v2.43.0', changes: [
         "An active Rain Ring now visibly rains over the whole block it's " +
           "watering, not just the rune itself - and the rain thins out in " +
@@ -4699,9 +4704,32 @@
       var n = RAIN_EFFECT_DROPS[stage];
       if (!n) return '';
       var rng = mulberry32(seed);
+      // A jittered grid, not n independent uniform-random points - at these
+      // small counts (3-10) pure uniform sampling clumps far more often
+      // than intuition suggests (birthday-paradox-style: plenty of empty
+      // area while two or three drops land right on top of each other),
+      // which is exactly the "clumped up" look reported. Carving the drawable
+      // area into a roughly sqrt(n)-by-sqrt(n) grid and placing exactly one
+      // drop per cell (at a random offset within it) guarantees actual
+      // spread - every cell gets a drop, so no region is ever left empty
+      // while another is crowded - while the per-cell jitter keeps it
+      // reading as scattered rain rather than a rigid dot grid.
+      var cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+      var cellW = 104 / cols, cellH = 90 / rows;
+      var cells = [];
+      for (var ci = 0; ci < cols * rows; ci++) cells.push(ci);
+      // Fisher-Yates, seeded - cols*rows can exceed n (e.g. 4x3=12 cells for
+      // n=10), so which cells sit empty varies per ring instead of always
+      // being the same trailing ones.
+      for (var si = cells.length - 1; si > 0; si--) {
+        var sj = Math.floor(rng() * (si + 1));
+        var tmp = cells[si]; cells[si] = cells[sj]; cells[sj] = tmp;
+      }
       var drops = '';
       for (var i = 0; i < n; i++) {
-        var x = 8 + rng() * 104, y = rng() * 90;
+        var col = cells[i] % cols, row = (cells[i] / cols) | 0;
+        var x = 8 + col * cellW + cellW * 0.2 + rng() * cellW * 0.6;
+        var y = row * cellH + cellH * 0.2 + rng() * cellH * 0.6;
         var delay = (rng() * 1.6).toFixed(2), dur = (1.3 + rng() * 0.7).toFixed(2);
         drops += '<ellipse class="rune-raindrop" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) +
           '" rx="1.6" ry="3.6" fill="' + RAIN_RUNE_DROP_MID + '" style="animation-delay:' +

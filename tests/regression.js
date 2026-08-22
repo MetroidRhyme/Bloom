@@ -619,6 +619,71 @@ const h = require('./harness');
   r.check('a stale wild flower on the center also blocks the ring', out.notCompleteWithStaleWild === true, out);
   r.check('...and it vanishing on its own (tickPlants) completes the ring too', out.completeAfterVanish === true, out);
 
+  // ---- Rain Ring: the rain effect thins out in 3 stages -------------------
+  const hasRainEffect = await page.evaluate(() => typeof rainRuneStage === 'function');
+  r.section('Rain Ring rain effect', hasRainEffect ? '' : '(SKIPPED - not in this build)');
+  if (hasRainEffect) {
+    out = await page.evaluate(() => {
+      var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+      var cq = here.q, cr = here.r, ringKey = cellKey(cq, cr);
+      var now = Date.now();
+      var sp = SPECIES.map(function (s) { return s.key; });
+      state.plants = {}; state.wild = {}; state.sprinklers = {}; rainRings = {}; state.runeWater = {};
+      rainRingLayers = {}; // drop any stale Leaflet layers from an earlier section's ring at this tile
+      CELL_NEIGHBORS.forEach(function (d, i) {
+        var q = cq + d[0], r = cr + d[1], c = cellCenter(q, r);
+        state.plants[cellKey(q, r)] = {
+          q: q, r: r, lat: c.lat, lng: c.lng, species: sp[i], color: 'blue',
+          stage: MAX_STAGE, plantedAt: now, lastWateredAt: now, readyAt: now + 1e9
+        };
+      });
+      recomputeRainRingsFull();
+      var ringComplete = !!rainRings[ringKey];
+
+      // Dormant (never watered): no rain layer, stage 0.
+      renderRainRings();
+      var dormantStage = rainRuneStage(ringKey, now);
+      var dormantHasRain = !!(rainRingLayers[ringKey] && rainRingLayers[ringKey].rain);
+
+      // Freshly watered - stage 3, the densest rain.
+      state.runeWater[ringKey] = now;
+      renderRainRings();
+      var stage3 = rainRuneStage(ringKey, now);
+      var stage3Drops = document.querySelectorAll('.rune-raindrop').length;
+
+      // Mid-window - stage 2, thinner.
+      state.runeWater[ringKey] = now - Math.round(RUNE_ACTIVE_MS * 0.5);
+      renderRainRings();
+      var stage2 = rainRuneStage(ringKey, now);
+      var stage2Drops = document.querySelectorAll('.rune-raindrop').length;
+
+      // Running low - stage 1, thinnest ("needs recharging soon").
+      state.runeWater[ringKey] = now - Math.round(RUNE_ACTIVE_MS * 0.9);
+      renderRainRings();
+      var stage1 = rainRuneStage(ringKey, now);
+      var stage1Drops = document.querySelectorAll('.rune-raindrop').length;
+
+      // Expired - back to stage 0, the rain layer torn down entirely.
+      state.runeWater[ringKey] = now - RUNE_ACTIVE_MS - 1000;
+      renderRainRings();
+      var stage0 = rainRuneStage(ringKey, now);
+      var expiredHasRain = !!(rainRingLayers[ringKey] && rainRingLayers[ringKey].rain);
+
+      return {
+        ringComplete: ringComplete, dormantStage: dormantStage, dormantHasRain: dormantHasRain,
+        stage3: stage3, stage3Drops: stage3Drops, stage2: stage2, stage2Drops: stage2Drops,
+        stage1: stage1, stage1Drops: stage1Drops, stage0: stage0, expiredHasRain: expiredHasRain
+      };
+    });
+    r.check('ring is structurally complete', out.ringComplete === true, out);
+    r.check('never watered -> stage 0, no rain layer at all', out.dormantStage === 0 && out.dormantHasRain === false, out);
+    r.check('freshly watered -> stage 3, the densest rain', out.stage3 === 3 && out.stage3Drops === 10, out);
+    r.check('half the window left -> stage 2, thinner', out.stage2 === 2 && out.stage2Drops === 6, out);
+    r.check('running low -> stage 1, thinnest of all', out.stage1 === 1 && out.stage1Drops === 3, out);
+    r.check('the three stages actually reduce in order', out.stage3Drops > out.stage2Drops && out.stage2Drops > out.stage1Drops, out);
+    r.check('expired -> back to stage 0, rain layer torn down', out.stage0 === 0 && out.expiredHasRain === false, out);
+  }
+
   // ---- Spell Book progressive unlock --------------------------------------
   const hasSpellbookUnlock = await page.evaluate(() => typeof isRainRingUnlocked === 'function');
   r.section('Spell Book progressive unlock', hasSpellbookUnlock ? '' : '(SKIPPED - not in this build)');

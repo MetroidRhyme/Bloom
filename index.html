@@ -1399,6 +1399,25 @@
        spins, so the compact center glyph and its full-range echo read as
        the same held symbol rather than two things fighting for attention. */
 
+    /* Rain effect over an ACTIVE rune's own reach (see buildRainEffectSVG/
+       rainRuneStage in the script) - a handful of droplets falling and
+       fading, thinning from stage 3 (freshly watered) down to stage 1
+       (running low - under a third of RUNE_ACTIVE_MS left) as the visible
+       "recharge this soon" tell. Base opacity is visible at rest, not 0 -
+       same reasoning bloom-halo/bloom-spark give: the global reduced-motion
+       rule (see below) collapses this to a single near-instant frame
+       rather than holding a mid-animation value, so starting invisible
+       would just vanish for those players instead of showing a still drop. */
+    @keyframes rune-rain-fall {
+      0% { opacity: 0; transform: translateY(-8px); }
+      20% { opacity: 0.9; }
+      80% { opacity: 0.55; }
+      100% { opacity: 0; transform: translateY(16px); }
+    }
+    .rune-raindrop {
+      opacity: 0.5; animation-name: rune-rain-fall; animation-timing-function: linear; animation-iteration-count: infinite;
+    }
+
     /* Signature colors only (see COLORS `species`). These are drawn inside the
        flower's own SVG, so the same markup glows in a 26px bookmark and a
        110px map marker with no extra elements around it.
@@ -1507,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.42.5</span>
+      <span id="game-version">v2.43.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1748,8 +1767,13 @@
     // the ring's own eight blue flowers - watered on its own for the next
     // 24 hours (RUNE_ACTIVE_MS), watering it again at any point tops that
     // window back up, and letting it run out just leaves it dormant rather
-    // than breaking anything. Tapping the rune opens a small panel with
-    // what it does and how long it has left. See the RAIN RINGS section
+    // than breaking anything. While active, a handful of droplets visibly
+    // fall across the whole watered block - and thin out in three stages as
+    // the 24 hours run down (see rainRuneStage/buildRainEffectSVG, below
+    // the rune activation section), so a glance at the map is enough to
+    // tell a rune that needs recharging soon from one that was just
+    // watered, no tap required. Tapping the rune still opens a small panel
+    // with what it does and how long it has left. See the RAIN RINGS section
     // (below catchUpSprinklersOffline) for the actual detection/watering
     // logic. There is deliberately no in-game hint for a player who hasn't
     // found this recipe yet - the Spell Book (see the SPELL BOOK section)
@@ -1897,6 +1921,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.43.0', changes: [
+        "An active Rain Ring now visibly rains over the whole block it's " +
+          "watering, not just the rune itself - and the rain thins out in " +
+          "three stages as its 24 hours run down, so a lighter sprinkle is " +
+          "your cue to go top it back up before it goes dormant."
+      ] },
       { version: 'v2.42.5', changes: [
         "Crossing Notes: a color you've already found on a different " +
           "species now shows up dimmed instead of a fresh '?' - you " +
@@ -4015,6 +4045,11 @@
       // harvest event to hang a recheck off of - same reasoning as the
       // Loki/Scry zone recheck just above.
       renderGrowRunes();
+      // A rain rune's own visible rain effect thins out in stages purely
+      // from the clock too (see rainRuneStage) - same "clock alone"
+      // reasoning as the three rechecks just above, just for a cosmetic
+      // stage instead of an active/dormant or wilted/intact transition.
+      renderRainRings();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
       // Keep an open Greenhouse fresh the same way an open plant panel is
@@ -4355,6 +4390,30 @@
       return !!wateredAt && (now - wateredAt) < RUNE_ACTIVE_MS;
     }
 
+    // ---- Rain effect (see buildRainEffectSVG/renderRainRings below) -------
+    // A purely visual "how much longer is this actually raining" tell,
+    // layered on top of isRuneActive rather than replacing it - the rune's
+    // own mechanics (does it water its neighbors, is it active) never read
+    // this, only the render side does. 0 = dormant (never watered, or its
+    // last watering ran out) - no rain drawn at all, same as before this
+    // existed. Otherwise the remaining fraction of RUNE_ACTIVE_MS splits
+    // into thirds: >2/3 left is stage 3 (freshly watered, rains hardest),
+    // >1/3 is stage 2, and the final third is stage 1 - visibly thinning
+    // out as the window runs low, the same "needs a top-up soon" read the
+    // player would otherwise only get by tapping the rune's own panel.
+    // RAIN_EFFECT_DROPS below maps each stage to how many droplets
+    // actually fall.
+    function rainRuneStage(key, now) {
+      var wateredAt = state.runeWater[key];
+      if (!wateredAt) return 0;
+      var remain = wateredAt + RUNE_ACTIVE_MS - now;
+      if (remain <= 0) return 0;
+      var frac = remain / RUNE_ACTIVE_MS;
+      if (frac > 2 / 3) return 3;
+      if (frac > 1 / 3) return 2;
+      return 1;
+    }
+
     // The one interaction a rune supports: water it (via the watering can,
     // same as any flower - see waterRuneWithCan below and toolTargetAt's
     // 'rune' kind). Always stamps `now`, whether the rune was dormant,
@@ -4616,6 +4675,41 @@
       return { circle: circle, star1: star1, star2: star2, ticks: ticks, diamonds: diamonds, lattice: lattice };
     }
 
+    // ---- Rain effect glyph (see rainRuneStage above) -----------------------
+    // A handful of falling droplets scattered across the SAME 120-unit
+    // viewBox rainBoundaryGeometry's own math is built on - at N =
+    // RAIN_RING_RADIUS, unit 60 lands exactly on the boundary (half = N +
+    // 0.5 tiles), so the full 0-120 span already IS the ring's whole 5x5
+    // reach, with no extra geometry to derive. Pure CSS animation (fall +
+    // fade, staggered per-drop delay/duration, the same "twinkle out of
+    // phase" convention sparkMarkup already uses for signature colors) -
+    // nothing here re-renders per frame. One marker per ACTIVE ring, not
+    // one per drop or per tile, so the cost this adds is bounded by how
+    // many rings are actively raining on screen at once - realistically
+    // zero or one - never by the size of the save (see the bloom-perf
+    // skill on why that distinction is the one that matters here). A
+    // dormant ring (stage 0) gets no marker at all, same "costs nothing to
+    // sit there" idea the rest of this spell already leans on.
+    var RAIN_EFFECT_DROPS = { 1: 3, 2: 6, 3: 10 };
+    // seed keeps one ring's own scatter stable across repeated rebuilds
+    // (a zoom step, a stage transition) instead of reshuffling every time -
+    // same "same tile, same look, every rebuild" reasoning
+    // dailyStockSeed/mulberry32 already serve grass tufts with.
+    function buildRainEffectSVG(px, stage, seed) {
+      var n = RAIN_EFFECT_DROPS[stage];
+      if (!n) return '';
+      var rng = mulberry32(seed);
+      var drops = '';
+      for (var i = 0; i < n; i++) {
+        var x = 8 + rng() * 104, y = rng() * 90;
+        var delay = (rng() * 1.6).toFixed(2), dur = (1.3 + rng() * 0.7).toFixed(2);
+        drops += '<ellipse class="rune-raindrop" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) +
+          '" rx="1.6" ry="3.6" fill="' + RAIN_RUNE_DROP_MID + '" style="animation-delay:' +
+          delay + 's;animation-duration:' + dur + 's"/>';
+      }
+      return '<svg viewBox="0 0 120 120" width="' + px + '" height="' + px + '">' + drops + '</svg>';
+    }
+
     // px is sized the same way every other plant-adjacent icon is
     // (plantIconBase(), the current on-screen width of one tile), so the
     // rune scales with zoom exactly like a flower or sprinkler would - see
@@ -4623,7 +4717,7 @@
     // live in-gesture and settled-zoom halves of that. The boundary layers
     // never need a rebuild call here at all (real lat/lng geometry, not
     // pixel icons), only teardown when a ring itself goes away.
-    var rainRingLayers = {}; // centerKey -> { marker, lattice, circle, star1, star2, ticks, diamonds }
+    var rainRingLayers = {}; // centerKey -> { marker, lattice, circle, star1, star2, ticks, diamonds, rain, rainStage }
     // Viewport-virtualized on exactly the same grounds as the plant/wild/
     // sprinkler/weed markers above (see MARKER_VIEWPORT_PAD), and with more
     // to gain per entry: a single rain ring is not one marker but SEVEN
@@ -4641,11 +4735,17 @@
       var basePx = plantIconBase();
       _iconBuiltPx = basePx; // same bookkeeping makeSprinklerIcon does with its own unscaled px
       var px = Math.round(basePx * 0.92);
+      // Full boundary span, not the compact glyph's own size - see
+      // buildRainEffectSVG's own comment on why its 0-120 viewBox already
+      // IS the ring's whole 5x5 reach at this scale.
+      var rainPx = Math.round(basePx * (RAIN_RING_RADIUS * 2 + 1));
+      var now = Date.now();
       var vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(rainRings).forEach(function (key) {
         var ring = rainRings[key];
         if (!boxInMarkerViewport(vc, ring.q, ring.r, RAIN_RUNE_VIEWPORT_EXTENT)) return; // off screen - torn down by the sweep below
         seen[key] = true;
+        var stage = rainRuneStage(key, now);
         var existing = rainRingLayers[key];
         var iconKey = px + '';
         if (existing) {
@@ -4653,6 +4753,7 @@
             existing.marker.setIcon(makeRainRuneIcon(px, key.replace(/[^a-zA-Z0-9]/g, '_')));
             existing.marker._iconKey = iconKey;
           }
+          syncRainEffectLayer(existing, ring, key, rainPx, stage);
           return;
         }
         var marker = L.marker([ring.lat, ring.lng], {
@@ -4688,16 +4789,44 @@
           color: RAIN_RUNE_GLOW, weight: 0, fillColor: RAIN_RUNE_GLOW, fillOpacity: 0.85, interactive: false
         }).addTo(map);
         rainRingLayers[key] = {
-          marker: marker, lattice: lattice, circle: circle, star1: star1, star2: star2, ticks: ticks, diamonds: diamonds
+          marker: marker, lattice: lattice, circle: circle, star1: star1, star2: star2, ticks: ticks, diamonds: diamonds,
+          rain: null, rainStage: 0
         };
+        syncRainEffectLayer(rainRingLayers[key], ring, key, rainPx, stage);
       });
       Object.keys(rainRingLayers).forEach(function (key) {
         if (seen[key]) return;
         var l = rainRingLayers[key];
         map.removeLayer(l.marker); map.removeLayer(l.lattice); map.removeLayer(l.circle);
         map.removeLayer(l.star1); map.removeLayer(l.star2); map.removeLayer(l.ticks); map.removeLayer(l.diamonds);
+        if (l.rain) map.removeLayer(l.rain);
         delete rainRingLayers[key];
       });
+    }
+    // Adds/rebuilds/removes one ring's rain-effect marker in place, called
+    // for both a freshly-created ring and one already on screen - so a
+    // stage transition (the 24h countdown crossing a third, ticked by
+    // tickPlants' own per-minute call into renderRainRings) picks up on
+    // the very next render pass, the same "clock alone" reasoning
+    // tickPlants already gives the Loki/Scry/grow-rune rechecks right next
+    // to it. Skips rebuilding when neither the stage nor the icon's own
+    // pixel size actually changed, so re-calling this on every render (as
+    // renderRainRings always does) costs nothing extra for the common case
+    // of "still the same stage, nothing to redraw."
+    function syncRainEffectLayer(entry, ring, key, rainPx, stage) {
+      if (stage === entry.rainStage && (!entry.rain || entry.rain._px === rainPx)) return;
+      if (entry.rain) { map.removeLayer(entry.rain); entry.rain = null; }
+      entry.rainStage = stage;
+      if (!stage) return; // dormant - no rain layer at all
+      var marker = L.marker([ring.lat, ring.lng], {
+        icon: L.divIcon({
+          html: buildRainEffectSVG(rainPx, stage, dailyStockSeed(key)),
+          iconSize: [rainPx, rainPx], iconAnchor: [rainPx / 2, rainPx / 2], className: ''
+        }),
+        interactive: false, zIndexOffset: 90 // above the compass rune (80) and its boundary
+      }).addTo(map);
+      marker._px = rainPx;
+      entry.rain = marker;
     }
 
     // ---- Rune info panel ---------------------------------------------------
@@ -4721,7 +4850,9 @@
       if (isRuneActive(key, now)) {
         var remain = wateredAt + RUNE_ACTIVE_MS - now;
         body += '<p><b>Active</b> - raining for another <b>' + formatDuration(remain) + '</b>. ' +
-          'Water it again any time to top the 24 hours back up.</p>';
+          'The rain you see falling over the block thins out as that window runs low - a lighter ' +
+          'sprinkle means it is worth topping up soon. Water it again any time to top the 24 hours ' +
+          'back up.</p>';
       } else if (wateredAt) {
         body += '<p><b>Dormant</b> - its last watering ran out, so it has stopped raining. ' +
           'The ring itself is fine - water the rune to start it up again.</p>';
@@ -7481,9 +7612,24 @@
       // reprojects those on its own), so it gets its own one-line loop
       // instead of going through apply().
       Object.keys(rainRingLayers).forEach(function (key) {
-        var el = rainRingLayers[key].marker.getElement();
+        var l = rainRingLayers[key];
+        var el = l.marker.getElement();
         var c = el && el.firstElementChild;
         if (c) c.style.transform = t;
+        // The rain-effect marker (see syncRainEffectLayer) is its own
+        // separate plantIconBase()-sized icon, built from the exact same
+        // basePx snapshot as the compact glyph just above - the same ratio
+        // `t` corrects it too. Absent while the ring is dormant (no rain
+        // marker to rescale at all), which is why this is checked rather
+        // than assumed - leaving this line out is exactly the zoom-rescale
+        // gotcha the bloom-spells skill warns about: a marker type built
+        // off the shared _iconBuiltPx baseline but left out of this batch
+        // drifts to the wrong size on every further zoom step.
+        if (l.rain) {
+          var rEl = l.rain.getElement();
+          var rc = rEl && rEl.firstElementChild;
+          if (rc) rc.style.transform = t;
+        }
       });
       // Same one-line-loop treatment as rainRingLayers just above, for the
       // exact same reason - growRuneLayers' own boundary shapes are real
@@ -10569,7 +10715,8 @@
           ' tiles of it - a ' + ringSpan + 'x' + ringSpan + ' block, including its own eight ' + ringColorName +
           ' flowers - watered on its own for the next ' + (RUNE_ACTIVE_MS / HOUR) + ' hours. Watering it again ' +
           'at any point tops that window back up; letting it run out just leaves it dormant until the next ' +
-          'watering, nothing is lost.</p>') :
+          'watering, nothing is lost. The rain you see falling over the block thins out in three stages as ' +
+          'the window runs down, so a lighter sprinkle is the tell to go top it up.</p>') :
         lockedSpellCard('\u{1F4A7}', 'Rain Ring',
           'Discover every species as a ' + ringColorName + ' flower to unlock.')) +
 

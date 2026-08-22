@@ -38,6 +38,12 @@ const h = require('./harness');
     }
     var rc = cellCenter(here.q, here.r - 1);
     rainRings = {}; rainRings[cellKey(here.q, here.r - 1)] = { q: here.q, r: here.r - 1, lat: rc.lat, lng: rc.lng };
+    // Watered (not just structurally complete) so the rain-effect marker
+    // (see rainRuneStage/buildRainEffectSVG) actually exists to check -
+    // its own plantIconBase()-derived sizing is a second marker type layered
+    // on the same ring, the exact shape of thing this whole walk exists to
+    // catch if it's left out of the zoom-rescale batch.
+    state.runeWater = {}; state.runeWater[cellKey(here.q, here.r - 1)] = now;
     state.growRunes = {};
     state.growRunes[cellKey(here.q, here.r + 1)] = {
       q: here.q, r: here.r + 1, activatedAt: now, species: SPECIES[0].key, color: baseColorOf(SPECIES[0].key)
@@ -61,13 +67,16 @@ const h = require('./harness');
           var rk = Object.keys(rainRingLayers)[0], gk = Object.keys(growRuneLayers)[0];
           var rune = rk ? svgOf(rainRingLayers[rk].marker) : null;
           var grow = gk ? svgOf(growRuneLayers[gk].marker) : null;
+          var rain = (rk && rainRingLayers[rk].rain) ? svgOf(rainRingLayers[rk].rain) : null;
           resolve({
             zoom: map.getZoom(),
             expected: plantIconBase(),
             runeExpected: Math.round(plantIconBase() * 0.92),
+            rainExpected: Math.round(plantIconBase() * (RAIN_RING_RADIUS * 2 + 1)),
             plantW: plant ? +plant.getAttribute('width') : null,
             runeW: rune ? +rune.getAttribute('width') : null,
             growW: grow ? +grow.getAttribute('width') : null,
+            rainW: rain ? +rain.getAttribute('width') : null,
             // zoomend hands back fresh untransformed DOM, so the live
             // in-gesture scale must have fallen back to identity by now.
             leftoverTransform: el.firstElementChild ? (el.firstElementChild.style.transform || '') : ''
@@ -82,8 +91,9 @@ const h = require('./harness');
     const ok = out.plantW === out.expected &&
       out.leftoverTransform === '' &&
       (out.runeW === null || out.runeW === out.runeExpected) &&
-      (out.growW === null || out.growW === out.runeExpected);
-    r.check('zoom ' + out.zoom + ': plant/rain/grow icons at true size, no leftover scale', ok, out);
+      (out.growW === null || out.growW === out.runeExpected) &&
+      (out.rainW === null || out.rainW === out.rainExpected);
+    r.check('zoom ' + out.zoom + ': plant/rain/grow/rain-effect icons at true size, no leftover scale', ok, out);
   }
 
   r.section('console cleanliness');

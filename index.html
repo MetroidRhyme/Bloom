@@ -1526,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.43.3</span>
+      <span id="game-version">v2.43.4</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1921,6 +1921,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.43.4', changes: [
+        "Watering, shearing, selling or planting a big dragged selection in " +
+          "one go no longer locks the game up while it works through the " +
+          "tiles - a hundred-tile sweep used to freeze everything for the " +
+          "best part of a second."
+      ] },
       { version: 'v2.43.3', changes: [
         "Smoother panning and zooming, especially once you have sprinklers " +
           "out - the map now does a lot less redrawing work to paint the " +
@@ -3815,8 +3821,7 @@
       // join one itself: it starts at stage 0, and MAX_STAGE is required.
       refreshRainRingCandidates(candidateRingCentersAround(q, r));
       saveState();
-      renderPlants();
-      updateHUD();
+      schedulePlantRender(); // see its own comment - a dragged seed sweep calls this once per tile
       vibrate(20);
       tutorialOnPlant(key);
       return key;
@@ -3920,9 +3925,7 @@
 
       recomputePlant(p, now);   // refresh derived state for immediate UI feedback
       saveState();
-      renderPlants();
-      if (viewingKey === key) renderPlantPanel(key);
-      updateHUD();
+      schedulePlantRender(); // see its own comment - a dragged water sweep lands one of these per tile
 
       // Watering never pops a toast - it's a plain tap done in a row across
       // a whole bed, and the can-pour animation plus the marker's own
@@ -3986,8 +3989,7 @@
         refreshRainRingCandidates(candidateRingCentersAround(p.q, p.r));
         state.seeds[vk] = (state.seeds[vk] || 0) + 1;
         saveState();
-        renderPlants();
-        updateHUD();
+        schedulePlantRender();
         closePlantPanel();
         vibrate(20);
         return 0;
@@ -4020,8 +4022,7 @@
       }
 
       saveState();
-      renderPlants();
-      updateHUD();
+      schedulePlantRender(); // see its own comment - a dragged shear/sell sweep calls this once per tile
       updateCurrencyPill();
       closePlantPanel();
       vibrate(20);
@@ -5049,9 +5050,7 @@
       var res = applyWatering(p, now);
       recomputePlant(p, now);
       saveState();
-      renderPlants();
-      updateHUD();
-      if (viewingKey === pkey) renderPlantPanel(pkey);
+      schedulePlantRender(); // several sprinklers/a rain ring land their droplets in the same frame
       // A landed droplet is the only way a plant reaches MAX_STAGE outside
       // a manual tap - see waterPlant's own call to this same check.
       if (res.grew && p.stage >= MAX_STAGE) checkGrowBlocksAround(p.q, p.r);
@@ -7676,6 +7675,67 @@
           list[i].el.classList.toggle('no-wind', still);
         }
       }
+    }
+
+    // ---- Coalesced post-mutation render -----------------------------------
+    // The four per-plant mutations below (plantSeedAt, waterPlant,
+    // finishAutoWatering, harvestPlant) each used to call renderPlants() +
+    // updateHUD() straight through. That is right for a single tap, and
+    // wrong the moment anything drives them in bulk - which three things
+    // now do: a dragged range selection (applyRangeToolAction /
+    // applyRangeSeedAction sweep a whole box, one call per tile) and a
+    // garden with several sprinklers or an active rain ring landing their
+    // droplets together. renderPlants() walks the entire lifetime garden
+    // every time, so N tiles cost N whole-garden walks in a single frame.
+    //
+    // Measured on the 1500-plant lifetime save, watering a 10x10 dragged
+    // box: 100 renderPlants() calls totalling 125ms plus 100 updateHUD()
+    // calls totalling 28ms, landing as a single 500ms frame. Selling the
+    // same box blocked for 155ms inline. Same pixels either way - every one
+    // of those renders but the last was immediately overwritten.
+    //
+    // So they schedule instead - same "one pending flag" shape as
+    // scheduleGridRedraw/scheduleMarkerRender/scheduleWindBudget just above,
+    // and the same reasoning as saveState's own coalescing: the call sites
+    // keep their plain "I changed something, redraw it" contract and none of
+    // them need to know about any of this. Order inside the flush is
+    // renderPlants-then-updateHUD, matching what the call sites did
+    // synchronously - updateHUD reads the `_d` cache renderPlants refreshes,
+    // so a freshly planted seed still lands in the HUD tallies on the same
+    // pass.
+    //
+    // setTimeout, NOT requestAnimationFrame, and that is not a detail - it
+    // is the whole difference between this being a win and a regression.
+    // The rAF version was written first and measured worse than no
+    // coalescing at all despite doing 45% less work: a ~50ms whole-garden
+    // render inside a rAF callback runs before that frame's own paint and
+    // blocks it, so batching a hundred tiles' worth of marker swaps into one
+    // callback stretched the visible hitch from ~380ms to ~1050ms with a
+    // single 850ms frame in it. A macrotask lets the browser paint between
+    // the mutation and the next frame instead. Measured, same box, same
+    // fixture, only the primitive changed:
+    //
+    //   rAF        hitch 1050-1100ms   longest frame 850-883ms
+    //   setTimeout hitch  317- 367ms   longest frame 150-267ms
+    //
+    // It also keeps working in a backgrounded tab, where rAF does not - a
+    // sprinkler landing a droplet while the tab is hidden still gets its
+    // state rendered rather than deferring until the player comes back.
+    //
+    // Deliberately NOT used by tickPlants/setCheatMode/the boot sequence:
+    // those already render exactly once for a whole pass, so there is
+    // nothing to coalesce and deferring them would only make them harder to
+    // reason about.
+    var _plantRenderPending = false;
+    function schedulePlantRender() {
+      if (_plantRenderPending) return;
+      _plantRenderPending = true;
+      setTimeout(function () {
+        _plantRenderPending = false;
+        renderPlants();
+        updateHUD();
+        if (viewingKey) renderPlantPanel(viewingKey);
+      }, 0);
     }
 
     // Suspends all ambient marker/overlay motion for the duration of a pan

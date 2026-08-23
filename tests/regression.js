@@ -1327,6 +1327,78 @@ const h = require('./harness');
   r.check('...and then stops rebuilding again', out.afterBreakRepeat === 2, out);
   r.check('a zoom step rebuilds it (icon size is part of the fingerprint)', out.afterZoom === 3, out);
 
+  // ---- bulk actions coalesce their renders -------------------------------
+  // plantSeedAt/waterPlant/finishAutoWatering/harvestPlant used to call
+  // renderPlants() + updateHUD() straight through, which is right for one
+  // tap and wrong for a dragged range selection: renderPlants walks the
+  // whole lifetime garden, so N tiles cost N whole-garden walks. They
+  // schedule a single coalesced flush instead - via setTimeout, not rAF; see
+  // schedulePlantRender's own comment for the measurements behind that.
+  const hasRenderCoalescing = await page.evaluate(() => typeof schedulePlantRender === 'function');
+  r.section('bulk actions coalesce their renders', hasRenderCoalescing ? '' : '(SKIPPED - not in this build)');
+  if (hasRenderCoalescing) {
+    out = await page.evaluate(async () => {
+      closeModal();
+      state.plants = {}; state.wild = {}; state.weeds = {}; state.sprinklers = {};
+      state.growRunes = {}; rainRings = {}; lokiZones = {}; scryZones = {};
+      Object.keys(plantMarkers).forEach(function (k) { map.removeLayer(plantMarkers[k]); delete plantMarkers[k]; });
+      var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+      var n = 6, q0 = here.q - 3, r0 = here.r - 3, now = Date.now(), keys = [];
+      for (var i = 0; i < n; i++) for (var j = 0; j < n; j++) {
+        var q = q0 + i, r = r0 + j, c = cellCenter(q, r), k = cellKey(q, r);
+        state.plants[k] = { q: q, r: r, lat: c.lat, lng: c.lng, species: 'tulip', color: 'red',
+          stage: 1, plantedAt: now, lastWateredAt: now - WATER_DURATION_MS - 1, readyAt: now - 1,
+          reachedBloom: false, reachedFlourish: false, grownCredited: false };
+        markAccessibleToday(q, r);
+        keys.push(k);
+      }
+      var tiles = keys.length;
+
+      var renders = 0, real = renderPlants;
+      window.renderPlants = function () { renders++; return real.apply(null, arguments); };
+
+      // Water the whole box. Each tile's watering lands on its own
+      // WATER_ANIM_MS timer; the renders behind them must collapse.
+      applyRangeToolAction('water', { minQ: q0, maxQ: q0 + n - 1, minR: r0, maxR: r0 + n - 1 });
+      await new Promise(function (res) { setTimeout(res, WATER_ANIM_MS + 500); });
+      var watered = keys.filter(function (k) { return state.plants[k] && state.plants[k].stage === 2; }).length;
+      var wateredRenders = renders;
+
+      // ...and the deferred flush must actually have happened: every plant
+      // still on screen has a marker, rebuilt at its new stage.
+      var markersAfterWater = keys.filter(function (k) { return !!plantMarkers[k]; }).length;
+
+      // Selling the box is fully synchronous - no animation timer at all -
+      // so this measures the inline blocking cost directly.
+      keys.forEach(function (k) { if (state.plants[k]) state.plants[k].stage = MAX_STAGE; });
+      renders = 0;
+      var t0 = performance.now();
+      applyRangeToolAction('sell', { minQ: q0, maxQ: q0 + n - 1, minR: r0, maxR: r0 + n - 1 });
+      var sellBlockingRenders = renders;
+      var sellMs = performance.now() - t0;
+      var sold = keys.filter(function (k) { return !state.plants[k]; }).length;
+      await new Promise(function (res) { setTimeout(res, 100); });
+      var sellRendersAfterFlush = renders;
+      var markersAfterSell = keys.filter(function (k) { return !!plantMarkers[k]; }).length;
+
+      window.renderPlants = real;
+      state.plants = {};
+      renderPlants();
+      return { tiles: tiles, watered: watered, wateredRenders: wateredRenders,
+               markersAfterWater: markersAfterWater, sold: sold,
+               sellBlockingRenders: sellBlockingRenders, sellRendersAfterFlush: sellRendersAfterFlush,
+               markersAfterSell: markersAfterSell, sellMs: +sellMs.toFixed(1) };
+    });
+    r.check('every tile in the box actually got watered', out.watered === out.tiles, out);
+    r.check('the renders behind them collapse (far fewer than one per tile)',
+      out.wateredRenders > 0 && out.wateredRenders <= out.tiles / 4, out);
+    r.check('the deferred flush still rebuilds every marker', out.markersAfterWater === out.tiles, out);
+    r.check('a bulk sell blocks on zero renders', out.sellBlockingRenders === 0, out);
+    r.check('...and still sells every tile', out.sold === out.tiles, out);
+    r.check('...with exactly one coalesced render behind it', out.sellRendersAfterFlush === 1, out);
+    r.check('...which tears the sold markers down', out.markersAfterSell === 0, out);
+  }
+
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));
 

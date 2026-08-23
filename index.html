@@ -1526,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.43.4</span>
+      <span id="game-version">v2.43.5</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1921,6 +1921,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.43.5', changes: [
+        "Housekeeping: your save no longer carries a couple of leftover " +
+          "bookkeeping flags nothing has used since the pop-up messages " +
+          "were trimmed back, and finished Rain Rings you have long since " +
+          "pulled up stop taking space in it. Nothing you can see changes."
+      ] },
       { version: 'v2.43.4', changes: [
         "Watering, shearing, selling or planting a big dragged selection in " +
           "one go no longer locks the game up while it works through the " +
@@ -3048,8 +3054,7 @@
     // Either way, over a week of ordinary play (7 days) the chance of
     // seeing at least one is already >80%, and over a month it is a near
     // certainty - so this reads as "everyone finds one eventually, most
-    // weeks bring one," not a grind. See the bloom-game skill notes for
-    // the full table this was picked from.
+    // weeks bring one," not a grind.
     var WILD_RARE_CHANCE = 0.05;
     var WILD_RARE_COLORS = COLORS.filter(function (c) { return c.tier === 1; })
       .map(function (c) { return c.id; });
@@ -3319,15 +3324,6 @@
         // renderSprinklerToggle). Placing one moves it from here into
         // `sprinklers` above; picking a placed one back up reverses that.
         sprinklerInventory: 0,
-        // One-time flag so the "Sprinklers unlocked!" toast (see
-        // checkSprinklerUnlock) can only ever fire once, even though every
-        // call site that touches stats.grown rechecks the threshold.
-        sprinklerUnlockAnnounced: false,
-        // Same one-time-toast pattern as sprinklerUnlockAnnounced above, for
-        // the Greenhouse becoming purchasable (not the same thing as
-        // greenhouseUnlocked, which means already bought - see
-        // checkGreenhouseTeaser).
-        greenhouseTeaserAnnounced: false,
         // cell key -> 1, every tile ever within planting range of the player.
         // Never shrinks - once a spot has been reachable it stays a priority
         // for wild spawning even if the player never goes back. See
@@ -3520,8 +3516,6 @@
           // got when the rain rune shipped.
           growRunes: parsed.growRunes || {},
           sprinklerInventory: typeof parsed.sprinklerInventory === 'number' ? parsed.sprinklerInventory : 0,
-          sprinklerUnlockAnnounced: !!parsed.sprinklerUnlockAnnounced,
-          greenhouseTeaserAnnounced: !!parsed.greenhouseTeaserAnnounced,
           inventory: migratedInventory,
           crosses: parsed.crosses || {},
           stats: migratedStats,
@@ -3687,8 +3681,6 @@
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
         sprinklers: state.sprinklers, runeWater: state.runeWater, growRunes: state.growRunes,
         sprinklerInventory: state.sprinklerInventory,
-        sprinklerUnlockAnnounced: state.sprinklerUnlockAnnounced,
-        greenhouseTeaserAnnounced: state.greenhouseTeaserAnnounced,
         following: state.following, seenWelcome: state.seenWelcome, tutorialDone: state.tutorialDone,
         fertReady: state.fertReady, fertUnlocked: state.fertUnlocked,
         greenhouseUnlocked: state.greenhouseUnlocked, greenhouse: state.greenhouse,
@@ -4026,8 +4018,6 @@
       updateCurrencyPill();
       closePlantPanel();
       vibrate(20);
-      checkSprinklerUnlock();
-      checkGreenhouseTeaser();
       return value; // used by the tutorial's bonus top-up
     }
 
@@ -4125,18 +4115,6 @@
     function nextSprinklerCost() {
       return SPRINKLER_COST + SPRINKLER_COST_STEP * sprinklerOwnedCount();
     }
-    // Flips the one-time unlock flag the moment the gate above first opens.
-    // Called from every place stats.grown changes (harvestPlant, pickWild)
-    // rather than off a timer, so it lands right at the harvest that
-    // actually crossed the line - and the persisted flag means it can never
-    // repeat even though every call site rechecks the same threshold. The
-    // Shop itself is what shows sprinklers becoming available.
-    function checkSprinklerUnlock() {
-      if (state.sprinklerUnlockAnnounced || !sprinklerUnlocked()) return;
-      state.sprinklerUnlockAnnounced = true;
-      saveState();
-    }
-
     // Runs on its own short interval (SPRINKLER_TICK_MS, well under
     // tickPlants' 60s) rather than living inside tickPlants - tickPlants is
     // deliberately a pure read (see its own comment above), and this one
@@ -4789,6 +4767,28 @@
     var RAIN_RUNE_VIEWPORT_EXTENT = RAIN_RING_RADIUS + 1;
     function renderRainRings() {
       var seen = {};
+      // Prune dead rune waterings, the same bookkeeping-before-drawing job
+      // renderGrowRunes does for state.growRunes (see its own ordering
+      // comment) - state.runeWater was the one rune registry with no cleanup
+      // at all, so a player who builds and breaks rings over a long save
+      // accumulated an entry per center forever.
+      //
+      // Deliberately narrow: only an entry that is BOTH past its own
+      // RUNE_ACTIVE_MS window AND no longer a structurally-complete ring.
+      // An expired entry on a ring that still stands has to stay, because
+      // rainRuneModalBody tells "its last watering ran out" apart from "it
+      // has never been watered" by exactly this; and an unexpired entry on a
+      // broken ring has to stay too, so harvesting a spoke and replanting it
+      // restores the rune's remaining time rather than silently zeroing it.
+      // What is left can never affect anything again.
+      var pruneNow = Date.now(), prunedWater = false;
+      Object.keys(state.runeWater).forEach(function (wk) {
+        if (rainRings[wk]) return;
+        if ((pruneNow - state.runeWater[wk]) < RUNE_ACTIVE_MS) return;
+        delete state.runeWater[wk];
+        prunedWater = true;
+      });
+      if (prunedWater) saveState();
       var basePx = plantIconBase();
       _iconBuiltPx = basePx; // same bookkeeping makeSprinklerIcon does with its own unscaled px
       var px = Math.round(basePx * 0.92);
@@ -6462,14 +6462,6 @@
         '" style="display:block">' + out + '</svg>';
       flowerSvgCache[ck] = svg;
       return svg;
-    }
-
-    // The round backing the sprinkler marker still sits on (flower growth
-    // stages no longer use this - see buildPlantVisual below).
-    function discStyle(bg, size) {
-      return 'background:' + bg + ';border:2px solid rgba(255,255,255,0.85);border-radius:50%;width:' +
-        size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;' +
-        'box-shadow:0 2px 8px rgba(60,40,20,0.3);flex-shrink:0;overflow:hidden';
     }
 
     // ---------------------------------------------------------------------
@@ -9997,8 +9989,6 @@
       updateCurrencyPill();
       closePlantPanel();
       vibrate(20);
-      checkSprinklerUnlock();
-      checkGreenhouseTeaser();
     }
 
     function renderPlantPanel(key) {
@@ -11987,16 +11977,6 @@
     function greenhouseAvailableForPurchase() {
       return !state.greenhouseUnlocked && state.stats.grown >= GREENHOUSE_UNLOCK_FLOWERS;
     }
-    // Flips the one-time teaser flag - same pattern and same reasoning as
-    // checkSprinklerUnlock, called from the same harvest sites (see
-    // harvestPlant/pickWild/harvestPottedPlant). The Shop itself is what
-    // shows the Greenhouse becoming available.
-    function checkGreenhouseTeaser() {
-      if (state.greenhouseTeaserAnnounced || !greenhouseAvailableForPurchase()) return;
-      state.greenhouseTeaserAnnounced = true;
-      saveState();
-    }
-
     // Slots [0, GREENHOUSE_STARTER_POTS) start clean and empty - yours from
     // the purchase, ready to plant right away. The rest start broken - see
     // brokenVariantFor/fixCostFor below for what each one looks like and
@@ -12386,8 +12366,6 @@
       updateHUD();
       updateCurrencyPill();
       vibrate(20);
-      checkSprinklerUnlock();
-      checkGreenhouseTeaser();
     }
     function extractPottedPlant(slotIndex) { harvestPottedPlant(slotIndex, 'extract'); }
     function sellPottedPlant(slotIndex) { harvestPottedPlant(slotIndex, 'sell'); }

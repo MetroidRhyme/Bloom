@@ -116,6 +116,45 @@ const h = require('./harness');
   r.check('save survives a reload', out.currency === 9191 && out.plants === 1, out);
   await h.lockGps(page);
 
+  // A save written by an older build carries two fields this one dropped
+  // (sprinklerUnlockAnnounced / greenhouseTeaserAnnounced - one-time toast
+  // latches whose toasts were removed in v2.37.0, leaving them read by
+  // nothing). Loading one must not lose anything else, and the field must
+  // simply not come back on the next write.
+  r.section('a save from before the dropped flags still loads');
+  await page.evaluate(() => {
+    var blob = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    blob.sprinklerUnlockAnnounced = true;
+    blob.greenhouseTeaserAnnounced = true;
+    blob.currency = 7373;
+    blob.stats = Object.assign({}, blob.stats || {}, { grown: 42 });
+    // Mark the blob's plant already credited, or backfillGrownCreditForBloomed
+    // legitimately bumps `grown` on load (it is in bloom and carries no
+    // grownCredited flag) and this check would be measuring that instead.
+    Object.keys(blob.plants || {}).forEach(function (k) { blob.plants[k].grownCredited = true; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(blob));
+    // The GPS lock just above queued a debounced lastSeenAt write; left
+    // pending it lands on top of the blob we just planted and this checks
+    // nothing. Same reasoning onResetSave gives for its own call.
+    cancelPendingSave();
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+  out = await page.evaluate(() => {
+    var loaded = { currency: state.currency, grown: state.stats.grown,
+                   plants: Object.keys(state.plants).length };
+    state.currency = state.currency; saveState(); flushSave();
+    var written = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    return { loaded: loaded,
+             stillWritten: ('sprinklerUnlockAnnounced' in written) || ('greenhouseTeaserAnnounced' in written),
+             writtenCurrency: written.currency, writtenGrown: written.stats && written.stats.grown };
+  });
+  r.check('nothing else in the old-shaped save is lost',
+    out.loaded.currency === 7373 && out.loaded.grown === 42 && out.loaded.plants === 1, out);
+  r.check('the dropped flags do not come back on the next write', out.stillWritten === false, out);
+  r.check('the rewritten save round trips', out.writtenCurrency === 7373 && out.writtenGrown === 42, out);
+  await h.lockGps(page);
+
   // ---- rune viewport virtualization ------------------------------------
   r.section('rune viewport virtualization');
   out = await page.evaluate(() => {
@@ -1398,6 +1437,52 @@ const h = require('./harness');
     r.check('...with exactly one coalesced render behind it', out.sellRendersAfterFlush === 1, out);
     r.check('...which tears the sold markers down', out.markersAfterSell === 0, out);
   }
+
+  // ---- runeWater pruning is narrow on purpose ----------------------------
+  r.section('rune watering cleanup');
+  out = await page.evaluate(() => {
+    closeModal();
+    state.plants = {}; state.wild = {}; state.weeds = {}; state.sprinklers = {};
+    state.growRunes = {}; state.runeWater = {}; rainRings = {}; lokiZones = {}; scryZones = {};
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var cq = here.q, cr = here.r, ringKey = cellKey(cq, cr), now = Date.now();
+    var sp = SPECIES.map(function (s) { return s.key; });
+    CELL_NEIGHBORS.forEach(function (d, i) {
+      var q = cq + d[0], r = cr + d[1], c = cellCenter(q, r);
+      state.plants[cellKey(q, r)] = { q: q, r: r, lat: c.lat, lng: c.lng, species: sp[i], color: 'blue',
+        stage: MAX_STAGE, plantedAt: now, lastWateredAt: now, readyAt: now + 1e9 };
+    });
+    recomputeRainRingsFull();
+    var ringComplete = !!rainRings[ringKey];
+
+    // Expired, but the ring still stands - must survive, or the rune panel
+    // loses the difference between "ran out" and "never watered".
+    state.runeWater[ringKey] = now - RUNE_ACTIVE_MS - 1000;
+    renderRainRings();
+    var keptExpiredOnLiveRing = state.runeWater[ringKey] !== undefined;
+
+    // Unexpired, but the ring is gone - must survive, so replanting a
+    // harvested spoke restores the rune's remaining time.
+    var goneKey = cellKey(cq + 50, cr + 50);
+    state.runeWater[goneKey] = now - 1000;
+    renderRainRings();
+    var keptUnexpiredOnDeadRing = state.runeWater[goneKey] !== undefined;
+
+    // Expired AND no ring - can never do anything again.
+    var deadKey = cellKey(cq + 60, cr + 60);
+    state.runeWater[deadKey] = now - RUNE_ACTIVE_MS - 1000;
+    renderRainRings();
+    var prunedDead = state.runeWater[deadKey] === undefined;
+
+    state.plants = {}; state.runeWater = {}; rainRings = {};
+    renderRainRings(); renderPlants();
+    return { ringComplete: ringComplete, keptExpiredOnLiveRing: keptExpiredOnLiveRing,
+             keptUnexpiredOnDeadRing: keptUnexpiredOnDeadRing, prunedDead: prunedDead };
+  });
+  r.check('the fixture ring completes', out.ringComplete === true, out);
+  r.check('an expired watering on a standing ring is kept', out.keptExpiredOnLiveRing === true, out);
+  r.check('an unexpired watering on a broken ring is kept', out.keptUnexpiredOnDeadRing === true, out);
+  r.check('an expired watering with no ring left is pruned', out.prunedDead === true, out);
 
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));

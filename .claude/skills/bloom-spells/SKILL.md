@@ -66,14 +66,22 @@ Tier 3 (Gold/signatures) is not yet claimed by any spell - the natural next
 step up, and the only tier where every flower is itself already a
 significant investment to grow.
 
-**Cross-spell interaction to know about:** a 2x2 block whose four flowers
-all happen to match (same species+color) and are tier-1 is *simultaneously*
-a valid GROW SPELL recipe. The grow spell fires unconditionally the moment
-such a block completes, consuming it before a Loki zone referencing the
-same tile could ever register. A deliberately mixed corner (any one of the
-four flowers differing) is immune. If you add a new tier-1 formation spell,
-it inherits this same risk - either warn about it in the comments (as Loki
-does) or move the new spell to a still-open tier.
+**Cross-spell interaction to know about:** GROW_TIER and LOKI_TIER are both
+1, so a 2x2 block could in principle satisfy both spells at once - and once
+did. It cannot any more: since v2.40.0 the two recipes are mutually
+exclusive *by construction*. `growBlockAt` requires exactly one shared
+color across four DIFFERENT species; `isCornerBlockOfTier` requires at
+least two different colors in the block. No block can be both, so the grow
+spell can no longer eat a completed Loki corner out from under it - which
+is what used to happen: it fired the instant such a block completed,
+consuming it before the zone referencing that tile could register. The
+CORNER ZONES banner comment in `index.html` says the same thing; keep the
+two in step if either rule is ever retuned.
+
+If you add a new formation spell on an already-claimed tier, that is the
+risk you inherit: work out whether its recipe can overlap the existing
+one's, and if it can, make the two exclusive by construction the way these
+now are rather than relying on which detection hook happens to run first.
 
 ## The CORNER ZONES foundation (shared by LOKI'S CONTROL and SCRY)
 
@@ -83,8 +91,11 @@ a side - so the detection/rendering is genuinely shared, not copy-pasted.
 Search `CORNER ZONES` for the section banner. The reusable pieces:
 
 - `isCornerBlockOfTier(q, r, tier)` - is the 2x2 anchored at (q,r) a
-  complete, grown, single-tier block? (Flowers don't need to match each
-  other - that's a GROW SPELL-only constraint.)
+  complete, grown, single-tier block with **at least two different colors**
+  in it? Species are free to repeat; only color diversity is required. That
+  "never monochrome" rule arrived in v2.40.0 and is half of what makes a
+  corner block and a grow-spell block mutually exclusive (see the tier
+  section above) - not merely a nicety.
 - `isZoneValidOfTier(qMin, rMin, qMax, rMax, tier)` - is this whole
   rectangle a valid zone (span limits + all four corners valid)?
 - `newZonesFromAnchorOfTier(aq, ar, tier)` - every rectangle this one
@@ -198,13 +209,22 @@ forget the others, which is exactly what happened building the grow rune:
   center tile, `growRuneAt(q, r)` (checking every `growAnchorsAround(q, r)`
   anchor, since a grow rune's registry key is only its own top-left corner
   but its footprint is all 4 tiles) for grow's 2x2. It has to be checked in
-  **three independent call sites**, not one: `map.on('click')` (bare tap),
+  **four independent call sites**, not one: `map.on('click')` (bare tap),
   `resolveSeedTap` (an equipped seed's tap - this one had NO rune awareness
   at all for either spell until it was added, meaning a seed could silently
   plant through and break an intact rain rune with a single tap, years
-  after the rain rune shipped), and `applyRangeSeedAction` (a dragged
+  after the rain rune shipped), `applyRangeSeedAction` (a dragged
   multi-tile sweep - already had its own rain-only check from a past fix,
-  easy to assume that covered every path when it didn't). `openRunePanel`
+  easy to assume that covered every path when it didn't), and `cellFree`
+  (the free-ground test `breedSpotFor` picks a bred seedling's tile from).
+  That last one is the trap: think "every path a SEED can land through" and
+  you will miss it, because breeding spends no seed - it is a *plant*
+  landing, not a seed being planted - and it was the last of the four to be
+  fixed, in v2.43.2. `breedSpotFor`'s fallback pool is every neighbour of
+  either parent, so a cross beside a finished rain ring dropped its seedling
+  straight onto the rune's center tile and destroyed the ring. Ask a new
+  spell "what are all the ways a plant object can come into existence on a
+  tile", not "where can the player plant". `openRunePanel`
   (also kind-dispatching, to `openRainRunePanel`/`openGrowRunePanel`) is
   the matching info-panel half - wire both from the same `runeAt` call so a
   tile that can't be planted on always explains why instead of silently
@@ -253,7 +273,7 @@ forget the others, which is exactly what happened building the grow rune:
     rune's own tile(s), most likely - ordinary zone corner flowers don't
     need this, they already occupy `state.plants`), extend `runeAt`/
     `openRunePanel` rather than adding a fourth parallel check - see the
-    Runes section's "three independent call sites" note.
+    Runes section's "four independent call sites" note.
 11. Test via the `bloom-playtest` skill - and specifically its own gotcha
     about routing growth through `waterPlant()` rather than raw
     `applyWatering()` when the test needs to exercise a call-site-hooked

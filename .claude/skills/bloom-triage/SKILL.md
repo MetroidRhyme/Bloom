@@ -168,7 +168,7 @@ working branch as it completes, one at a time:
 ```
 git merge --no-ff worktree-agent-<id> -m "Merge fix for issue #N: <summary>
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
 Merging incrementally as each agent finishes (rather than waiting for all

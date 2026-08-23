@@ -127,7 +127,7 @@ git commit -m "vX.Y.Z: <short summary>
 
 <body: what changed and why, plus what verification was run>
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude <noreply@anthropic.com>"
 git push
 ```
 

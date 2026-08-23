@@ -8,17 +8,18 @@ Emoji used for game visuals are written as JS `\u{...}` escapes (inside `<script
 
 ## Versioning
 
-Bump the version number on every change. It lives in `index.html` at the `#game-version` span (currently `v1.0.0`). Bump the patch number (third segment) for tweaks/fixes, minor for new features, major for large overhauls. Include the new version in the commit message.
+Bump the version number on every change. It lives in `index.html` at the `#game-version` span (currently `v2.43.5`). Bump the patch number (third segment) for tweaks/fixes, minor for new features, major for large overhauls. Include the new version in the commit message.
 
 ## App structure
 
-Everything - HTML, CSS, and JS - lives in the single `index.html` file, following the same backbone as [PorterGame](https://github.com/MetroidRhyme/PorterGame): Leaflet.js map, flat-top axial hex grid, `navigator.geolocation.watchPosition` for player tracking, and `localStorage` for persistence. Unlike Porter, Bloom's whole save is one JSON blob under `bloom_state_v1` rather than many individual keys - state is small (a dictionary of planted flowers plus a few stats), so a single-blob save is simpler and sufficient.
+Everything - HTML, CSS, and JS - lives in the single `index.html` file, following the same backbone as [PorterGame](https://github.com/MetroidRhyme/PorterGame): Leaflet.js map, a square grid axis-aligned with lat/lng (v1.x used a flat-top axial hex grid; v2.0 switched - see the CELL MATH section and the one-time `migrateGridKeys` re-key), polled `navigator.geolocation.getCurrentPosition` for player tracking (a `watchPosition` subscription keeps the GPS radio in a continuous high-accuracy session, which is one of the biggest battery costs on a walking game - see the adaptive backoff in the `bloom-perf` skill), and `localStorage` for persistence. Unlike Porter, Bloom's whole save is one JSON blob under `bloom_state_v1` rather than many individual keys - state is small (a dictionary of planted flowers plus a few stats), so a single-blob save is simpler and sufficient.
 
 Key pieces:
-- `state.plants` - dictionary keyed by `"q,r"` hex key, one entry per planted flower.
+- `state.plants` - dictionary keyed by `"q,r"` cell key, one entry per planted flower. `state.wild`, `state.weeds` and `state.sprinklers` are keyed the same way.
 - `recomputePlant(p, now)` - the growth engine. Fully timestamp-derived (not tick-accumulated) so offline time (the whole point of a walking game) is handled correctly. Read the comment above it before changing timing constants.
-- `PLANT_RANGE_HEX`, `WATER_DURATION_MS`, `GRACE_MS`, `DEATH_MS`, `GROWTH_THRESHOLDS` - all the pacing knobs live at the top of the script.
+- `PLANT_RANGE`, `WATER_DURATION_MS`, `STAGE_READY_MS`, `MAX_STAGE` - the pacing knobs, all at the top of the script alongside the spell constants (`RAIN_RING_RADIUS`, `GROW_RUNE_MS`, `ZONE_MIN_SPAN`, and friends). Growth is advanced by *watering*, not by elapsed time.
 - `buildPlantVisual()` - shared by both the map marker icon and the big panel preview; returns rendered box dimensions alongside the HTML so callers can size their container to match.
+- `tests/` - the Playwright regression suite. `./tests/setup.sh` once, then `./tests/run-all.sh`; see the `bloom-ship` and `bloom-playtest` skills.
 
 ## Workflow
 

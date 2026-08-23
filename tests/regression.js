@@ -1236,6 +1236,97 @@ const h = require('./harness');
   r.check('the tile just south of live range is not painted as grass', southOfRangeAlpha === 0, { southOfRangeAlpha });
   r.check('the southmost tile still inside live range does paint as grass', southmostInRangeAlpha > 0, { southmostInRangeAlpha });
 
+  // ---- localDayKey() is memoized; the memo must expire at real midnight --
+  // inRange() calls localDayKey() and renderGridMesh() calls inRange() once
+  // per cell, so the no-argument form caches. It caches against the exact ms
+  // of the next LOCAL midnight rather than a timer, because a cache that can
+  // answer "yesterday" for even a moment after the rollover would defeat the
+  // whole reason state.todayAccessibleDay is re-checked on every call.
+  const hasDayKeyMemo = await page.evaluate(() => typeof dayKeyOf === 'function');
+  r.section('localDayKey memo', hasDayKeyMemo ? '' : '(SKIPPED - not in this build)');
+  if (hasDayKeyMemo) {
+    out = await page.evaluate(() => {
+      var now = new Date();
+      var expected = dayKeyOf(now);
+      var live = localDayKey();
+      // The explicit-argument form must bypass the cache entirely - a date on
+      // a different day has to come back as that day, not as today's cached
+      // answer.
+      var other = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 40);
+      var otherKey = localDayKey(other);
+      var stillToday = localDayKey();
+      // The cache boundary is a real local midnight: all time fields zero,
+      // and somewhere in the next 24h.
+      var edge = new Date(_dayKeyUntil);
+      var edgeIsMidnight = edge.getHours() === 0 && edge.getMinutes() === 0 &&
+        edge.getSeconds() === 0 && edge.getMilliseconds() === 0;
+      var edgeAhead = _dayKeyUntil > Date.now() && _dayKeyUntil - Date.now() <= 24 * 3600 * 1000;
+      // Force it to recompute from scratch - same answer.
+      _dayKey = null; _dayKeyUntil = 0;
+      var recomputed = localDayKey();
+      return { expected: expected, live: live, otherKey: otherKey, otherExpected: dayKeyOf(other),
+               stillToday: stillToday, edgeIsMidnight: edgeIsMidnight, edgeAhead: edgeAhead,
+               recomputed: recomputed };
+    });
+    r.check('localDayKey() still returns today', out.live === out.expected, out);
+    r.check('an explicit date argument bypasses the memo', out.otherKey === out.otherExpected, out);
+    r.check('...and does not poison it', out.stillToday === out.expected, out);
+    r.check('the memo expires at a real local midnight', out.edgeIsMidnight && out.edgeAhead, out);
+    r.check('a cold recompute agrees with the cached answer', out.recomputed === out.expected, out);
+  }
+
+  // ---- sprinkler markers skip the rebuild when nothing changed -----------
+  // renderPlants/renderWild/renderWeeds all fingerprint their icons and skip
+  // the DOM swap when it has not moved; renderSprinklers was simply missing
+  // that, so it rebuilt every visible sprinkler's SVG on every pan and zoom.
+  r.section('sprinkler icon rebuild is fingerprinted');
+  out = await page.evaluate(async () => {
+    closeModal();
+    state.plants = {}; state.wild = {}; state.weeds = {}; state.sprinklers = {};
+    state.growRunes = {}; rainRings = {}; lokiZones = {}; scryZones = {};
+    Object.keys(sprinklerMarkers).forEach(function (k) {
+      map.removeLayer(sprinklerMarkers[k]); delete sprinklerMarkers[k];
+    });
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var sq = here.q, sr = here.r, c = cellCenter(sq, sr);
+    state.sprinklers[cellKey(sq, sr)] = { q: sq, r: sr, lat: c.lat, lng: c.lng, placedAt: Date.now() };
+
+    var builds = 0, real = makeSprinklerIcon;
+    window.makeSprinklerIcon = function () { builds++; return real.apply(null, arguments); };
+
+    renderSprinklers();
+    var afterFirst = builds;            // 1 - the marker did not exist yet
+    renderSprinklers();
+    renderSprinklers();
+    var afterRepeats = builds;          // still 1 - nothing changed
+
+    // Break it: a live grow rune on the neighbouring tile.
+    state.growRunes[cellKey(sq + 1, sr)] = { q: sq + 1, r: sr, activatedAt: Date.now() };
+    renderSprinklers();
+    var afterBreak = builds;            // 2 - the look genuinely changed
+    renderSprinklers();
+    var afterBreakRepeat = builds;      // still 2
+
+    // A zoom step changes plantIconBase(), so the icon must rebuild.
+    await new Promise(function (res) {
+      var z = map.getZoom() === 18 ? 17 : 18;
+      map.once('zoomend', res); map.setZoom(z, { animate: false });
+    });
+    renderSprinklers();
+    var afterZoom = builds;
+
+    window.makeSprinklerIcon = real;
+    state.growRunes = {}; state.sprinklers = {};
+    renderSprinklers();
+    return { afterFirst: afterFirst, afterRepeats: afterRepeats, afterBreak: afterBreak,
+             afterBreakRepeat: afterBreakRepeat, afterZoom: afterZoom };
+  });
+  r.check('the first render builds the icon', out.afterFirst === 1, out);
+  r.check('repeat renders with nothing changed rebuild nothing', out.afterRepeats === 1, out);
+  r.check('breaking the sprinkler does rebuild it', out.afterBreak === 2, out);
+  r.check('...and then stops rebuilding again', out.afterBreakRepeat === 2, out);
+  r.check('a zoom step rebuilds it (icon size is part of the fingerprint)', out.afterZoom === 3, out);
+
   r.section('console cleanliness');
   r.check('no page or console errors', errors.length === 0, errors.slice(0, 5));
 

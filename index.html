@@ -1526,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.43.2</span>
+      <span id="game-version">v2.43.3</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1921,6 +1921,11 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.43.3', changes: [
+        "Smoother panning and zooming, especially once you have sprinklers " +
+          "out - the map now does a lot less redrawing work to paint the " +
+          "exact same picture. Nothing looks any different."
+      ] },
       { version: 'v2.43.2', changes: [
         "Fixed a cross being able to drop its seedling right on top of a " +
           "Rain Ring's rune, which quietly destroyed the whole ring - a " +
@@ -2503,9 +2508,20 @@
                         { n: 3, rx: 11, ry: 21, r: 23, rot: 60, tip: 'round', deep: true }],
                  center: { r: 5, stamen: true } } }
     ];
+    // Lookup indexes, built once. SPECIES and COLORS are static after this
+    // script's own top-level evaluation - resolveColors() below mutates
+    // entries in place, but nothing ever adds or removes one - so scanning
+    // the array on every lookup was pure waste, and these are hot:
+    // speciesFor/colorFor run for every marker built (speciesFor/paletteOf
+    // in makePlantIcon), colorFor again for every spell's own tier check
+    // (colorFor(colorOfPlant(p)).tier), and the rank lookups below run
+    // INSIDE sort comparators. Null-prototype objects so a corrupted save
+    // carrying a species/color id like "constructor" resolves to the
+    // fallback rather than to something off Object.prototype.
+    var SPECIES_BY_KEY = Object.create(null), SPECIES_RANK = Object.create(null);
+    SPECIES.forEach(function (s, i) { SPECIES_BY_KEY[s.key] = s; SPECIES_RANK[s.key] = i; });
     function speciesFor(key) {
-      for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return SPECIES[i];
-      return SPECIES[0];
+      return SPECIES_BY_KEY[key] || SPECIES[0];
     }
 
     // ---- Colors ----------------------------------------------------------
@@ -2747,9 +2763,13 @@
       });
     })();
 
+    // See the SPECIES_BY_KEY comment above for why these are indexed rather
+    // than scanned. Built here, below resolveColors(), purely for reading
+    // order - the entries are the same objects either way.
+    var COLORS_BY_ID = Object.create(null), COLOR_RANK = Object.create(null);
+    COLORS.forEach(function (c, i) { COLORS_BY_ID[c.id] = c; COLOR_RANK[c.id] = i; });
     function colorFor(id) {
-      for (var i = 0; i < COLORS.length; i++) if (COLORS[i].id === id) return COLORS[i];
-      return COLORS[0];
+      return COLORS_BY_ID[id] || COLORS[0];
     }
     // The color a flower should be treated as when a save (or a caller)
     // predates colors entirely.
@@ -2783,13 +2803,15 @@
     }
     // Colors sort by breeding tier so rarer things sink to the bottom of a
     // list rather than scattering through it alphabetically.
+    // Explicit undefined checks, not `|| 99` - rank 0 is a real rank (White,
+    // Sunflower) and would otherwise be read as "unknown".
     function colorRank(id) {
-      for (var i = 0; i < COLORS.length; i++) if (COLORS[i].id === id) return i;
-      return 99;
+      var i = COLOR_RANK[id];
+      return i === undefined ? 99 : i;
     }
     function speciesRank(key) {
-      for (var i = 0; i < SPECIES.length; i++) if (SPECIES[i].key === key) return i;
-      return 99;
+      var i = SPECIES_RANK[key];
+      return i === undefined ? 99 : i;
     }
     function sortVariants(keys) {
       return keys.sort(function (a, b) {
@@ -5690,12 +5712,20 @@
     // A tile could only ever be inside two zones at once if two separate
     // 16-flower structures overlapped, which nothing here forbids, so this
     // checks every zone rather than assuming at most one match.
+    // for-in rather than Object.keys().some(): this is called per cell from
+    // liveControl() (via renderGridMesh's own per-cell inRange), and
+    // Object.keys allocates a fresh array every time even for the empty
+    // registry almost every player has. for-in allocates nothing and exits
+    // immediately when there are no zones at all. Same iteration order and
+    // same result - these registries are plain object literals with string
+    // keys and nothing in this file extends Object.prototype.
     function isInActiveZoneOf(registry, q, r, now) {
-      return Object.keys(registry).some(function (zk) {
+      for (var zk in registry) {
         var z = registry[zk];
-        if (q < z.qMin || q > z.qMax || r < z.rMin || r > z.rMax) return false;
-        return isZoneActive(z, now);
-      });
+        if (q < z.qMin || q > z.qMax || r < z.rMin || r > z.rMax) continue;
+        if (isZoneActive(z, now)) return true;
+      }
+      return false;
     }
 
     // The whole rectangle's outer boundary (half a tile of padding beyond
@@ -5841,11 +5871,14 @@
     //  plant" - one tile of buffer around whatever ground the spell itself
     //  occupies.
     // ---------------------------------------------------------------------
+    // Same no-allocation for-in as isInActiveZoneOf above, for the same
+    // reason - sprinklerNearMagic runs this twice per sprinkler per render.
     function isNearZoneMagic(registry, q, r) {
-      return Object.keys(registry).some(function (zk) {
+      for (var zk in registry) {
         var z = registry[zk];
-        return q >= z.qMin - 1 && q <= z.qMax + 1 && r >= z.rMin - 1 && r <= z.rMax + 1;
-      });
+        if (q >= z.qMin - 1 && q <= z.qMax + 1 && r >= z.rMin - 1 && r <= z.rMax + 1) return true;
+      }
+      return false;
     }
     function sprinklerNearMagic(q, r) {
       if (runeAt(q, r)) return true;
@@ -5862,10 +5895,36 @@
     // ---------------------------------------------------------------------
     // Local calendar day, not UTC - "the first time you open it each day"
     // should mean the player's day, so the roll-over happens at their midnight.
-    function localDayKey(d) {
-      d = d || new Date();
+    //
+    // The no-argument form is memoized, because inRange() calls it and
+    // renderGridMesh() calls inRange() once per cell - up to GRID_MAX_CELLS
+    // times per redraw, on every pan, zoom, viewreset and resize. Building a
+    // fresh Date plus three string concats per cell, for an answer that
+    // changes once a day, was most of that loop's cost.
+    //
+    // Cached against the exact millisecond of the next LOCAL midnight rather
+    // than against a timer, so it can never be stale by even one tick: the
+    // rollover invalidates it precisely, instead of the cache answering
+    // "yesterday" for a moment after the day has actually turned. That
+    // matters - state.todayAccessibleDay is compared against this on every
+    // inRange() call specifically so a pre-midnight set is never mistaken
+    // for today's (see inRange and the bloom-range skill's day-rollover
+    // trap). new Date(y, m, day + 1) normalizes month/year rollover on its
+    // own and is constructed in local time, so it lands on real local
+    // midnight across a DST change too.
+    function dayKeyOf(d) {
       var m = d.getMonth() + 1, day = d.getDate();
       return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+    }
+    var _dayKey = null, _dayKeyUntil = 0;
+    function localDayKey(d) {
+      if (d) return dayKeyOf(d);
+      var now = Date.now();
+      if (_dayKey !== null && now < _dayKeyUntil) return _dayKey;
+      var t = new Date();
+      _dayKeyUntil = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1).getTime();
+      _dayKey = dayKeyOf(t);
+      return _dayKey;
     }
 
     // How far through its short life a wild flower is. Entirely derived from
@@ -5954,6 +6013,27 @@
       }
     }
 
+    // The player's own tile, derived from state.userPos exactly the way
+    // liveControl always did it - just not re-derived for every one of the
+    // ~3000 cells renderGridMesh tests per redraw. Keyed on the identity of
+    // the userPos object (onLocationUpdate assigns a brand-new one on every
+    // fix, so identity is an exact "has the position changed" test) AND on
+    // CELL_LNG_DEG, which onGpsLocked rewrites once at first lock - without
+    // that second half the very first lock would leave a cell cached against
+    // the uncorrected longitude scale. Deliberately NOT reusing
+    // userCellQ/userCellR: those are only written on an actual tile change,
+    // and coupling range checks to them would be exactly the kind of quiet
+    // drift between the three range pieces the bloom-range skill warns about.
+    var _userCellPos = null, _userCellLng = 0, _userCell = null;
+    function userCell() {
+      if (_userCellPos !== state.userPos || _userCellLng !== CELL_LNG_DEG) {
+        _userCellPos = state.userPos;
+        _userCellLng = CELL_LNG_DEG;
+        _userCell = state.userPos ? latLngToCell(state.userPos.lat, state.userPos.lng) : null;
+      }
+      return _userCell;
+    }
+
     // True if (q, r) is under the player's control RIGHT NOW - live
     // PLANT_RANGE around their current GPS position, or a currently active
     // Scry/Loki extension - without crediting the "was in range at some
@@ -5967,10 +6047,8 @@
       // plant/water/harvest/sell/fertilize/pick/sprinkler all work anywhere
       // on the map, not just near the player's live position.
       if (state.cheatMode) return true;
-      if (state.userPos) {
-        var uh = latLngToCell(state.userPos.lat, state.userPos.lng);
-        if (cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
-      }
+      var uh = userCell();
+      if (uh && cellDist(uh.q, uh.r, q, r) <= PLANT_RANGE) return true;
       // SCRY: unlike Loki, this needs no prior visit or grant of any kind,
       // only that the zone covering (q, r) is structurally complete and
       // unwilted right now (see the CORNER ZONES section, below the GROW
@@ -5983,8 +6061,13 @@
       // immediately, it doesn't ride out the remainder of an already-
       // stamped window (see markAccessibleToday and isInActiveLokiZone,
       // below the GROW SPELL section).
+      // Zone check first, cell key second - reversed from how this reads in
+      // prose, but both halves are pure and the registry is empty for almost
+      // every player, so leading with it skips building a cell-key string
+      // per cell in the common case (see renderGridMesh's per-cell loop).
+      if (!isInActiveLokiZone(q, r, now)) return false;
       var until = state.lokiAccess[cellKey(q, r)];
-      return !!until && until > now && isInActiveLokiZone(q, r, now);
+      return !!until && until > now;
     }
 
     // The one gate every plant/water/harvest/sell/fertilize/pick/sprinkler
@@ -7473,14 +7556,32 @@
     var sprinklerMarkers = {};
     function renderSprinklers() {
       var seen = {};
+      var px = plantIconBase();
+      // Written unconditionally, before anything below can skip a rebuild -
+      // same bookkeeping renderRainRings/renderGrowRunes do, and for the same
+      // reason (the shared zoom-rescale baseline; see rescalePlantIcons).
+      _iconBuiltPx = px;
       var vc = viewportCellBounds(MARKER_VIEWPORT_PAD);
       Object.keys(state.sprinklers).forEach(function (key) {
         var s = state.sprinklers[key];
         if (!inMarkerViewport(vc, s.q, s.r)) return;
         seen[key] = true;
-        var icon = makeSprinklerIcon(sprinklerNearMagic(s.q, s.r));
-        if (sprinklerMarkers[key]) sprinklerMarkers[key].setIcon(icon);
-        else sprinklerMarkers[key] = L.marker([s.lat, s.lng], { icon: icon, interactive: false, zIndexOffset: 95 }).addTo(map);
+        // The same _iconKey fingerprint renderPlants/renderWild/renderWeeds
+        // already use, which this one was simply missing: it rebuilt the SVG
+        // and forced a real DOM node swap for every visible sprinkler on
+        // every pan and zoom, and each rebuild re-ran sprinklerNearMagic
+        // (nine runeAt calls plus two registry scans) on top. A sprinkler's
+        // look depends on exactly two things - its size and whether it is
+        // broken - so those two are the complete key.
+        var broken = sprinklerNearMagic(s.q, s.r);
+        var iconKey = px + '|' + broken;
+        var m = sprinklerMarkers[key];
+        if (m) {
+          if (m._iconKey !== iconKey) { m.setIcon(makeSprinklerIcon(broken)); m._iconKey = iconKey; }
+        } else {
+          m = sprinklerMarkers[key] = L.marker([s.lat, s.lng], { icon: makeSprinklerIcon(broken), interactive: false, zIndexOffset: 95 }).addTo(map);
+          m._iconKey = iconKey;
+        }
       });
       Object.keys(sprinklerMarkers).forEach(function (key) {
         if (!seen[key]) { map.removeLayer(sprinklerMarkers[key]); delete sprinklerMarkers[key]; }

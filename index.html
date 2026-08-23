@@ -1526,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.43.1</span>
+      <span id="game-version">v2.43.2</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1921,6 +1921,12 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.43.2', changes: [
+        "Fixed a cross being able to drop its seedling right on top of a " +
+          "Rain Ring's rune, which quietly destroyed the whole ring - a " +
+          "seedling now comes up on genuinely free ground only, never on a " +
+          "rune's own tile or on a weed."
+      ] },
       { version: 'v2.43.1', changes: [
         "Fixed the Rain Ring's rain effect looking clumped in one spot - " +
           "the droplets are now spread evenly across the whole block " +
@@ -9969,11 +9975,34 @@
     function neighborsOf(q, r) {
       return CELL_NEIGHBORS.map(function (d) { return { q: q + d[0], r: r + d[1] }; });
     }
-    // Free means nothing of yours, no wild flower, and no placed sprinkler -
-    // a bred seedling must never land on top of something already there.
+    // Free means nothing of yours, no wild flower, no placed sprinkler, no
+    // weed, and no rune ground - a bred seedling must never land on top of
+    // something already there.
+    //
+    // The rune half is the one that isn't obvious, because a rune's own
+    // ground is deliberately EMPTY in state.plants (see isRainRingComplete's
+    // "center tile must be completely empty" rule and resolveGrowBlock
+    // deleting its four corners), so it looks exactly like bare ground to a
+    // plain occupancy check. Every path a SEED can land through already
+    // checks runeAt for this reason - map.on('click'), resolveSeedTap and
+    // applyRangeSeedAction, the three call sites the bloom-spells skill
+    // lists. Breeding is a fourth path a plant can land through, and it was
+    // never wired up: breedSpotFor's fallback pool is every neighbour of
+    // either parent, so a cross between a ring spoke and a same-species
+    // neighbour outside the ring could drop a seedling straight onto that
+    // ring's center tile whenever no shared tile was free - which is exactly
+    // the dense garden a completed ring implies. doBreed's own
+    // refreshRainRingCandidates then tore the finished sixteen-flower spell
+    // down, with no warning and no way to see what had happened.
+    //
+    // Weeds are the same class of gap one step milder: a weed lives in its
+    // own dictionary, so a seedling could land on top of one and leave it
+    // rendered but unpluckable underneath the flower (plants outrank weeds
+    // in every tap dispatch).
     function cellFree(q, r) {
       var k = cellKey(q, r);
-      return !state.plants[k] && !state.wild[k] && !state.sprinklers[k];
+      return !state.plants[k] && !state.wild[k] && !state.sprinklers[k] &&
+        !state.weeds[k] && !runeAt(q, r);
     }
     function colorOfPlant(p) { return p.color || baseColorOf(p.species); }
 

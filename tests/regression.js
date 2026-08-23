@@ -619,6 +619,99 @@ const h = require('./harness');
   r.check('a stale wild flower on the center also blocks the ring', out.notCompleteWithStaleWild === true, out);
   r.check('...and it vanishing on its own (tickPlants) completes the ring too', out.completeAfterVanish === true, out);
 
+  // ---- a bred seedling must never land on rune ground ---------------------
+  // Every path a SEED can land through checks runeAt (map.on('click'),
+  // resolveSeedTap, applyRangeSeedAction). Breeding is a fourth path a plant
+  // can land through, and cellFree() had no rune awareness at all - so a
+  // cross next to a finished Rain Ring could drop its seedling straight onto
+  // the rune's own (deliberately empty) center tile and destroy the ring.
+  r.section('a bred seedling never lands on rune ground');
+  out = await page.evaluate(() => {
+    closeModal();
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var cq = here.q, cr = here.r;
+    var ringKey = cellKey(cq, cr);
+    var now = Date.now();
+    var sp = SPECIES.map(function (s) { return s.key; });
+    function put(q, r, species, color, stage) {
+      var c = cellCenter(q, r);
+      state.plants[cellKey(q, r)] = {
+        q: q, r: r, lat: c.lat, lng: c.lng, species: species, color: color,
+        stage: stage, plantedAt: now, lastWateredAt: now, readyAt: now + 1e9,
+        reachedBloom: true, reachedFlourish: true, grownCredited: true
+      };
+    }
+    function reset() {
+      state.plants = {}; state.wild = {}; state.sprinklers = {}; state.weeds = {};
+      state.growRunes = {}; rainRings = {}; lokiZones = {}; scryZones = {};
+    }
+
+    // A complete Rain Ring: eight blue clusters, one of each species, around
+    // an empty center.
+    reset();
+    CELL_NEIGHBORS.forEach(function (d, i) { put(cq + d[0], cr + d[1], sp[i], 'blue', MAX_STAGE); });
+    recomputeRainRingsFull();
+    var ringComplete = !!rainRings[ringKey];
+
+    // cellFree must already refuse the rune's own tile, before any breeding
+    // is involved - that is the whole fix in one call.
+    var centerReadsFree = cellFree(cq, cr);
+
+    // Now force breedSpotFor down its FALLBACK path (any neighbour of either
+    // parent) by leaving the ring's center as the only free tile in it.
+    // Parents: the east spoke, and a same-species flower one further east.
+    var aq = cq + 1, ar = cr;
+    var bq = cq + 2, br = cr;
+    put(bq, br, sp[0], 'blue', MAX_STAGE);
+    // Every other neighbour of either parent, blocked with an inert plant so
+    // the only cellFree candidate left in the pool is the rune's center.
+    [[cq + 2, cr + 1], [cq + 2, cr - 1], [cq + 3, cr - 1], [cq + 3, cr], [cq + 3, cr + 1]]
+      .forEach(function (t) { put(t[0], t[1], 'tulip', 'red', 0); });
+
+    var spot = breedSpotFor(state.plants[cellKey(aq, ar)], state.plants[cellKey(bq, br)]);
+    var spotIsRune = !!spot && spot.q === cq && spot.r === cr;
+
+    state.fertilizer = 5;
+    doBreed(cellKey(aq, ar), cellKey(bq, br));
+    var plantedOnRune = !!state.plants[ringKey];
+    var ringSurvived = !!rainRings[ringKey];
+
+    // A live grow rune's own 2x2 patch is the same story - its four tiles are
+    // deleted from state.plants when the spell resolves, so they look bare.
+    reset();
+    var gq = cq + 20, gr = cr + 20;
+    state.growRunes[cellKey(gq, gr)] = { q: gq, r: gr, activatedAt: now };
+    var growTiles = [[gq, gr], [gq + 1, gr], [gq, gr + 1], [gq + 1, gr + 1]];
+    var growGroundFree = growTiles.some(function (t) { return cellFree(t[0], t[1]); });
+
+    // And a weed tile: a seedling on top of one leaves it rendered but
+    // unpluckable underneath the flower.
+    reset();
+    var wq = cq + 30, wr = cr + 30, wc = cellCenter(wq, wr);
+    state.weeds[cellKey(wq, wr)] = { q: wq, r: wr, lat: wc.lat, lng: wc.lng, spawnedAt: now };
+    var weedGroundFree = cellFree(wq, wr);
+
+    // Ordinary empty ground is of course still free - the fix must not have
+    // made cellFree refuse everything.
+    var bareGroundFree = cellFree(cq + 40, cr + 40);
+
+    reset();
+    return {
+      ringComplete: ringComplete, centerReadsFree: centerReadsFree,
+      spotIsRune: spotIsRune, spot: spot, plantedOnRune: plantedOnRune,
+      ringSurvived: ringSurvived, growGroundFree: growGroundFree,
+      weedGroundFree: weedGroundFree, bareGroundFree: bareGroundFree
+    };
+  });
+  r.check('the fixture ring actually completes', out.ringComplete === true, out);
+  r.check("cellFree refuses a rain rune's center tile", out.centerReadsFree === false, out);
+  r.check('breedSpotFor never returns rune ground', out.spotIsRune === false, out);
+  r.check('a cross cannot plant a seedling on the rune', out.plantedOnRune === false, out);
+  r.check('the ring survives the cross', out.ringSurvived === true, out);
+  r.check("cellFree refuses an active grow rune's 2x2", out.growGroundFree === false, out);
+  r.check('cellFree refuses a weed tile', out.weedGroundFree === false, out);
+  r.check('cellFree still allows genuinely bare ground', out.bareGroundFree === true, out);
+
   // ---- Rain Ring: the rain effect thins out in 3 stages -------------------
   const hasRainEffect = await page.evaluate(() => typeof rainRuneStage === 'function');
   r.section('Rain Ring rain effect', hasRainEffect ? '' : '(SKIPPED - not in this build)');

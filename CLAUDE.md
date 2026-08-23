@@ -8,7 +8,9 @@ Emoji used for game visuals are written as JS `\u{...}` escapes (inside `<script
 
 ## Versioning
 
-Bump the version number on every change. It lives in `index.html` at the `#game-version` span (currently `v2.43.5`). Bump the patch number (third segment) for tweaks/fixes, minor for new features, major for large overhauls. Include the new version in the commit message.
+Bump the version number on every change to `index.html`. It lives in that file at the `#game-version` span (currently `v2.43.5`). Bump the patch number (third segment) for tweaks/fixes, minor for new features, major for large overhauls. Include the new version in the commit message, and add the matching `CHANGELOG` entry in the same commit (see the `bloom-ship` skill).
+
+A commit that touches **no** game file - only `CLAUDE.md`, `.claude/skills/*`, `tests/*` or `README.md` - takes no version bump. The rule exists to keep `#game-version` in step with the `CHANGELOG` array the in-game "What's New" popup reads off it, so a bump with nothing player-facing behind it just puts an empty or filler entry in front of players. If a docs-only pass turns out to need a one-line comment fix inside `index.html` too, fold that into whichever real change ships alongside it rather than bumping for a comment.
 
 ## App structure
 

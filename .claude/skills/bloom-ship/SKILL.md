@@ -84,6 +84,15 @@ to assert before today.
 
 ## 4. Version bump
 
+**Docs-only commits skip steps 4-6 entirely.** If the change touches no
+game file - only `CLAUDE.md`, this or another skill, `tests/*` or
+`README.md` - there is no bump and no changelog entry, because there is
+nothing player-facing for the "What's New" popup to show and a filler entry
+is worse than none. (Steps 1-3 still apply to anything under `tests/`.) If
+a docs pass also wants a one-line comment fix inside `index.html`, fold
+that into whichever real change ships alongside it rather than bumping the
+version for a comment. Everything below is for a real `index.html` change.
+
 Bump `<span id="game-version">` near the top of `index.html`
 (search for `id="game-version"`). Patch (third segment) for tweaks/fixes,
 minor for new features/capabilities, major for large overhauls. This

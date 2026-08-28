@@ -124,7 +124,7 @@ equivalents) immediately below the CORNER ZONES section for the ~10-line
 pattern to copy: a registry var, three one-line wrapper functions, a style
 function, and a render function. The *effect* (what being "in an active
 zone" actually does) is always spell-specific and lives outside this
-section - Loki's is in `markAccessibleToday`/`inRange` (extends
+section - Loki's is in `markTileControl`/`inRange` (extends
 `state.lokiAccess` timestamps), Scry's is a single unconditional check
 added to `inRange` directly, with no persisted state at all.
 

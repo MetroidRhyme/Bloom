@@ -56,7 +56,7 @@ function row(label, value, unit) {
     out.push(bench('tickPlants()', tickPlants, 5));
     out.push(bench('renderPlants()', renderPlants, 20));
     out.push(bench('renderGridMesh()', renderGridMesh, 20));
-    out.push(bench('markAccessibleToday()', function () { markAccessibleToday(here.q, here.r); }, 20));
+    out.push(bench('markTileControl()', function () { markTileControl(here.q, here.r); }, 20));
     out.push(bench('sortedPlantKeys()', sortedPlantKeys, 20));
     out.push(bench('onLocationUpdate() [same tile]', function () {
       onLocationUpdate({ coords: { latitude: state.userPos.lat, longitude: state.userPos.lng, accuracy: 5 } });

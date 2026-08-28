@@ -1173,20 +1173,20 @@ const h = require('./harness');
   r.check('grassTuftPick always picks four or five tufts', out.validCount === true, out);
   r.check('grassTuftPick varies from one tile to the next', out.differsByTile === true, out);
 
-  // ---- grid mesh grass tracks the whole day's walk, resets at midnight ---
+  // ---- grid mesh grass tracks the whole walk, decays per tile after 24h --
   // Reported symptom (of the OPPOSITE kind from what shipped in v2.39.7):
-  // ground the player had actually walked through earlier today - and which
-  // still grants real plant/water/harvest access all day, per inRange() -
-  // stopped reading as grass the moment they walked on, even though nothing
-  // about their access to it had changed. The "memory" was real in state
-  // (todayAccessible) but invisible on the map. Fix: renderGridMesh gates
+  // ground the player had actually walked through recently - and which
+  // still grants real plant/water/harvest access, per inRange() - stopped
+  // reading as grass the moment they walked on, even though nothing about
+  // their access to it had changed. The "memory" was real in state
+  // (state.tileControl) but invisible on the map. Fix: renderGridMesh gates
   // each tile on the same inRange() every gameplay action already goes
-  // through (live PLANT_RANGE/Scry/Loki OR anywhere walked within range
-  // earlier today), not just the live-position half of it (liveControl) -
-  // so grass always matches what's actually usable, and only shrinks back
-  // at a real local-midnight rollover (state.todayAccessible resetting),
-  // never just because the player moved on.
-  r.section("grid mesh grass tracks the whole day's walk, resets at midnight");
+  // through (live PLANT_RANGE/Scry/Loki OR anywhere walked within the last
+  // TILE_CONTROL_MS - see markTileControl), not just the live-position half
+  // of it (liveControl) - so grass always matches what's actually usable,
+  // and a tile only drops out once its own TILE_CONTROL_MS actually runs
+  // out (see inRange), never just because the player moved on.
+  r.section("grid mesh grass tracks the whole walk, decays per tile after 24h");
   const settleRaf = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(function () { requestAnimationFrame(resolve); })));
   // The previous section leaves the map at whatever zoom its own resize
   // check last toggled to (18 or 19) - a higher zoom shows fewer real tiles
@@ -1218,10 +1218,22 @@ const h = require('./harness');
     var x = Math.round((p.x - b.min.x) * scale), y = Math.round((p.y - b.min.y) * scale);
     return gridRenderer._ctx.getImageData(x, y, 1, 1).data[3];
   }, [dq, dr]);
+  // Same pixel, RGB instead of alpha - used below to confirm a decaying
+  // tile actually paints a different color, not just the same green again.
+  const cellPaintedRgb = (dq, dr) => page.evaluate(([dq, dr]) => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    var c = cellCenter(here.q + dq, here.r + dr);
+    var p = map.latLngToLayerPoint([c.lat, c.lng]);
+    var b = gridRenderer._bounds, canvas = gridRenderer._ctx.canvas;
+    var scale = canvas.width / b.getSize().x;
+    var x = Math.round((p.x - b.min.x) * scale), y = Math.round((p.y - b.min.y) * scale);
+    var d = gridRenderer._ctx.getImageData(x, y, 1, 1).data;
+    return [d[0], d[1], d[2]];
+  }, [dq, dr]);
 
   await page.evaluate(() => {
     var here = latLngToCell(state.userPos.lat, state.userPos.lng);
-    for (var i = -6; i <= 6; i++) markAccessibleToday(here.q + i, here.r);
+    for (var i = -6; i <= 6; i++) markTileControl(here.q + i, here.r);
     scheduleGridRedraw();
   });
   await settleRaf();
@@ -1233,28 +1245,68 @@ const h = require('./harness');
   const farAlpha = await cellPaintedAlpha(6, 0);
   const nearAlpha = await cellPaintedAlpha(1, 0); // inside live PLANT_RANGE
 
-  r.check('a tile walked past earlier today counts as in range (real access)', farInRange === true, { farInRange });
+  r.check('a tile walked past recently counts as in range (real access)', farInRange === true, { farInRange });
   r.check('and that same tile DOES paint as grass, even though it is out of live range', farAlpha > 0, { farAlpha });
   r.check('a tile still inside live range also paints as grass', nearAlpha > 0, { nearAlpha });
 
-  // A real local-midnight rollover - not just moving away - is what should
-  // make the remembered strip stop reading as grass. Mirrors the "offline
+  // A tile's own TILE_CONTROL_MS running out - not just moving away - is
+  // what should make it stop reading as grass. Mirrors the "offline
   // catch-up on tab resume" handler's own scheduleGridRedraw call (see
   // v2.39.5) so the mesh actually repaints, the same way it would for a
-  // player who backgrounded the tab overnight.
-  await page.evaluate(() => { state.todayAccessibleDay = 'not-today'; scheduleGridRedraw(); });
+  // player who backgrounded the tab long enough for a walked tile's own
+  // timer to lapse.
+  await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    state.tileControl[cellKey(here.q + 6, here.r)] = Date.now() - 1; // already expired
+    scheduleGridRedraw();
+  });
   await settleRaf();
 
-  const afterRolloverInRange = await page.evaluate(() => {
+  const afterExpiryInRange = await page.evaluate(() => {
     var here = latLngToCell(state.userPos.lat, state.userPos.lng);
     return inRange(here.q + 6, here.r);
   });
-  const afterRolloverFarAlpha = await cellPaintedAlpha(6, 0);
-  const afterRolloverNearAlpha = await cellPaintedAlpha(1, 0); // still live, unaffected by the rollover
+  const afterExpiryFarAlpha = await cellPaintedAlpha(6, 0);
+  const afterExpiryNearAlpha = await cellPaintedAlpha(1, 0); // still live, unaffected by the expiry
 
-  r.check('that access itself expires on a day rollover', afterRolloverInRange === false, { afterRolloverInRange });
-  r.check('and the remembered tile stops painting as grass once it does', afterRolloverFarAlpha === 0, { afterRolloverFarAlpha });
-  r.check('a tile still inside live range keeps painting through the rollover', afterRolloverNearAlpha > 0, { afterRolloverNearAlpha });
+  r.check('that access itself expires once its own 24h timer runs out', afterExpiryInRange === false, { afterExpiryInRange });
+  r.check('and the remembered tile stops painting as grass once it does', afterExpiryFarAlpha === 0, { afterExpiryFarAlpha });
+  r.check('a tile still inside live range keeps painting through that expiry', afterExpiryNearAlpha > 0, { afterExpiryNearAlpha });
+
+  // ---- grass browns as a walked tile's own timer runs into its final hour
+  // A tile more than TILE_CONTROL_DECAY_MS from expiring paints as ordinary
+  // green; one inside that final hour paints in the GRASS_DECAY_* palette
+  // instead (see tileDecayStage) - a visible warning before the tile
+  // actually drops out of inRange(), not just a hard cutoff with no notice.
+  r.section("grid mesh grass browns as a walked tile's own timer runs low");
+  await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    state.tileControl[cellKey(here.q + 6, here.r)] = Date.now() + TILE_CONTROL_MS; // freshly stamped, nowhere near decaying
+    scheduleGridRedraw();
+  });
+  await settleRaf();
+  const freshStage = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    return tileDecayStage(here.q + 6, here.r, Date.now());
+  });
+  const freshRgb = await cellPaintedRgb(6, 0);
+
+  await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    state.tileControl[cellKey(here.q + 6, here.r)] = Date.now() + 5 * 60 * 1000; // 5 minutes left, well inside the last hour
+    scheduleGridRedraw();
+  });
+  await settleRaf();
+  const decayingStage = await page.evaluate(() => {
+    var here = latLngToCell(state.userPos.lat, state.userPos.lng);
+    return tileDecayStage(here.q + 6, here.r, Date.now());
+  });
+  const decayingRgb = await cellPaintedRgb(6, 0);
+
+  r.check('a tile far from expiring reports no decay stage', freshStage === 0, { freshStage });
+  r.check('a tile minutes from expiring reports a decay stage', decayingStage > 0, { decayingStage });
+  r.check('and it visibly paints a different color than the fresh tile', JSON.stringify(decayingRgb) !== JSON.stringify(freshRgb),
+    { freshRgb, decayingRgb });
 
   // ---- grass tufts stay inside their own tile's row, not the row south ---
   // Reported symptom: a stray row of grass tufts printed just past the
@@ -1276,11 +1328,11 @@ const h = require('./harness');
   r.check('the southmost tile still inside live range does paint as grass', southmostInRangeAlpha > 0, { southmostInRangeAlpha });
 
   // ---- localDayKey() is memoized; the memo must expire at real midnight --
-  // inRange() calls localDayKey() and renderGridMesh() calls inRange() once
-  // per cell, so the no-argument form caches. It caches against the exact ms
-  // of the next LOCAL midnight rather than a timer, because a cache that can
-  // answer "yesterday" for even a moment after the rollover would defeat the
-  // whole reason state.todayAccessibleDay is re-checked on every call.
+  // dailyStock() and maybeSpawnWild()'s once-a-day gate (state.lastWildDay)
+  // both call the no-argument form, which caches its answer. It caches
+  // against the exact ms of the next LOCAL midnight rather than a timer, so
+  // a cache that could answer "yesterday" for even a moment after the
+  // rollover never has the chance to.
   const hasDayKeyMemo = await page.evaluate(() => typeof dayKeyOf === 'function');
   r.section('localDayKey memo', hasDayKeyMemo ? '' : '(SKIPPED - not in this build)');
   if (hasDayKeyMemo) {
@@ -1388,7 +1440,7 @@ const h = require('./harness');
         state.plants[k] = { q: q, r: r, lat: c.lat, lng: c.lng, species: 'tulip', color: 'red',
           stage: 1, plantedAt: now, lastWateredAt: now - WATER_DURATION_MS - 1, readyAt: now - 1,
           reachedBloom: false, reachedFlourish: false, grownCredited: false };
-        markAccessibleToday(q, r);
+        markTileControl(q, r);
         keys.push(k);
       }
       var tiles = keys.length;

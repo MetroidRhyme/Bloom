@@ -120,9 +120,14 @@ function seededRandom(seed) {
 // tickPlants.
 const LIFETIME_SAVE = function (arg) {
   var n = arg.plants, rnd = arg.rnd, here = latLngToCell(arg.lat, arg.lng), now = Date.now();
+  // Falls back to a literal 24h when run against a build that predates
+  // TILE_CONTROL_MS (e.g. pixel-diff.js comparing against an older commit) -
+  // this fixture is shared across builds, so it can't hard-depend on a
+  // symbol that might not exist on the other side of the comparison.
+  var tileControlMs = typeof TILE_CONTROL_MS !== 'undefined' ? TILE_CONTROL_MS : 24 * 3600000;
   var seed = 12345;
   var rand = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  state.plants = {}; state.wild = {}; state.weeds = {}; state.visited = {}; state.todayAccessible = {};
+  state.plants = {}; state.wild = {}; state.weeds = {}; state.visited = {}; state.tileControl = {};
   var placed = 0, guard = 0;
   while (placed < n && guard++ < 200000) {
     var q, r;
@@ -141,9 +146,18 @@ const LIFETIME_SAVE = function (arg) {
   for (var i = 0; i < 6000; i++) {
     state.visited[cellKey(here.q + Math.floor(rand() * 240) - 120, here.r + Math.floor(rand() * 240) - 120)] = 1;
   }
-  state.todayAccessibleDay = localDayKey();
+  // Also stamps the pre-v2.44.0 todayAccessible/todayAccessibleDay fields
+  // (harmless on a build that no longer reads them) so a pixel-diff against
+  // an older commit grants that build equivalent walked-area access instead
+  // of none at all - without this, comparing against a pre-tileControl
+  // build reports a huge, misleading diff that's really just "the old
+  // fixture no longer feeds that build what its own inRange() reads",
+  // rather than any real rendering difference.
+  state.todayAccessible = {}; state.todayAccessibleDay = localDayKey();
   for (var j = 0; j < 900; j++) {
-    state.todayAccessible[cellKey(here.q + Math.floor(rand() * 60) - 30, here.r + Math.floor(rand() * 60) - 30)] = 1;
+    var jKey = cellKey(here.q + Math.floor(rand() * 60) - 30, here.r + Math.floor(rand() * 60) - 30);
+    state.tileControl[jKey] = now + tileControlMs;
+    state.todayAccessible[jKey] = 1;
   }
   state.seeds = {};
   SPECIES.forEach(function (s) { state.seeds[s.key + ':' + baseColorOf(s.key)] = 20; });
@@ -176,7 +190,7 @@ const DENSE_VIEWPORT = function (arg) {
 };
 
 // Everything visually load-bearing in one frame: the grid mesh, the
-// today-access fill, markers across several species and stages, a rain rune
+// walked-area fill, markers across several species and stages, a rain rune
 // and a grow rune with their full boundary geometry. One pixel comparison of
 // this covers the lot.
 const SHOWCASE = function (arg) {
@@ -202,9 +216,22 @@ const SHOWCASE = function (arg) {
   state.growRunes[cellKey(here.q + 2, here.r + 5)] = {
     q: here.q + 2, r: here.r + 5, activatedAt: now, species: SPECIES[0].key, color: baseColorOf(SPECIES[0].key)
   };
-  state.todayAccessibleDay = localDayKey(); state.todayAccessible = {};
+  // Falls back to a literal 24h when run against a build that predates
+  // TILE_CONTROL_MS (e.g. pixel-diff.js comparing against an older commit) -
+  // this fixture is shared across builds, so it can't hard-depend on a
+  // symbol that might not exist on the other side of the comparison.
+  var tileControlMs = typeof TILE_CONTROL_MS !== 'undefined' ? TILE_CONTROL_MS : 24 * 3600000;
+  state.tileControl = {};
+  // Also stamps the pre-v2.44.0 todayAccessible/todayAccessibleDay fields -
+  // see the identical comment in LIFETIME_SAVE above for why a pixel-diff
+  // against an older commit needs both.
+  state.todayAccessible = {}; state.todayAccessibleDay = localDayKey();
   for (var aq = -6; aq <= 6; aq++) {
-    for (var ar = -8; ar <= 8; ar++) state.todayAccessible[cellKey(here.q + aq, here.r + ar)] = 1;
+    for (var ar = -8; ar <= 8; ar++) {
+      var acKey = cellKey(here.q + aq, here.r + ar);
+      state.tileControl[acKey] = now + tileControlMs;
+      state.todayAccessible[acKey] = 1;
+    }
   }
   tickPlants(); renderGridMesh(); renderPlants(); renderRainRings(); renderGrowRunes();
   return { plants: Object.keys(state.plants).length };

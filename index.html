@@ -1526,7 +1526,7 @@
   <div id="hud-top">
     <div id="title-wrap">
       <span id="game-title">BLOOM &#x1F338;</span>
-      <span id="game-version">v2.43.5</span>
+      <span id="game-version">v2.44.0</span>
     </div>
     <div id="top-right">
       <span id="gps-status" class="pending">LOCATING&hellip;</span>
@@ -1758,6 +1758,21 @@
 
     var PLANT_RANGE = 2;   // how close (in tiles, 8-directional) you must be to plant or water
 
+    // Walking-area control: every tile within PLANT_RANGE of a visit is
+    // usable (plant/water/harvest/etc, via inRange()) for TILE_CONTROL_MS
+    // from that visit, and a later visit to the same tile resets its own
+    // timer back to the full window rather than topping up or stacking -
+    // see markTileControl. Per-tile and rolling, not a shared calendar-day
+    // bucket that empties for everyone at once at local midnight the way
+    // this used to work (todayAccessible/todayAccessibleDay, pre-v2.44.0) -
+    // a tile you keep returning to never goes stale, and one you visited
+    // once keeps working for a full day regardless of what the wall clock
+    // says. TILE_CONTROL_DECAY_MS is how far out from actually expiring a
+    // tile starts visibly browning as a warning - see tileDecayStage and
+    // the MEADOW TUFTS section's GRASS_DECAY_* palette, below.
+    var TILE_CONTROL_MS = 24 * HOUR;
+    var TILE_CONTROL_DECAY_MS = 1 * HOUR;
+
     // Basic elemental magic, step one: a RAIN RING. Eight blue flowers - one
     // of each of the 8 species, no repeats - planted in the 8 tiles
     // immediately around one empty tile, all grown to a full cluster, raise
@@ -1844,10 +1859,11 @@
     // LOKI'S CONTROL uses LOKI_TIER flowers. While all four corner blocks
     // are structurally complete AND none of their sixteen flowers is
     // currently wilted, every tile inside the rectangle has however it was
-    // already granted inRange access (a live visit, or today's walk - see
-    // markAccessibleToday/inRange) extended out to LOKI_CONTROL_MS instead
-    // of expiring at local midnight. This never grants access to ground
-    // never actually reached - it only extends how long already-earned
+    // already granted inRange access (a live visit, or a walk within the
+    // last TILE_CONTROL_MS - see markTileControl/inRange) extended out to
+    // LOKI_CONTROL_MS instead of running down with the rest of the walked
+    // area. This never grants access to ground never actually reached - it
+    // only extends how long already-earned
     // access lasts.
     //
     // SCRY uses SCRY_TIER flowers, one tier higher. While its own four
@@ -1921,6 +1937,15 @@
     // for the version this popup itself ships in - that gets added later,
     // alongside the version bump.
     var CHANGELOG = [
+      { version: 'v2.44.0', changes: [
+        "The area you've walked no longer resets for everyone at midnight - " +
+          "each square now holds your access for a full 24 hours from the " +
+          "last time you were actually near it, and walking back through it " +
+          "resets that square's own 24 hours again.",
+        "A square about to time out now warns you first: its grass browns " +
+          "and the ground underneath yellows in the last hour before your " +
+          "access there runs out, instead of it just quietly stopping."
+      ] },
       { version: 'v2.43.5', changes: [
         "Housekeeping: your save no longer carries a couple of leftover " +
           "bookkeeping flags nothing has used since the pop-up messages " +
@@ -3329,26 +3354,24 @@
         // for wild spawning even if the player never goes back. See
         // markAccessible() and pickWildSpots().
         visited: {},
-        // cell key -> 1, every tile within planting range at any point during
-        // todayAccessibleDay (the player's local calendar day). Unlike
-        // `visited` above, this resets to empty at local midnight - see
-        // markAccessibleToday() and inRange(). Lets a tile tended earlier on
-        // today's walk stay actionable for the rest of the day even after
-        // the player has moved elsewhere.
-        todayAccessible: {},
-        // Local YYYY-MM-DD (see localDayKey) that `todayAccessible` was last
-        // reset for. Compared against localDayKey() on every read so a
-        // stale set from a previous day is never trusted just because
-        // nothing has touched it since the rollover.
-        todayAccessibleDay: null,
+        // cell key -> ms timestamp this tile's walking-area control expires
+        // at. Every visit within planting range of it (see markTileControl)
+        // resets it to a fresh TILE_CONTROL_MS from that moment - unlike
+        // `visited` above (permanent, only ever biases wild-flower
+        // spawning), this decays tile by tile, each on its own clock
+        // counted from its own last visit, not from a calendar-day bucket
+        // that used to empty for every tile at once at local midnight
+        // (todayAccessible/todayAccessibleDay, pre-v2.44.0). See inRange()
+        // and renderGridMesh's decay-warning color band as a tile's timer
+        // runs low.
+        tileControl: {},
         // cell key -> ms timestamp this tile's inRange access is extended
-        // until - LOKI'S CONTROL's own record, separate from
-        // todayAccessible above. Only ever stamped for a tile inside a
-        // currently-active Loki zone at the same moment markAccessibleToday
-        // would already grant it normal access, and only actually honored
-        // by inRange while that zone is still active - see
-        // markAccessibleToday/inRange and the LOKI'S CONTROL section
-        // (below the GROW SPELL section).
+        // until - LOKI'S CONTROL's own record, separate from tileControl
+        // above. Only ever stamped for a tile inside a currently-active
+        // Loki zone at the same moment markTileControl would already grant
+        // it normal access, and only actually honored by inRange while
+        // that zone is still active - see markTileControl/inRange and the
+        // LOKI'S CONTROL section (below the GROW SPELL section).
         lokiAccess: {},
         // variant key -> { count, firstAt }: every flower you have ever grown,
         // by exact species+color, whether you extracted its seeds or sold it -
@@ -3475,7 +3498,27 @@
         // (never-persisted) flag on the returned object tells the caller,
         // right after this function returns, to save immediately - see
         // just below `var state = loadState()`.
-        var needsResave = neededGrownBackfill || Object.keys(grantSeeds).length > 0;
+        //
+        // v2.44.0 replaced the calendar-day todayAccessible/
+        // todayAccessibleDay bucket with a per-tile expiry, `tileControl`
+        // (see markTileControl/inRange) - each tile decays on its own
+        // TILE_CONTROL_MS clock instead of the whole set emptying for
+        // everyone at local midnight. A save written under the old model
+        // has no per-tile timestamp to migrate from, only "was this tile
+        // in today's set" - so a set still valid under the old rule (its
+        // own local midnight hasn't passed yet) is generously granted a
+        // full fresh TILE_CONTROL_MS from load time, rather than a player
+        // losing walking progress made only moments before this update
+        // landed; a set already stale under the old rule is simply
+        // dropped, exactly as it would already have been.
+        var tileControl = parsed.tileControl || {};
+        var migratedTileControl = false;
+        if (!parsed.tileControl && parsed.todayAccessible && parsed.todayAccessibleDay === localDayKey()) {
+          var freshTileControlUntil = Date.now() + TILE_CONTROL_MS;
+          Object.keys(parsed.todayAccessible).forEach(function (k) { tileControl[k] = freshTileControlUntil; });
+          migratedTileControl = true;
+        }
+        var needsResave = neededGrownBackfill || Object.keys(grantSeeds).length > 0 || migratedTileControl;
         return {
           _needsResave: needsResave,
           plants: plants,
@@ -3491,14 +3534,14 @@
           weeds: parsed.weeds || {},
           lastWeedSpawnAt: typeof parsed.lastWeedSpawnAt === 'number' ? parsed.lastWeedSpawnAt : null,
           visited: visited,
-          // Brand new with this feature - a pre-existing save simply starts
-          // with an empty today-set, same backfill treatment as `visited`
-          // and `sprinklers` got when they were introduced.
-          todayAccessible: parsed.todayAccessible || {},
-          todayAccessibleDay: parsed.todayAccessibleDay || null,
+          // See the tileControl/migratedTileControl migration just above -
+          // brand new (or freshly migrated from the old todayAccessible/
+          // todayAccessibleDay model) either way, same backfill treatment
+          // as `visited` and `sprinklers` got when they were introduced.
+          tileControl: tileControl,
           // Brand new with this feature - a pre-existing save simply has no
           // Loki extensions recorded yet, same backfill treatment as
-          // `todayAccessible` got when it was introduced.
+          // `tileControl` got when it was introduced.
           lokiAccess: parsed.lokiAccess || {},
           // Brand new with this feature - any pre-existing save simply has
           // none placed/owned yet, same treatment as fertilizer's own
@@ -3619,7 +3662,7 @@
     //
     // There are 50-odd call sites and several of them fire in bursts: a
     // single walk to a new tile calls this twice back to back (see
-    // markAccessible then markAccessibleToday), and every sprinkler or
+    // markAccessible then markTileControl), and every sprinkler or
     // rain-ring droplet that lands calls it again (see finishAutoWatering)
     // - which, with a few sprinklers running, is several full saves a
     // second, all writing state that is about to be overwritten by the next
@@ -3675,7 +3718,7 @@
         plants: state.plants, wild: state.wild, lastWildDay: state.lastWildDay,
         weeds: state.weeds, lastWeedSpawnAt: state.lastWeedSpawnAt,
         visited: state.visited,
-        todayAccessible: state.todayAccessible, todayAccessibleDay: state.todayAccessibleDay,
+        tileControl: state.tileControl,
         lokiAccess: state.lokiAccess,
         inventory: state.inventory, crosses: state.crosses, stats: state.stats,
         seeds: state.seeds, fertilizer: state.fertilizer, currency: state.currency,
@@ -4074,6 +4117,13 @@
       // reasoning as the three rechecks just above, just for a cosmetic
       // stage instead of an active/dormant or wilted/intact transition.
       renderRainRings();
+      // A walked tile's own TILE_CONTROL_MS timer can run down - and cross
+      // into its final TILE_CONTROL_DECAY_MS browning warning, or expire
+      // outright - purely from the clock too, with no walk/pan/zoom event
+      // to hang a repaint off of: a player standing still watching their
+      // own grass brown needs this same per-minute tick, not just the
+      // GPS-fix-triggered redraw markTileControl already does.
+      scheduleGridRedraw();
       updateHUD();
       if (viewingKey) renderPlantPanel(viewingKey);
       // Keep an open Greenhouse fresh the same way an open plant panel is
@@ -5785,7 +5835,7 @@
     //  reasoning as `rainRings` - entirely a function of what's already in
     //  state.plants, rebuilt once at boot by recomputeLokiZonesFull and
     //  kept current by refreshLokiZoneCandidates from then on. The actual
-    //  access-extension effect lives in state.lokiAccess/markAccessibleToday/
+    //  access-extension effect lives in state.lokiAccess/markTileControl/
     //  inRange, not here - this section is purely the zone's own
     //  detection/visibility.
     // ---------------------------------------------------------------------
@@ -5895,22 +5945,23 @@
     // Local calendar day, not UTC - "the first time you open it each day"
     // should mean the player's day, so the roll-over happens at their midnight.
     //
-    // The no-argument form is memoized, because inRange() calls it and
-    // renderGridMesh() calls inRange() once per cell - up to GRID_MAX_CELLS
-    // times per redraw, on every pan, zoom, viewreset and resize. Building a
-    // fresh Date plus three string concats per cell, for an answer that
-    // changes once a day, was most of that loop's cost.
+    // The no-argument form is memoized: dailyStock() and maybeSpawnWild()'s
+    // once-a-day gate (state.lastWildDay) both call it, and building a
+    // fresh Date plus three string concats for an answer that changes once
+    // a day is wasted work on every one of those calls. (inRange() and the
+    // walking-area grass wash used to call this too, up to GRID_MAX_CELLS
+    // times per renderGridMesh redraw, back when access reset on a shared
+    // calendar-day bucket - v2.44.0 moved that to a per-tile expiry,
+    // tileControl, that no longer depends on the wall-clock date at all;
+    // see markTileControl/inRange.)
     //
     // Cached against the exact millisecond of the next LOCAL midnight rather
     // than against a timer, so it can never be stale by even one tick: the
     // rollover invalidates it precisely, instead of the cache answering
-    // "yesterday" for a moment after the day has actually turned. That
-    // matters - state.todayAccessibleDay is compared against this on every
-    // inRange() call specifically so a pre-midnight set is never mistaken
-    // for today's (see inRange and the bloom-range skill's day-rollover
-    // trap). new Date(y, m, day + 1) normalizes month/year rollover on its
-    // own and is constructed in local time, so it lands on real local
-    // midnight across a DST change too.
+    // "yesterday" for a moment after the day has actually turned. new
+    // Date(y, m, day + 1) normalizes month/year rollover on its own and is
+    // constructed in local time, so it lands on real local midnight across
+    // a DST change too.
     function dayKeyOf(d) {
       var m = d.getMonth() + 1, day = d.getDate();
       return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
@@ -5958,42 +6009,55 @@
       if (added) saveState();
     }
 
-    // Sibling to markAccessible() above, but keyed to the player's local
-    // calendar day instead of forever: records every tile within planting
-    // range of (q, r) as usable for the rest of today, so a spot tended
-    // earlier on a walk stays actionable after the player has moved
-    // somewhere else entirely (see inRange()). Resets itself the first time
-    // it's called after a local-midnight rollover. NOT the same set as
-    // state.visited - that one is permanent and only ever biases wild-flower
-    // spawning; this one is real gameplay range and clears daily.
-    function markAccessibleToday(q, r) {
-      var today = localDayKey();
-      if (state.todayAccessibleDay !== today) {
-        state.todayAccessible = {};
-        state.todayAccessibleDay = today;
-      }
+    // Sibling to markAccessible() above, but keyed to a rolling per-tile
+    // timer instead of forever: records every tile within planting range of
+    // (q, r) as under the player's control for the next TILE_CONTROL_MS,
+    // resetting that window back to the full TILE_CONTROL_MS on every visit
+    // - so a spot tended earlier on a walk stays actionable after the
+    // player has moved somewhere else entirely (see inRange()), and a spot
+    // revisited before its timer runs out never has to be re-earned. Each
+    // tile decays on its own clock, counted from its own last visit - not
+    // from a calendar-day bucket that used to empty for every tile at once
+    // at local midnight (pre-v2.44.0). NOT the same set as state.visited -
+    // that one is permanent and only ever biases wild-flower spawning;
+    // this one is real gameplay range and always eventually expires.
+    function markTileControl(q, r) {
       var now = Date.now();
+      var until = now + TILE_CONTROL_MS;
       var added = false;
       for (var dq = -PLANT_RANGE; dq <= PLANT_RANGE; dq++) {
         for (var dr = -PLANT_RANGE; dr <= PLANT_RANGE; dr++) {
           var tq = q + dq, tr = r + dr;
           var key = cellKey(tq, tr);
-          if (!state.todayAccessible[key]) { state.todayAccessible[key] = 1; added = true; }
-          // LOKI'S CONTROL: a tile that just earned (or already had) today's
-          // normal access, and sits inside a currently-active Loki zone,
-          // has that access topped up to a full LOKI_CONTROL_MS instead of
-          // expiring at midnight - see the LOKI'S CONTROL section (below
-          // the GROW SPELL section) for isInActiveLokiZone.
+          // Always overwritten, not just filled in when absent - a visit to
+          // a tile still comfortably inside its old window still resets it
+          // back to the full TILE_CONTROL_MS, per the "every visit resets
+          // the timer" rule above.
+          state.tileControl[key] = until;
+          added = true;
+          // LOKI'S CONTROL: a tile that just earned (or already had) normal
+          // walking-area access, and sits inside a currently-active Loki
+          // zone, has that access topped up to a full LOKI_CONTROL_MS
+          // instead of decaying with the rest of the walked area - see the
+          // LOKI'S CONTROL section (below the GROW SPELL section) for
+          // isInActiveLokiZone.
           if (isInActiveLokiZone(tq, tr, now)) {
-            var until = now + LOKI_CONTROL_MS;
-            if (!(state.lokiAccess[key] >= until)) { state.lokiAccess[key] = until; added = true; }
+            var lokiUntil = now + LOKI_CONTROL_MS;
+            if (!(state.lokiAccess[key] >= lokiUntil)) { state.lokiAccess[key] = lokiUntil; }
           }
         }
       }
-      // Prune anything already expired - same spirit as todayAccessible
-      // resetting at midnight, keeps the persisted set from growing
-      // forever across many zones over many days. Cheap: only walks
-      // lokiAccess's own (small) key set, not the whole save.
+      // Prune anything already expired from both maps. tileControl no
+      // longer gets wiped wholesale at a shared calendar rollover, so
+      // without this it would grow for the entire life of a save instead
+      // of settling at roughly one day's worth of recently-walked tiles -
+      // about the same steady-state size the old todayAccessible model
+      // had. Cheap relative to the save as a whole: this only walks
+      // tileControl's and lokiAccess's own key sets, not every plant/wild/
+      // visited entry too.
+      Object.keys(state.tileControl).forEach(function (k) {
+        if (state.tileControl[k] < now) delete state.tileControl[k];
+      });
       Object.keys(state.lokiAccess).forEach(function (k) {
         if (state.lokiAccess[k] < now) { delete state.lokiAccess[k]; added = true; }
       });
@@ -6035,12 +6099,14 @@
 
     // True if (q, r) is under the player's control RIGHT NOW - live
     // PLANT_RANGE around their current GPS position, or a currently active
-    // Scry/Loki extension - without crediting the "was in range at some
-    // point earlier today" grant inRange() below also allows. Split out as
-    // its own function purely for readability (inRange is the "live OR
-    // today's walk" union of this plus the today-access fallback) - both
-    // renderGridMesh's grass wash and every gameplay action gate on the
-    // wider inRange(), not this on its own.
+    // Scry/Loki extension - without crediting the "walked within range
+    // sometime in the last TILE_CONTROL_MS" grant inRange() below also
+    // allows. Split out as its own function purely for readability (inRange
+    // is the "live OR walked-recently" union of this plus the tileControl
+    // fallback) - both renderGridMesh's grass wash and every gameplay
+    // action gate on the wider inRange(), not this on its own. Also doubles
+    // as "this tile isn't decaying" for renderGridMesh's own decay-warning
+    // color band - see tileDecayStage just below inRange.
     function liveControl(q, r, now) {
       // Cheat Mode: no distance limit - every tile counts as in range, so
       // plant/water/harvest/sell/fertilize/pick/sprinkler all work anywhere
@@ -6054,12 +6120,12 @@
       // SPELL section).
       if (isInActiveScryZone(q, r, now)) return true;
       // LOKI'S CONTROL: this extension has its own real timestamp,
-      // independent of the daily bucket. An extension only ever counts
-      // while BOTH its own timer hasn't run out AND the zone granting it is
-      // still actually active right now - a wilted corner drops this
-      // immediately, it doesn't ride out the remainder of an already-
-      // stamped window (see markAccessibleToday and isInActiveLokiZone,
-      // below the GROW SPELL section).
+      // independent of the walking-area tileControl timer. An extension
+      // only ever counts while BOTH its own timer hasn't run out AND the
+      // zone granting it is still actually active right now - a wilted
+      // corner drops this immediately, it doesn't ride out the remainder
+      // of an already-stamped window (see markTileControl and
+      // isInActiveLokiZone, below the GROW SPELL section).
       // Zone check first, cell key second - reversed from how this reads in
       // prose, but both halves are pure and the registry is empty for almost
       // every player, so leading with it skips building a cell-key string
@@ -6071,18 +6137,40 @@
 
     // The one gate every plant/water/harvest/sell/fertilize/pick/sprinkler
     // action goes through: true if (q, r) is under live control right now
-    // (see liveControl above), OR if it was within range at any point
-    // earlier today (state.todayAccessible) - rewarding the walk itself
-    // rather than requiring the player to be standing right next to a tile
-    // at the exact moment they want to tend it. The day check is
-    // re-verified here (not just trusted from whenever todayAccessible was
-    // last written) so a set left over from before a midnight rollover that
-    // simply hasn't been touched yet is never mistaken for today's.
+    // (see liveControl above), OR if a visit within the last TILE_CONTROL_MS
+    // stamped a still-unexpired entry in state.tileControl (see
+    // markTileControl) - rewarding the walk itself rather than requiring
+    // the player to be standing right next to a tile at the exact moment
+    // they want to tend it. Read straight off the stamped timestamp rather
+    // than any cached "is this still today" flag, so a tile's access
+    // expires at the real moment its own 24h are up, not at the next time
+    // something happens to touch it.
     function inRange(q, r) {
       if (!state.userPos) return false;
       var now = Date.now();
       if (liveControl(q, r, now)) return true;
-      return state.todayAccessibleDay === localDayKey() && !!state.todayAccessible[cellKey(q, r)];
+      var until = state.tileControl[cellKey(q, r)];
+      return !!until && until > now;
+    }
+
+    // 0 if (q, r) isn't currently decaying - either it's under live control
+    // right now (liveControl; that access renews continuously, so there's
+    // nothing running down to warn about) or its walked-area grant just
+    // isn't close enough to TILE_CONTROL_MS running out yet - otherwise 1-3
+    // as that grant runs into its final TILE_CONTROL_DECAY_MS, thinning
+    // toward brown the same "visibly running low" idea rainRuneStage uses
+    // for the rain rune's own countdown (see the RAIN RINGS section). Only
+    // ever meaningful on a cell renderGridMesh has already confirmed passes
+    // inRange() - a stage of 0 here means "not decaying," never "not in
+    // range," so never call this without checking inRange() first.
+    function tileDecayStage(q, r, now) {
+      if (liveControl(q, r, now)) return 0;
+      var remain = (state.tileControl[cellKey(q, r)] || 0) - now;
+      if (remain <= 0 || remain > TILE_CONTROL_DECAY_MS) return 0;
+      var frac = remain / TILE_CONTROL_DECAY_MS; // 1 (just entered the last hour) .. 0 (about to expire)
+      if (frac > 2 / 3) return 1;
+      if (frac > 1 / 3) return 2;
+      return 3;
     }
 
     // Priority + rejection sampling. First fills from state.visited - tiles
@@ -7211,8 +7299,9 @@
 
     // ===================================================================
     //  MEADOW TUFTS - shared shape data for both grass renderers: this
-    //  canvas one (renderGridMesh, below, paints the wider today-accessible
-    //  walked area) and the SVG one (ensureGrassPattern, in the GPS section
+    //  canvas one (renderGridMesh, below, paints the wider walked-area
+    //  memory, see tileControl/inRange) and the SVG one (ensureGrassPattern,
+    //  in the GPS section
     //  further down, fills the live rangeArea polygon). Both used to tile
     //  a fixed-24-device-pixel repeating pattern, which put the tuft count
     //  at the mercy of zoom - the same real square showed more repeats the
@@ -7241,6 +7330,20 @@
     var GRASS_BLADE_DARK = '#345c30';
     var GRASS_BLADE_BRIGHT = '#5ea648';
     var GRASS_WASH = '#4caf6d';
+    // Warning palette for a walked tile's grass as its TILE_CONTROL_MS
+    // control runs into its final TILE_CONTROL_DECAY_MS (see
+    // tileDecayStage) - the wash and tufts shift from green toward
+    // yellow-brown across three stages as a tile gets closer to dropping
+    // out of inRange() on its own, so the player sees it going away before
+    // it actually does instead of the grass just vanishing with no notice.
+    // Index 0 (unused here - stage 0 always draws the normal GRASS_WASH/
+    // GRASS_BLADE_DARK/GRASS_BLADE_BRIGHT colors above) is left out; index
+    // by stage 1-3. Never applied to a tile under live control right now
+    // (see liveControl) - only the "remembered" walked area between visits
+    // is ever actually at risk of expiring.
+    var GRASS_DECAY_WASH = [null, '#9c9c3a', '#b3873a', '#8a6a3a'];
+    var GRASS_DECAY_DARK = [null, '#5c5424', '#6b4a24', '#5c4224'];
+    var GRASS_DECAY_BRIGHT = [null, '#c2b84a', '#c99a4a', '#a67a3a'];
     // Each blade: [controlDx, controlDy, tipDx, tipDy, color] - offsets in
     // the 24-unit design space the shape was originally authored in. A
     // darker pair frames a brighter center blade, same convention
@@ -7286,7 +7389,14 @@
     // identical for every cell that draws it. That turns what would be a
     // stroke() per tuft (thousands, at a dense walked area) into a fixed 15
     // (5 spots x 3 blades) regardless of how many tiles are on screen.
-    function drawGrassTufts(ctx, cells, tileW) {
+    //
+    // `stage` (0-3, from tileDecayStage) picks the blade color: 0 draws the
+    // normal GRASS_BLADE_DARK/BRIGHT colors baked into GRASS_BLADE_OFFSETS,
+    // 1-3 substitute the matching GRASS_DECAY_DARK/BRIGHT entry instead -
+    // still one fixed batch of 15 stroke() calls per call, just called once
+    // per decay stage present on screen (renderGridMesh buckets cells by
+    // stage first) rather than once overall.
+    function drawGrassTufts(ctx, cells, tileW, stage) {
       if (!cells.length) return;
       ctx.lineCap = 'round';
       for (var si = 0; si < GRASS_TUFT_SPOTS.length; si++) {
@@ -7294,7 +7404,8 @@
         var scale = (tileW / GRASS_UNIT_PER_TILE) * spot.s * GRASS_TUFT_SCALE;
         for (var bi = 0; bi < GRASS_BLADE_OFFSETS.length; bi++) {
           var bd = GRASS_BLADE_OFFSETS[bi];
-          ctx.strokeStyle = hexToRgba(bd[4], GRASS_TUFT_OPACITY);
+          var color = stage ? (bd[4] === GRASS_BLADE_DARK ? GRASS_DECAY_DARK[stage] : GRASS_DECAY_BRIGHT[stage]) : bd[4];
+          ctx.strokeStyle = hexToRgba(color, GRASS_TUFT_OPACITY);
           ctx.lineWidth = 1.15 * scale;
           ctx.beginPath();
           var any = false;
@@ -7318,19 +7429,22 @@
     // it) a grass fill over every tile still in range RIGHT NOW - the live
     // PLANT_RANGE circle the separate, more solid rangeArea polygon fills
     // (see onLocationUpdate), a currently active Scry/Loki extension, AND
-    // everywhere else the player has walked within range of today (see
-    // inRange/state.todayAccessible/markAccessibleToday), all redrawn here
-    // as a lighter wash across the wider viewport. This intentionally
-    // matches inRange() exactly, not just its live-position half
-    // (liveControl) - inRange() is the one gate every plant/water/harvest/
-    // sell/fertilize/pick/sprinkler action actually goes through, so a tile
-    // that reads as grass is always a tile those actions actually work on,
-    // and a tile that stops reading as grass (a local-midnight rollover -
+    // everywhere else the player has walked within the last TILE_CONTROL_MS
+    // (see inRange/state.tileControl/markTileControl), all redrawn here as a
+    // lighter wash across the wider viewport. This intentionally matches
+    // inRange() exactly, not just its live-position half (liveControl) -
+    // inRange() is the one gate every plant/water/harvest/sell/fertilize/
+    // pick/sprinkler action actually goes through, so a tile that reads as
+    // grass is always a tile those actions actually work on, and a tile
+    // that stops reading as grass (its own tileControl entry running out -
     // see the offline-catch-up handler's own scheduleGridRedraw call, and
-    // markAccessibleToday resetting state.todayAccessible - both keep this
-    // in sync) is always a tile where they stop working. Both layers share
-    // the same viewport-bounded tile loop below, since recomputing that
-    // twice would be pure waste.
+    // tickPlants' once-a-minute redraw, both of which keep this in sync even
+    // with no pan/zoom/GPS fix to trigger it on their own) is always a tile
+    // where they stop working. A tile within TILE_CONTROL_DECAY_MS of that
+    // happening paints in the GRASS_DECAY_* warning palette instead of the
+    // normal green - see tileDecayStage. Both layers share the same
+    // viewport-bounded tile loop below, since recomputing that twice would
+    // be pure waste.
     function renderGridMesh() {
       if (!gridRenderer._ctx || !gridRenderer._bounds) return;
       var ctx = gridRenderer._ctx, b = gridRenderer._bounds, sz = b.getSize();
@@ -7376,11 +7490,12 @@
 
       // inRange (not just liveControl) gates every tile here - see the
       // function comment above renderGridMesh for why the ambient wash
-      // deliberately follows the whole of today's walk instead of stopping
-      // at live control.
+      // deliberately follows the whole walked area instead of stopping at
+      // live control - and tileDecayStage buckets each in-range tile by how
+      // close it is to expiring, for the browning warning.
       if (state.userPos || state.cheatMode) {
-        ctx.fillStyle = hexToRgba(GRASS_WASH, GRASS_WASH_OPACITY);
-        var grassCells = [];
+        var gmNow = Date.now();
+        var stageCells = [[], [], [], []]; // bucketed by tileDecayStage: 0 fresh/live, 1-3 closer to expiring
         for (var aq = minQ; aq <= maxQ; aq++) {
           var ai = aq - minQ;
           if (!colOn(ai)) continue;
@@ -7388,24 +7503,40 @@
             var aj = ar - minR;
             if (!rowOn(aj)) continue;
             if (!inRange(aq, ar)) continue;
-            // An axis-aligned rectangle, which is all a cell has ever been
-            // on this grid - fillRect instead of building and filling a
-            // four-point path per tile.
-            ctx.fillRect(xs[ai], ys[aj], xs[ai + 1] - xs[ai], ys[aj + 1] - ys[aj]);
             // Tuft spots (GRASS_TUFT_SPOTS) are authored as top-to-bottom
             // fractions of one tile, so the anchor here has to be the
             // tile's own TOP (north) edge - ys[aj+1], the smaller of the
             // row's two y-pixels, not ys[aj]/the bottom edge the fillRect
-            // above starts from. Anchoring at the bottom edge instead (as
+            // below starts from. Anchoring at the bottom edge instead (as
             // this did before) pushed every tuft up to a whole tile-height
             // further south than its own cell, which the wash rectangles
             // masked everywhere except the live-control area's southmost
             // row, where the displaced tufts had no cell below to land in
             // and printed as a stray row of grass south of the highlight.
-            grassCells.push({ x: xs[ai], y: ys[aj + 1], pick: grassTuftPick(aq, ar) });
+            stageCells[tileDecayStage(aq, ar, gmNow)].push({
+              x0: xs[ai], y0: ys[aj], w: xs[ai + 1] - xs[ai], h: ys[aj + 1] - ys[aj],
+              x: xs[ai], y: ys[aj + 1], pick: grassTuftPick(aq, ar)
+            });
           }
         }
-        drawGrassTufts(ctx, grassCells, cellPixelWidth());
+        // A separate fillRect/drawGrassTufts pass per stage present on
+        // screen (at most 4, never per-cell) instead of one pass with a
+        // per-cell fillStyle/blade-color lookup - keeps drawGrassTufts'
+        // own batched-stroke-call guarantee intact (see its own comment)
+        // while still letting a decaying tile paint a different color than
+        // a fresh one.
+        for (var stg = 0; stg <= 3; stg++) {
+          var stCells = stageCells[stg];
+          if (!stCells.length) continue;
+          // An axis-aligned rectangle, which is all a cell has ever been on
+          // this grid - fillRect instead of building and filling a
+          // four-point path per tile.
+          ctx.fillStyle = hexToRgba(stg ? GRASS_DECAY_WASH[stg] : GRASS_WASH, GRASS_WASH_OPACITY);
+          for (var sci = 0; sci < stCells.length; sci++) {
+            ctx.fillRect(stCells[sci].x0, stCells[sci].y0, stCells[sci].w, stCells[sci].h);
+          }
+          drawGrassTufts(ctx, stCells, cellPixelWidth(), stg);
+        }
       }
 
       ctx.strokeStyle = 'rgba(70,120,80,0.14)';
@@ -9453,15 +9584,17 @@
       maybeSpawnWild();
       // The grid mesh's grass fill is a canvas layer, not markers - it only
       // repaints on an actual moveend/zoomend/viewreset/resize, or when
-      // markAccessibleToday touches the current viewport (see
-      // renderGridMesh). A local-midnight rollover while backgrounded
-      // resets state.todayAccessible (inRange() re-checks localDayKey()
-      // fresh, so it correctly starts denying those tiles right away), but
-      // without this the canvas keeps showing yesterday's grass right where
-      // the player is looking until some unrelated pan/zoom happens to
-      // repaint that spot - grass visibly there, every action on it
-      // refused. Force a redraw here so the mesh always matches whatever
-      // catch-up just did to state.
+      // markTileControl/tickPlants touches the current viewport (see
+      // renderGridMesh). Backgrounded long enough for tiles' own
+      // TILE_CONTROL_MS timers to lapse continuously runs down state.
+      // tileControl entries one by one rather than at a single rollover
+      // instant (inRange() reads each timestamp fresh, so it correctly
+      // starts denying those tiles right away regardless), but without this
+      // the canvas keeps showing stale grass right where the player is
+      // looking until some unrelated pan/zoom happens to repaint that spot -
+      // grass visibly there, every action on it refused. Force a redraw
+      // here so the mesh always matches whatever catch-up just did to
+      // state.
       scheduleGridRedraw();
       state.lastSeenAt = Date.now();
       saveState();
@@ -9721,7 +9854,7 @@
       if (!rangeArea) {
         userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
-        markAccessibleToday(h.q, h.r);
+        markTileControl(h.q, h.r);
         rangeArea = L.polygon(cellRingLatLngs(h.q, h.r, PLANT_RANGE), {
           color: '#4caf6d', weight: 1.5,
           fillColor: '#4caf6d', fillOpacity: 0.08, interactive: false
@@ -9761,7 +9894,7 @@
         var fromRing = cellRingLatLngs(userCellQ, userCellR, PLANT_RANGE);
         userCellQ = h.q; userCellR = h.r;
         markAccessible(h.q, h.r);
-        markAccessibleToday(h.q, h.r);
+        markTileControl(h.q, h.r);
         animateRangeTo(fromRing, cellRingLatLngs(h.q, h.r, PLANT_RANGE));
         if (state.following) map.panTo([c.lat, c.lng], { animate: true, duration: 0.4 });
       }
@@ -10944,8 +11077,8 @@
           'rectangle between ' + ZONE_MIN_SPAN + ' and ' + ZONE_MAX_SPAN + ' tiles on a side - species can ' +
           'repeat freely, but each corner block needs at least two different colors in it, never a single ' +
           'flat color. Once all sixteen corner flowers are grown, everywhere ' +
-          'inside holds your access for up to ' + (LOKI_CONTROL_MS / HOUR / 24) + ' days instead of expiring at ' +
-          'midnight, as long as every corner stays flourishing. Let even one corner wilt and the extension ' +
+          'inside holds your access for up to ' + (LOKI_CONTROL_MS / HOUR / 24) + ' days instead of running out ' +
+          '24 hours after your last visit there, as long as every corner stays flourishing. Let even one corner wilt and the extension ' +
           'lapses until every corner is rewatered - it only ever stretches access already earned by walking ' +
           'there, never grants ground never actually reached.</p>') :
         lockedSpellCard('\u{1F451}', 'Loki\'s Control',

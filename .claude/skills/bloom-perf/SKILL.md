@@ -118,7 +118,7 @@ The save blob is the *whole* state - every plant, every visited tile - and
 write on desktop, and it grows for the entire life of a save.
 
 There are 50-odd call sites and several fire in bursts: one walk step saves
-twice (`markAccessible`, then `markAccessibleToday`), and every sprinkler or
+twice (`markAccessible`, then `markTileControl`), and every sprinkler or
 rain-ring droplet landing saves again via `finishAutoWatering` - which with a
 few sprinklers running was several full saves a second, each writing state the
 next one was about to overwrite.
